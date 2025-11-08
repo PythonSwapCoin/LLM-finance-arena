@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import type { Agent, PerformanceMetrics } from '../types';
 import { InformationCircleIcon } from './icons/Icons';
@@ -29,6 +28,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
   
   const sortedAgents = useMemo(() => {
     const sortableAgents = [...agents];
+    if (sortableAgents.length === 0 || sortableAgents[0].performanceHistory.length === 0) {
+        return [];
+    }
     sortableAgents.sort((a, b) => {
       let aValue: any;
       let bValue: any;
@@ -61,18 +63,18 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
   };
   
   return (
-    <div className="bg-brand-surface rounded-lg shadow-lg overflow-hidden">
-      <div className="p-4 sm:p-6 border-b border-brand-border">
-        <h2 className="text-lg font-semibold text-brand-text-primary">Performance Leaderboard</h2>
+    <div className="bg-arena-surface rounded-lg shadow-lg overflow-hidden">
+      <div className="p-4 sm:p-6 border-b border-arena-border">
+        <h2 className="text-lg font-semibold text-arena-text-primary">Performance Leaderboard</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-800 text-brand-text-secondary uppercase tracking-wider">
+          <thead className="bg-arena-bg text-arena-text-secondary uppercase tracking-wider">
             <tr>
               <th className="p-3 text-left">Rank</th>
               {columns.map(col => (
                 <th key={col.key} className={`p-3 cursor-pointer ${col.className || 'text-left'}`} onClick={() => requestSort(col.key)}>
-                  <div className="flex items-center justify-end">
+                  <div className={`flex items-center ${col.className?.includes('right') ? 'justify-end' : 'justify-start'}`}>
                     {col.label}
                     {sortConfig.key === col.key && (<span>{sortConfig.direction === 'desc' ? ' ▼' : ' ▲'}</span>)}
                   </div>
@@ -81,16 +83,21 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
                <th className="p-3 text-center">Details</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-brand-border">
+          <tbody className="divide-y divide-arena-border">
             {sortedAgents.map((agent, index) => {
               const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
               if (!latestPerf) return null;
               return (
-                <tr key={agent.id} className="hover:bg-brand-border transition-colors duration-150">
+                <tr key={agent.id} className="hover:bg-arena-border transition-colors duration-150">
                   <td className="p-3 font-bold text-center">{index + 1}</td>
                   <td className="p-3 text-left">
-                    <div className="font-semibold text-brand-text-primary">{agent.name}</div>
-                    <div className="text-xs text-brand-text-secondary">{agent.model}</div>
+                     <div className="flex items-center space-x-3">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: agent.color }}></div>
+                        <div>
+                            <div className="font-semibold text-arena-text-primary">{agent.name}</div>
+                            <div className="text-xs text-arena-text-secondary">{agent.model}</div>
+                        </div>
+                    </div>
                   </td>
                   {columns.slice(1).map(col => (
                      <td key={col.key} className={`p-3 font-mono ${col.className}`}>
@@ -104,7 +111,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
                     </td>
                   ))}
                   <td className="p-3 text-center">
-                      <button onClick={() => onSelectAgent(agent)} className="text-brand-accent hover:text-blue-400">
+                      <button onClick={() => onSelectAgent(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
                           <InformationCircleIcon className="h-6 w-6" />
                       </button>
                   </td>

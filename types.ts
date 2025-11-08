@@ -1,4 +1,3 @@
-
 export interface TickerData {
   ticker: string;
   price: number;
@@ -46,6 +45,7 @@ export interface Agent {
   id: string;
   name: string;
   model: string;
+  color: string;
   portfolio: Portfolio;
   tradeHistory: Trade[];
   performanceHistory: PerformanceMetrics[];
@@ -55,5 +55,6 @@ export interface Agent {
 export interface Benchmark {
     id: string;
     name: string;
+    color: string;
     performanceHistory: PerformanceMetrics[];
 }

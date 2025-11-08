@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Agent, MarketData, Trade, TradeAction } from '../types';
 import { MAX_POSITION_SIZE_PERCENT } from '../constants';
@@ -10,12 +9,12 @@ if (!API_KEY) {
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const PROMPT_TEMPLATES = {
-    'gemini-2.5-pro': `You are a virtual portfolio manager operating within a simulated equity-trading environment.
+    'gemini-pro-balanced': `You are a virtual portfolio manager operating within a simulated equity-trading environment.
 Your goal is to maximize risk-adjusted returns while adhering to the trading rules.
 Evaluate macro signals, sector performance, and stock momentum based on the provided data.
 Return only your trade decisions in the specified JSON schema.
 Avoid excessive turnover and maintain diversification.`,
-    'gemini-2.5-flash': `You are an aggressive momentum-based virtual portfolio manager in a simulated trading environment.
+    'gemini-flash-aggressive': `You are an aggressive momentum-based virtual portfolio manager in a simulated trading environment.
 Your goal is to maximize short-term returns.
 Focus on stocks with high positive momentum.
 Return only your trade decisions in the specified JSON schema.
@@ -33,11 +32,12 @@ Do not hold cash unless absolutely necessary. Be fully invested.`
 };
 
 const getAgentPrompt = (agent: Agent): string => {
-    if (agent.id.includes('pro')) return PROMPT_TEMPLATES['gemini-2.5-pro'];
-    if (agent.id.includes('flash')) return PROMPT_TEMPLATES['gemini-2.5-flash'];
+    // This maps agent IDs to prompt templates
     if (agent.id.includes('prudent')) return PROMPT_TEMPLATES['prudent-value-investor'];
     if (agent.id.includes('momentum')) return PROMPT_TEMPLATES['momentum-trader-9000'];
-    return PROMPT_TEMPLATES['gemini-2.5-pro'];
+    if (agent.id.includes('flash') || agent.id.includes('qwen')) return PROMPT_TEMPLATES['gemini-flash-aggressive'];
+    if (agent.id.includes('pro') || agent.id.includes('deepseek')) return PROMPT_TEMPLATES['gemini-pro-balanced'];
+    return PROMPT_TEMPLATES['gemini-pro-balanced']; // Default
 };
 
 

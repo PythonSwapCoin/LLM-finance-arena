@@ -1,55 +1,41 @@
-
 import React from 'react';
-import { ArrowPathIcon, PlayIcon } from './icons/Icons';
+import { PlayIcon, PauseIcon } from './icons/Icons';
 
 interface HeaderProps {
-  day: number;
-  onAdvanceDay: () => void;
-  isLoading: boolean;
-  sp500Return: number;
-  aiIndexReturn: number;
+  isLive: boolean;
+  onToggleLive: () => void;
 }
 
-const formatReturn = (ret: number) => {
-    const value = ret * 100;
-    const color = value >= 0 ? 'text-brand-positive' : 'text-brand-negative';
-    return <span className={color}>{value.toFixed(2)}%</span>;
-}
-
-export const Header: React.FC<HeaderProps> = ({ day, onAdvanceDay, isLoading, sp500Return, aiIndexReturn }) => {
+export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive }) => {
   return (
-    <header className="bg-brand-surface border-b border-brand-border p-4 shadow-md">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-6">
-          <h1 className="text-xl md:text-2xl font-bold text-brand-text-primary">
-            LLM Portfolio Manager Benchmark
+    <header className="bg-arena-bg border-b border-arena-border p-4 sticky top-0 z-20">
+      <div className="max-w-screen-2xl mx-auto flex justify-between items-center">
+        <div className="flex items-center space-x-8">
+          <h1 className="text-2xl font-bold text-arena-text-primary tracking-tighter">
+            LLM TRADING ARENA
           </h1>
-          <div className="flex items-center space-x-4 text-sm text-brand-text-secondary mt-2 sm:mt-0">
-             <div className="flex items-center space-x-2">
-                <span className="font-semibold">S&P 500:</span> {formatReturn(sp500Return)}
-             </div>
-             <div className="flex items-center space-x-2">
-                <span className="font-semibold">AI Index:</span> {formatReturn(aiIndexReturn)}
-             </div>
-          </div>
+          <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
+            <a href="#" className="text-arena-text-primary flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-red-500 animate-pulse' : 'bg-gray-500'}`}></div>
+              <span>LIVE</span>
+            </a>
+            <a href="#leaderboard" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">LEADERBOARD</a>
+            <a href="#" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">BLOG</a>
+            <a href="#" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">MODELS</a>
+          </nav>
         </div>
 
         <div className="flex items-center space-x-4">
-          <div className="text-right">
-            <span className="text-sm font-medium text-brand-text-secondary">Trading Day</span>
-            <p className="text-2xl font-bold text-brand-accent">{day}</p>
-          </div>
-          <button
-            onClick={onAdvanceDay}
-            disabled={isLoading}
-            className="flex items-center justify-center bg-brand-accent hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200"
+           <button
+            onClick={onToggleLive}
+            className="flex items-center justify-center bg-arena-surface hover:bg-arena-border border border-arena-border text-arena-text-primary font-bold w-10 h-10 rounded-full transition-colors duration-200"
+            aria-label={isLive ? 'Pause simulation' : 'Play simulation'}
           >
-            {isLoading ? (
-              <ArrowPathIcon className="animate-spin h-5 w-5 mr-2" />
+            {isLive ? (
+              <PauseIcon className="h-5 w-5" />
             ) : (
-              <PlayIcon className="h-5 w-5 mr-2" />
+              <PlayIcon className="h-5 w-5" />
             )}
-            {isLoading ? 'Simulating...' : 'Next Day'}
           </button>
         </div>
       </div>

@@ -1,23 +1,28 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLM Portfolio Manager Benchmark</title>
+    <title>LLM Trading Arena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
             colors: {
-              'brand-bg': '#111827',
-              'brand-surface': '#1F2937',
-              'brand-border': '#374151',
-              'brand-text-primary': '#F9FAFB',
-              'brand-text-secondary': '#9CA3AF',
-              'brand-accent': '#3B82F6',
+              'arena-bg': '#0D0D0D',
+              'arena-surface': '#1A1A1A',
+              'arena-border': '#262626',
+              'arena-text-primary': '#F5F5F5',
+              'arena-text-secondary': '#A3A3A3',
+              'arena-text-tertiary': '#737373',
               'brand-positive': '#22C55E',
               'brand-negative': '#EF4444',
             },
@@ -37,7 +42,7 @@
 }
 </script>
 </head>
-  <body class="bg-brand-bg text-brand-text-primary">
+  <body class="bg-arena-bg text-arena-text-primary">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

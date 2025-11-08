@@ -1,7 +1,6 @@
-
 import { useState, useCallback, useEffect } from 'react';
 import type { Agent, MarketData, Trade, PerformanceMetrics, Benchmark } from '../types';
-import { INITIAL_AGENTS, S_P500_TICKERS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID } from '../constants';
+import { INITIAL_AGENTS, S_P500_TICKERS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants';
 import { generateNextDayMarketData, createInitialMarketData } from '../services/marketDataService';
 import { getTradeDecisions } from '../services/geminiService';
 import { calculateAllMetrics } from '../utils/portfolioCalculations';
@@ -24,8 +23,8 @@ export const useSimulation = () => {
 
     const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, initialMarketData, [], 0);
     setBenchmarks([
-        { id: S_P500_BENCHMARK_ID, name: 'S&P 500', performanceHistory: [initialBenchmarkMetrics] },
-        { id: AI_MANAGERS_INDEX_ID, name: 'AI Managers Index', performanceHistory: [initialBenchmarkMetrics] }
+        { id: S_P500_BENCHMARK_ID, name: 'S&P 500', color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID], performanceHistory: [initialBenchmarkMetrics] },
+        { id: AI_MANAGERS_INDEX_ID, name: 'AI Managers Index', color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID], performanceHistory: [initialBenchmarkMetrics] }
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -109,18 +108,10 @@ export const useSimulation = () => {
         
         const newHistory = [...b.performanceHistory];
         const newDailyReturn = (newTotalValue / lastPerf.totalValue) - 1;
-        const newTotalReturn = (newTotalValue / INITIAL_CASH) - 1;
         
-        const newMetrics: PerformanceMetrics = {
-            ...lastPerf,
-            totalValue: newTotalValue,
-            dailyReturn: newDailyReturn,
-            totalReturn: newTotalReturn,
-            timestamp: nextDay
-        };
-        newHistory.push(newMetrics);
+        const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, newHistory, nextDay);
         
-        return { ...b, performanceHistory: newHistory };
+        return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
     });
 
     setBenchmarks(updatedBenchmarks);
@@ -128,5 +119,5 @@ export const useSimulation = () => {
     setSimulationState({ day: nextDay, isLoading: false });
   }, [simulationState.day, marketData, agents, benchmarks]);
 
-  return { agents, benchmarks, simulationState, advanceDay };
+  return { agents, benchmarks, simulationState, marketData, advanceDay };
 };
