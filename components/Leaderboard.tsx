@@ -1,0 +1,119 @@
+
+import React, { useState, useMemo } from 'react';
+import type { Agent, PerformanceMetrics } from '../types';
+import { InformationCircleIcon } from './icons/Icons';
+
+interface LeaderboardProps {
+  agents: Agent[];
+  onSelectAgent: (agent: Agent) => void;
+}
+
+type SortKey = keyof PerformanceMetrics | 'name';
+
+const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
+const formatNumber = (value: number) => value.toFixed(2);
+const formatValue = (value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const columns: { key: SortKey; label: string; format: (val: any) => string; className?: string }[] = [
+  { key: 'name', label: 'Agent Name', format: (val) => val, className: 'text-left font-semibold' },
+  { key: 'totalValue', label: 'Total Value', format: formatValue, className: 'text-right' },
+  { key: 'totalReturn', label: 'Total Return', format: formatPercent, className: 'text-right' },
+  { key: 'dailyReturn', label: 'Daily Return', format: formatPercent, className: 'text-right' },
+  { key: 'sharpeRatio', label: 'Sharpe Ratio', format: formatNumber, className: 'text-right' },
+  { key: 'maxDrawdown', label: 'Max Drawdown', format: formatPercent, className: 'text-right' },
+  { key: 'annualizedVolatility', label: 'Volatility (Ann.)', format: formatPercent, className: 'text-right' },
+];
+
+export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent }) => {
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'totalReturn', direction: 'desc' });
+  
+  const sortedAgents = useMemo(() => {
+    const sortableAgents = [...agents];
+    sortableAgents.sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      if (sortConfig.key === 'name') {
+        aValue = a.name;
+        bValue = b.name;
+      } else {
+        aValue = a.performanceHistory[a.performanceHistory.length - 1]?.[sortConfig.key as keyof PerformanceMetrics] ?? -Infinity;
+        bValue = b.performanceHistory[b.performanceHistory.length - 1]?.[sortConfig.key as keyof PerformanceMetrics] ?? -Infinity;
+      }
+
+      if (aValue < bValue) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+    return sortableAgents;
+  }, [agents, sortConfig]);
+
+  const requestSort = (key: SortKey) => {
+    let direction: 'asc' | 'desc' = 'desc';
+    if (sortConfig.key === key && sortConfig.direction === 'desc') {
+      direction = 'asc';
+    }
+    setSortConfig({ key, direction });
+  };
+  
+  return (
+    <div className="bg-brand-surface rounded-lg shadow-lg overflow-hidden">
+      <div className="p-4 sm:p-6 border-b border-brand-border">
+        <h2 className="text-lg font-semibold text-brand-text-primary">Performance Leaderboard</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-800 text-brand-text-secondary uppercase tracking-wider">
+            <tr>
+              <th className="p-3 text-left">Rank</th>
+              {columns.map(col => (
+                <th key={col.key} className={`p-3 cursor-pointer ${col.className || 'text-left'}`} onClick={() => requestSort(col.key)}>
+                  <div className="flex items-center justify-end">
+                    {col.label}
+                    {sortConfig.key === col.key && (<span>{sortConfig.direction === 'desc' ? ' ▼' : ' ▲'}</span>)}
+                  </div>
+                </th>
+              ))}
+               <th className="p-3 text-center">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-brand-border">
+            {sortedAgents.map((agent, index) => {
+              const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
+              if (!latestPerf) return null;
+              return (
+                <tr key={agent.id} className="hover:bg-brand-border transition-colors duration-150">
+                  <td className="p-3 font-bold text-center">{index + 1}</td>
+                  <td className="p-3 text-left">
+                    <div className="font-semibold text-brand-text-primary">{agent.name}</div>
+                    <div className="text-xs text-brand-text-secondary">{agent.model}</div>
+                  </td>
+                  {columns.slice(1).map(col => (
+                     <td key={col.key} className={`p-3 font-mono ${col.className}`}>
+                        {col.key === 'totalReturn' || col.key === 'dailyReturn' ? (
+                          <span className={latestPerf[col.key as keyof PerformanceMetrics] >= 0 ? 'text-brand-positive' : 'text-brand-negative'}>
+                              {col.format(latestPerf[col.key as keyof PerformanceMetrics])}
+                          </span>
+                        ) : (
+                          col.format(latestPerf[col.key as keyof PerformanceMetrics])
+                        )}
+                    </td>
+                  ))}
+                  <td className="p-3 text-center">
+                      <button onClick={() => onSelectAgent(agent)} className="text-brand-accent hover:text-blue-400">
+                          <InformationCircleIcon className="h-6 w-6" />
+                      </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};

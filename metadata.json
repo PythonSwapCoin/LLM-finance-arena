@@ -1,0 +1,5 @@
+{
+  "name": "LLM Portfolio Manager Benchmark",
+  "description": "A web-based simulation platform that benchmarks large-language models (LLMs) acting as autonomous equity portfolio managers. The system ingests live stock-market data, allows each model to place trades under identical conditions, and displays a public leaderboard of performance metrics.",
+  "requestFramePermissions": []
+}
