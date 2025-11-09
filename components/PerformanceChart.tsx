@@ -10,8 +10,12 @@ interface PerformanceChartProps {
 }
 
 export const PerformanceChart: React.FC<PerformanceChartProps> = ({ data, dataKey, color }) => {
+  if (!data || data.length === 0) {
+    return <div className="flex items-center justify-center h-full text-arena-text-secondary">No data available</div>;
+  }
+  
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" minHeight={200}>
       <LineChart
         data={data}
         margin={{
@@ -31,9 +35,10 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({ data, dataKe
         <YAxis 
             stroke="#A3A3A3"
             tick={{ fill: '#A3A3A3', fontSize: 12 }}
-            tickFormatter={(value) => typeof value === 'number' ? `$${(value / 1000).toFixed(0)}k` : ''}
+            tickFormatter={(value) => typeof value === 'number' ? `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : ''}
             domain={['dataMin', 'dataMax']}
             allowDataOverflow={true}
+            width={80}
         />
         <Tooltip
             contentStyle={{
@@ -44,8 +49,8 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({ data, dataKe
             labelStyle={{ color: '#F5F5F5' }}
             formatter={(value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
         />
-        <Line type="monotone" dataKey="totalValue" stroke={color} strokeWidth={2} dot={false} name="Portfolio Value" />
-        <Line type="monotone" dataKey={() => INITIAL_CASH} stroke="#737373" strokeWidth={1} strokeDasharray="5 5" dot={false} name="Initial Capital" />
+        <Line type="linear" dataKey="totalValue" stroke={color} strokeWidth={2} dot={false} name="Portfolio Value" connectNulls={false} />
+        <Line type="linear" dataKey={() => INITIAL_CASH} stroke="#737373" strokeWidth={1} strokeDasharray="5 5" dot={false} name="Initial Capital" connectNulls={false} />
 
       </LineChart>
     </ResponsiveContainer>

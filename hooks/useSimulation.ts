@@ -1,123 +1,172 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { Agent, MarketData, Trade, PerformanceMetrics, Benchmark } from '../types';
-import { INITIAL_AGENTS, S_P500_TICKERS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants';
-import { generateNextDayMarketData, createInitialMarketData } from '../services/marketDataService';
-import { getTradeDecisions } from '../services/geminiService';
-import { calculateAllMetrics } from '../utils/portfolioCalculations';
+import type { Agent, MarketData, Benchmark } from '../types';
+
+// API base URL - use relative path for same origin, or environment variable for different origin
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
+interface SimulationState {
+  day: number;
+  intradayHour: number;
+  isLoading: boolean;
+}
+
+interface SimulationResponse {
+  simulationState: SimulationState;
+  marketData: MarketData;
+  agents: Agent[];
+  benchmarks: Benchmark[];
+}
 
 export const useSimulation = () => {
-  const [simulationState, setSimulationState] = useState({ day: 0, isLoading: false });
+  const [simulationState, setSimulationState] = useState<SimulationState>({ day: 0, intradayHour: 0, isLoading: false });
   const [marketData, setMarketData] = useState<MarketData>({});
-  const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
 
-  useEffect(() => {
-    const initialMarketData = createInitialMarketData(S_P500_TICKERS);
-    setMarketData(initialMarketData);
-    
-    const initialAgentStates = INITIAL_AGENTS.map(agent => {
-        const initialMetrics = calculateAllMetrics(agent.portfolio, initialMarketData, [], 0);
-        return { ...agent, performanceHistory: [initialMetrics] };
-    });
-    setAgents(initialAgentStates);
-
-    const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, initialMarketData, [], 0);
-    setBenchmarks([
-        { id: S_P500_BENCHMARK_ID, name: 'S&P 500', color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID], performanceHistory: [initialBenchmarkMetrics] },
-        { id: AI_MANAGERS_INDEX_ID, name: 'AI Managers Index', color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID], performanceHistory: [initialBenchmarkMetrics] }
-    ]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Fetch simulation state from API
+  const fetchSimulationState = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/simulation/state`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch simulation state: ${response.statusText}`);
+      }
+      const data: SimulationResponse = await response.json();
+      setSimulationState(data.simulationState);
+      setMarketData(data.marketData);
+      setAgents(data.agents);
+      setBenchmarks(data.benchmarks);
+    } catch (error) {
+      console.error('Error fetching simulation state:', error);
+    }
   }, []);
 
+  // Initialize on mount
+  useEffect(() => {
+    fetchSimulationState();
+  }, [fetchSimulationState]);
+
+  // Advance intraday
+  const advanceIntraday = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/simulation/advance`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'intraday' }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to advance intraday: ${response.statusText}`);
+      }
+      const data: SimulationResponse = await response.json();
+      setSimulationState(data.simulationState);
+      setMarketData(data.marketData);
+      setAgents(data.agents);
+      setBenchmarks(data.benchmarks);
+    } catch (error) {
+      console.error('Error advancing intraday:', error);
+    }
+  }, []);
+
+  // Advance day
   const advanceDay = useCallback(async () => {
-    setSimulationState(prev => ({ ...prev, isLoading: true }));
+    try {
+      const response = await fetch(`${API_BASE_URL}/simulation/advance`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'day' }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to advance day: ${response.statusText}`);
+      }
+      const data: SimulationResponse = await response.json();
+      setSimulationState(data.simulationState);
+      setMarketData(data.marketData);
+      setAgents(data.agents);
+      setBenchmarks(data.benchmarks);
+    } catch (error) {
+      console.error('Error advancing day:', error);
+    }
+  }, []);
 
-    const nextDay = simulationState.day + 1;
-    const newMarketData = generateNextDayMarketData(marketData);
-    setMarketData(newMarketData);
-
-    const updatedAgents: Agent[] = await Promise.all(
-      agents.map(async (agent) => {
-        try {
-          const { trades: decidedTrades, rationale } = await getTradeDecisions(agent, newMarketData, nextDay);
-          const newTradeHistory = [...agent.tradeHistory];
-          const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
-          
-          decidedTrades.forEach(trade => {
-            const tradePrice = newMarketData[trade.ticker]?.price;
-            if (!tradePrice) return;
-
-            if (trade.action === 'buy') {
-                const cost = trade.quantity * tradePrice;
-                if(newPortfolio.cash >= cost) {
-                    newPortfolio.cash -= cost;
-                    const existingPosition = newPortfolio.positions[trade.ticker];
-                    if (existingPosition) {
-                        const totalCost = (existingPosition.averageCost * existingPosition.quantity) + cost;
-                        existingPosition.quantity += trade.quantity;
-                        existingPosition.averageCost = totalCost / existingPosition.quantity;
-                    } else {
-                        newPortfolio.positions[trade.ticker] = { ticker: trade.ticker, quantity: trade.quantity, averageCost: tradePrice };
-                    }
-                    newTradeHistory.push({ ...trade, price: tradePrice, timestamp: nextDay });
-                }
-            } else if (trade.action === 'sell') {
-                const existingPosition = newPortfolio.positions[trade.ticker];
-                if(existingPosition && existingPosition.quantity > 0) {
-                    const quantityToSell = Math.min(trade.quantity, existingPosition.quantity);
-                    newPortfolio.cash += quantityToSell * tradePrice;
-                    existingPosition.quantity -= quantityToSell;
-                    if(existingPosition.quantity === 0) {
-                        delete newPortfolio.positions[trade.ticker];
-                    }
-                    newTradeHistory.push({ ...trade, quantity: quantityToSell, price: tradePrice, timestamp: nextDay });
-                }
-            }
-          });
-
-          const dailyTrades = newTradeHistory.filter(t => t.timestamp === nextDay);
-          const newMetrics = calculateAllMetrics(newPortfolio, newMarketData, agent.performanceHistory, nextDay, dailyTrades);
-          
-          return {
-            ...agent,
-            portfolio: newPortfolio,
-            tradeHistory: newTradeHistory,
-            performanceHistory: [...agent.performanceHistory, newMetrics],
-            rationale,
-          };
-        } catch (error) {
-          console.error(`Failed to process agent ${agent.name}:`, error);
-          const newMetrics = calculateAllMetrics(agent.portfolio, newMarketData, agent.performanceHistory, nextDay);
-          return { ...agent, performanceHistory: [...agent.performanceHistory, newMetrics], rationale: `Error: Could not retrieve trade decision. Holding positions. ${error}`};
+  // Export simulation data
+  const exportSimulationData = useCallback(() => {
+    const exportData = {
+      simulation: {
+        totalDays: simulationState.day + 1,
+        daysProcessed: simulationState.day + 1,
+        finalDay: simulationState.day,
+        timestamp: new Date().toISOString(),
+      },
+      agents: agents.map(agent => ({
+        id: agent.id,
+        name: agent.name,
+        model: agent.model,
+        finalPortfolio: agent.portfolio,
+        trades: agent.tradeHistory.map(trade => ({
+          day: Math.floor(trade.timestamp),
+          intradayHour: Math.round((trade.timestamp - Math.floor(trade.timestamp)) * 10),
+          timestamp: trade.timestamp,
+          ticker: trade.ticker,
+          action: trade.action,
+          quantity: trade.quantity,
+          price: trade.price,
+          value: trade.quantity * trade.price,
+          fairValue: trade.fairValue,
+          topOfBox: trade.topOfBox,
+          bottomOfBox: trade.bottomOfBox,
+          justification: trade.justification,
+        })),
+        valuationAnalysis: agent.tradeHistory
+          .filter(trade => trade.fairValue !== undefined || trade.topOfBox !== undefined || trade.bottomOfBox !== undefined || trade.justification)
+          .map(trade => ({
+            day: Math.floor(trade.timestamp),
+            intradayHour: Math.round((trade.timestamp - Math.floor(trade.timestamp)) * 10),
+            timestamp: trade.timestamp,
+            ticker: trade.ticker,
+            action: trade.action,
+            currentPrice: trade.price,
+            fairValue: trade.fairValue,
+            topOfBox: trade.topOfBox,
+            bottomOfBox: trade.bottomOfBox,
+            justification: trade.justification || 'No justification provided',
+          })),
+        dailyRationales: agent.rationaleHistory,
+        performance: agent.performanceHistory.map(perf => ({
+          day: Math.floor(perf.timestamp),
+          intradayHour: perf.intradayHour ?? (Math.round((perf.timestamp - Math.floor(perf.timestamp)) * 10)),
+          timestamp: perf.timestamp,
+          totalValue: perf.totalValue,
+          totalReturn: perf.totalReturn,
+          dailyReturn: perf.dailyReturn,
+          sharpeRatio: perf.sharpeRatio,
+          maxDrawdown: perf.maxDrawdown,
+          volatility: perf.annualizedVolatility,
+          turnover: perf.turnover,
+        })),
+        summary: {
+          totalTrades: agent.tradeHistory.length,
+          finalValue: agent.performanceHistory[agent.performanceHistory.length - 1]?.totalValue || 0,
+          totalReturn: agent.performanceHistory[agent.performanceHistory.length - 1]?.totalReturn || 0,
+          finalSharpeRatio: agent.performanceHistory[agent.performanceHistory.length - 1]?.sharpeRatio || 0,
         }
-      })
-    );
-    
-    // Update Benchmarks
-    const updatedBenchmarks = benchmarks.map(b => {
-        const lastPerf = b.performanceHistory[b.performanceHistory.length - 1];
-        let newTotalValue = lastPerf.totalValue;
+      })),
+    };
 
-        if (b.id === S_P500_BENCHMARK_ID) {
-            const marketReturn = Object.values(newMarketData).reduce((acc, stock) => acc + stock.dailyChangePercent, 0) / Object.values(newMarketData).length;
-            newTotalValue *= (1 + marketReturn);
-        } else if (b.id === AI_MANAGERS_INDEX_ID) {
-            const avgAgentReturn = updatedAgents.reduce((acc, agent) => acc + (agent.performanceHistory.slice(-1)[0]?.dailyReturn ?? 0), 0) / updatedAgents.length;
-            newTotalValue *= (1 + avgAgentReturn);
-        }
-        
-        const newHistory = [...b.performanceHistory];
-        const newDailyReturn = (newTotalValue / lastPerf.totalValue) - 1;
-        
-        const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, newHistory, nextDay);
-        
-        return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
-    });
+    // Create and download JSON file
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `simulation-export-day-${simulationState.day}-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [agents, simulationState.day]);
 
-    setBenchmarks(updatedBenchmarks);
-    setAgents(updatedAgents);
-    setSimulationState({ day: nextDay, isLoading: false });
-  }, [simulationState.day, marketData, agents, benchmarks]);
-
-  return { agents, benchmarks, simulationState, marketData, advanceDay };
+  return { agents, benchmarks, simulationState, marketData, advanceDay, advanceIntraday, exportSimulationData };
 };

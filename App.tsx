@@ -7,19 +7,40 @@ import type { Agent } from './types';
 import { TickerBar } from './components/TickerBar';
 import { MainPerformanceChart } from './components/MainPerformanceChart';
 import { InfoPanel } from './components/InfoPanel';
+// Removed direct imports - now using API
 
 export default function App() {
-  const { agents, benchmarks, simulationState, marketData, advanceDay } = useSimulation();
+  const { agents, benchmarks, simulationState, marketData, advanceDay, advanceIntraday, exportSimulationData } = useSimulation();
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isLive, setIsLive] = useState(false);
+  const [isStopped, setIsStopped] = useState(false);
   const liveIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (isLive && !simulationState.isLoading) {
+    // Auto-stop if historical simulation is complete (day > 4)
+    if (simulationState.day > 4 && !isStopped) {
+      setIsLive(false);
+      setIsStopped(true);
+      setTimeout(() => {
+        exportSimulationData();
+      }, 500);
+    }
+  }, [simulationState.day, isStopped, exportSimulationData]);
+
+  useEffect(() => {
+    if (isLive && !simulationState.isLoading && !isStopped && simulationState.day <= 4) {
       liveIntervalRef.current = window.setInterval(() => {
-        advanceDay();
+        // Advance intraday first (every 30 minutes: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6)
+        // After 13 intraday updates (hour 6.5), advance to next day
+        // Check current hour to decide whether to advance intraday or day
+        if (simulationState.intradayHour < 6) {
+          advanceIntraday();
+        } else {
+          // At hour 6, we've completed the day, advance to next day
+          advanceDay();
+        }
       }, 3000); // Advance every 3 seconds
-    } else if (!isLive && liveIntervalRef.current) {
+    } else if ((!isLive || isStopped || simulationState.day > 4) && liveIntervalRef.current) {
         clearInterval(liveIntervalRef.current);
         liveIntervalRef.current = null;
     }
@@ -28,17 +49,30 @@ export default function App() {
         clearInterval(liveIntervalRef.current);
       }
     };
-  }, [isLive, advanceDay, simulationState.isLoading]);
+  }, [isLive, advanceDay, advanceIntraday, simulationState.isLoading, isStopped, simulationState.day, simulationState.intradayHour]);
 
   const handleSelectAgent = (agent: Agent) => setSelectedAgent(agent);
   const handleCloseDetail = () => setSelectedAgent(null);
-  const toggleLiveMode = () => setIsLive(prev => !prev);
+  const toggleLiveMode = () => {
+    if (isStopped) return; // Can't resume if stopped
+    setIsLive(prev => !prev);
+  };
+  
+  const handleStop = () => {
+    setIsLive(false);
+    setIsStopped(true);
+    // Wait a moment for any ongoing simulation to finish, then export
+    setTimeout(() => {
+      exportSimulationData();
+    }, 500);
+  };
 
   const allParticipants = [...agents, ...benchmarks];
+  const simulationMode = 'real-time'; // Will be determined by backend
 
   return (
     <div className="min-h-screen bg-arena-bg font-sans text-arena-text-primary antialiased">
-      <Header isLive={isLive} onToggleLive={toggleLiveMode} />
+      <Header isLive={isLive} onToggleLive={toggleLiveMode} isStopped={isStopped} simulationMode={simulationMode} />
       <TickerBar marketData={marketData} />
       
       <main className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
@@ -53,9 +87,12 @@ export default function App() {
             <InfoPanel 
               agents={agents}
               onAdvanceDay={advanceDay}
+              onStop={handleStop}
               isLoading={simulationState.isLoading}
               isLive={isLive}
+              isStopped={isStopped}
               day={simulationState.day}
+              intradayHour={simulationState.intradayHour}
             />
           </div>
         </div>
@@ -64,9 +101,9 @@ export default function App() {
           <Leaderboard agents={agents} onSelectAgent={handleSelectAgent} />
         </div>
         
-        {selectedAgent && (
-          <AgentDetailView agent={selectedAgent} onClose={handleCloseDetail} />
-        )}
+                {selectedAgent && (
+                  <AgentDetailView agent={selectedAgent} onClose={handleCloseDetail} marketData={marketData} />
+                )}
       </main>
 
       <footer className="text-center p-4 text-arena-text-tertiary text-xs">

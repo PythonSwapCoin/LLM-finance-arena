@@ -1,17 +1,23 @@
 import React from 'react';
 import type { Agent } from '../types';
-import { ArrowPathIcon, PlayIcon } from './icons/Icons';
+import { ArrowPathIcon, PlayIcon, StopIcon } from './icons/Icons';
+// Removed service imports - mode is passed as prop or determined client-side
 
 interface InfoPanelProps {
   agents: Agent[];
   onAdvanceDay: () => void;
+  onStop: () => void;
+  onExportLogs?: () => void;
   isLoading: boolean;
   isLive: boolean;
+  isStopped: boolean;
   day: number;
+  intradayHour?: number;
 }
 
-export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, isLoading, isLive, day }) => {
-    
+export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, onStop, onExportLogs, isLoading, isLive, isStopped, day, intradayHour = 0 }) => {
+  const simulationMode = 'real-time'; // Will come from API in the future
+  const isHistoricalComplete = day > 4;
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
 
   const highestPerformer = agentsWithPerf.length > 0
@@ -35,20 +41,58 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, isLo
         <div className="flex justify-between items-center border-b border-arena-border pb-4">
             <div>
                 <span className="text-arena-text-secondary">Trading Day</span>
-                <p className="text-3xl font-bold text-arena-text-primary">{day}</p>
-            </div>
-             <button
-                onClick={onAdvanceDay}
-                disabled={isLoading || isLive}
-                className="flex items-center justify-center bg-arena-surface hover:bg-arena-border disabled:opacity-50 disabled:cursor-not-allowed border border-arena-border text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-              >
-                {isLoading ? (
-                  <ArrowPathIcon className="animate-spin h-5 w-5 mr-2" />
-                ) : (
-                  <PlayIcon className="h-5 w-5 mr-2" />
+                <p className="text-3xl font-bold text-arena-text-primary">{day + 1}</p>
+                {intradayHour > 0 && (
+                  <span className="text-xs text-arena-text-secondary block mt-1">
+                    Intraday: {Math.floor(intradayHour)}:{(intradayHour % 1 * 60).toFixed(0).padStart(2, '0')}
+                  </span>
                 )}
-                {isLoading ? 'Simulating...' : 'Next Day'}
-            </button>
+                {isStopped && (
+                  <span className="text-xs text-arena-text-tertiary block mt-1">Simulation Stopped</span>
+                )}
+                {isHistoricalComplete && simulationMode === 'historical' && (
+                  <span className="text-xs text-blue-400 block mt-1 font-semibold">✓ Historical Week Complete (5 days)</span>
+                )}
+                {simulationMode === 'historical' && !isHistoricalComplete && (
+                  <span className="text-xs text-blue-400 block mt-1">Historical Mode: {day + 1}/5 days</span>
+                )}
+            </div>
+            <div className="flex gap-2">
+              {!isStopped && (
+                <button
+                  onClick={onAdvanceDay}
+                  disabled={isLoading || isLive}
+                  className="flex items-center justify-center bg-arena-surface hover:bg-arena-border disabled:opacity-50 disabled:cursor-not-allowed border border-arena-border text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                >
+                  {isLoading ? (
+                    <ArrowPathIcon className="animate-spin h-5 w-5 mr-2" />
+                  ) : (
+                    <PlayIcon className="h-5 w-5 mr-2" />
+                  )}
+                  {isLoading ? 'Simulating...' : 'Next Day'}
+                </button>
+              )}
+              {day > 0 && !isStopped && (
+                <button
+                  onClick={onStop}
+                  disabled={isLoading}
+                  className="flex items-center justify-center bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed border border-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                  title="Stop simulation and export results"
+                >
+                  <StopIcon className="h-5 w-5 mr-2" />
+                  Stop & Export
+                </button>
+              )}
+              {onExportLogs && (
+                <button
+                  onClick={onExportLogs}
+                  className="flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed border border-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 text-xs"
+                  title="Export system logs"
+                >
+                  📋 Logs
+                </button>
+              )}
+            </div>
         </div>
 
         {highestPerformer && lowestPerformer && (

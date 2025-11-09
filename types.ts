@@ -3,6 +3,32 @@ export interface TickerData {
   price: number;
   dailyChange: number;
   dailyChangePercent: number;
+  // Financial metrics from defaultKeyStatistics
+  trailingPE?: number;
+  forwardPE?: number;
+  priceToBook?: number;
+  priceToSales?: number;
+  enterpriseValue?: number;
+  enterpriseToRevenue?: number;
+  enterpriseToEbitda?: number;
+  beta?: number;
+  marketCap?: number;
+  volume?: number;
+  averageVolume?: number;
+  profitMargins?: number;
+  grossMargins?: number;
+  operatingMargins?: number;
+  debtToEquity?: number;
+  dividendYield?: number;
+  payoutRatio?: number;
+  fiftyTwoWeekChange?: number;
+  dayHigh?: number;
+  dayLow?: number;
+  fiftyTwoWeekHigh?: number;
+  fiftyTwoWeekLow?: number;
+  sector?: string;
+  industry?: string;
+  longName?: string;
 }
 
 export interface MarketData {
@@ -17,12 +43,19 @@ export interface Trade {
   quantity: number;
   price: number;
   timestamp: number; // Day number
+  fairValue?: number; // Estimated fair value of the stock
+  topOfBox?: number; // 10% best case scenario price by next day
+  bottomOfBox?: number; // 10% worst case scenario price by next day
+  justification?: string; // One sentence justification for the trade
 }
 
 export interface Position {
   ticker: string;
   quantity: number;
   averageCost: number;
+  lastFairValue?: number; // Last estimated fair value
+  lastTopOfBox?: number; // Last estimated top of box
+  lastBottomOfBox?: number; // Last estimated bottom of box
 }
 
 export interface Portfolio {
@@ -38,7 +71,8 @@ export interface PerformanceMetrics {
   sharpeRatio: number;
   maxDrawdown: number;
   turnover: number;
-  timestamp: number; // Day number
+  timestamp: number; // Day number (for intraday: day + hour/10, e.g., 1.0, 1.2, 1.4, 1.6, 2.0)
+  intradayHour?: number; // 0, 2, 4, 6 for intraday updates
 }
 
 export interface Agent {
@@ -49,7 +83,13 @@ export interface Agent {
   portfolio: Portfolio;
   tradeHistory: Trade[];
   performanceHistory: PerformanceMetrics[];
-  rationale: string;
+  rationale: string; // Current rationale
+  rationaleHistory: { [day: number]: string }; // Historical rationales by day
+  memory?: { // Agent memory/context for past decisions
+    recentTrades: Trade[]; // Last N trades for context
+    pastRationales: string[]; // Recent rationales
+    pastPerformance: PerformanceMetrics[]; // Recent performance snapshots
+  };
 }
 
 export interface Benchmark {
