@@ -7,7 +7,8 @@ import type { Agent } from './types';
 import { TickerBar } from './components/TickerBar';
 import { MainPerformanceChart } from './components/MainPerformanceChart';
 import { InfoPanel } from './components/InfoPanel';
-// Removed direct imports - now using API
+import { isHistoricalSimulationComplete, getSimulationMode } from './services/marketDataService';
+import { logger } from './services/logger';
 
 export default function App() {
   const { agents, benchmarks, simulationState, marketData, advanceDay, advanceIntraday, exportSimulationData } = useSimulation();
@@ -17,8 +18,8 @@ export default function App() {
   const liveIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Auto-stop if historical simulation is complete (day > 4)
-    if (simulationState.day > 4 && !isStopped) {
+    // Auto-stop if historical simulation is complete
+    if (isHistoricalSimulationComplete(simulationState.day) && !isStopped) {
       setIsLive(false);
       setIsStopped(true);
       setTimeout(() => {
@@ -28,7 +29,7 @@ export default function App() {
   }, [simulationState.day, isStopped, exportSimulationData]);
 
   useEffect(() => {
-    if (isLive && !simulationState.isLoading && !isStopped && simulationState.day <= 4) {
+    if (isLive && !simulationState.isLoading && !isStopped && !isHistoricalSimulationComplete(simulationState.day)) {
       liveIntervalRef.current = window.setInterval(() => {
         // Advance intraday first (every 30 minutes: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6)
         // After 13 intraday updates (hour 6.5), advance to next day
@@ -40,7 +41,7 @@ export default function App() {
           advanceDay();
         }
       }, 3000); // Advance every 3 seconds
-    } else if ((!isLive || isStopped || simulationState.day > 4) && liveIntervalRef.current) {
+    } else if ((!isLive || isStopped || isHistoricalSimulationComplete(simulationState.day)) && liveIntervalRef.current) {
         clearInterval(liveIntervalRef.current);
         liveIntervalRef.current = null;
     }
@@ -61,14 +62,21 @@ export default function App() {
   const handleStop = () => {
     setIsLive(false);
     setIsStopped(true);
+    logger.logSimulationEvent('Simulation stopped by user', { day: simulationState.day });
     // Wait a moment for any ongoing simulation to finish, then export
     setTimeout(() => {
       exportSimulationData();
+      // Also export logs when simulation stops
+      logger.exportLogs();
     }, 500);
   };
 
+  const handleExportLogs = () => {
+    logger.exportLogs();
+  };
+
   const allParticipants = [...agents, ...benchmarks];
-  const simulationMode = 'real-time'; // Will be determined by backend
+  const simulationMode = getSimulationMode();
 
   return (
     <div className="min-h-screen bg-arena-bg font-sans text-arena-text-primary antialiased">
@@ -88,11 +96,11 @@ export default function App() {
               agents={agents}
               onAdvanceDay={advanceDay}
               onStop={handleStop}
+              onExportLogs={handleExportLogs}
               isLoading={simulationState.isLoading}
               isLive={isLive}
               isStopped={isStopped}
               day={simulationState.day}
-              intradayHour={simulationState.intradayHour}
             />
           </div>
         </div>

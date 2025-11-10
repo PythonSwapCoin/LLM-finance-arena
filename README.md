@@ -15,17 +15,9 @@ A web-based platform that benchmarks large-language models (LLMs) acting as auto
 - **Live Trading Simulation**: Watch agents make trading decisions in real-time
 - **OpenRouter Integration**: Use OpenRouter API to access multiple LLM providers through a single interface
 
-## Architecture
-
-This application is split into **frontend** and **backend**:
-- **Frontend**: React app that displays data from the API
-- **Backend**: Node.js API (Vercel serverless functions) that handles market data, LLM calls, and calculations
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) and [BACKEND_SETUP.md](./BACKEND_SETUP.md) for detailed information.
-
 ## Run Locally
 
-**Prerequisites:** Node.js (v18+), Vercel CLI (for backend)
+**Prerequisites:** Node.js (v18+)
 
 ### Quick Start (3 Steps)
 

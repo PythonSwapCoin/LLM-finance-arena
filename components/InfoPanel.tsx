@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Agent } from '../types';
 import { ArrowPathIcon, PlayIcon, StopIcon } from './icons/Icons';
-// Removed service imports - mode is passed as prop or determined client-side
+import { getSimulationMode, isHistoricalSimulationComplete } from '../services/marketDataService';
 
 interface InfoPanelProps {
   agents: Agent[];
@@ -16,8 +16,8 @@ interface InfoPanelProps {
 }
 
 export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, onStop, onExportLogs, isLoading, isLive, isStopped, day, intradayHour = 0 }) => {
-  const simulationMode = 'real-time'; // Will come from API in the future
-  const isHistoricalComplete = day > 4;
+  const simulationMode = getSimulationMode();
+  const isHistoricalComplete = isHistoricalSimulationComplete(day);
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
 
   const highestPerformer = agentsWithPerf.length > 0
