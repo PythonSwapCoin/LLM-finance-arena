@@ -1,8 +1,8 @@
-import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics } from '../types';
-import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH } from '../constants';
-import { calculateAllMetrics } from '../utils/portfolioCalculations';
-import { getTradeDecisions } from '../services/llmService';
-import { logger } from '../services/logger';
+import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics } from '../types.js';
+import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH } from '../constants.js';
+import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
+import { getTradeDecisions } from '../services/llmService.js';
+import { logger } from '../services/logger.js';
 
 // Pure function: step the simulation forward with new prices
 export const step = async (

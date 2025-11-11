@@ -1,8 +1,8 @@
-import type { SimulationSnapshot } from '../types';
+import type { SimulationSnapshot } from '../types.js';
 import { promises as fs } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { logger, LogLevel, LogCategory } from '../services/logger';
+import { logger, LogLevel, LogCategory } from '../services/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { logger, LogLevel, LogCategory } from './logger';
+import { logger, LogLevel, LogCategory } from './logger.js';
 
 const LOG_EXPORT_DIR = './data/logs';
 

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { promises as fs } from 'fs';
-import { simulationState } from '../simulation/state';
-import { startScheduler, stopScheduler, isSchedulerRunning } from '../simulation/scheduler';
-import { logger, LogLevel, LogCategory } from '../services/logger';
-import { getSimulationMode, createInitialMarketData } from '../services/marketDataService';
-import { exportSimulationData } from '../services/exportService';
-import { exportLogs } from '../services/logExportService';
-import { S_P500_TICKERS } from '../constants';
-import { saveSnapshot } from '../store/persistence';
+import { simulationState } from '../simulation/state.js';
+import { startScheduler, stopScheduler, isSchedulerRunning } from '../simulation/scheduler.js';
+import { logger, LogLevel, LogCategory } from '../services/logger.js';
+import { getSimulationMode, createInitialMarketData } from '../services/marketDataService.js';
+import { exportSimulationData } from '../services/exportService.js';
+import { exportLogs } from '../services/logExportService.js';
+import { S_P500_TICKERS } from '../constants.js';
+import { saveSnapshot } from '../store/persistence.js';
 import type { 
   SimulationStateResponse, 
   AgentsResponse, 
@@ -16,7 +16,7 @@ import type {
   HistoryResponse, 
   StartStopResponse, 
   LogsResponse 
-} from './dto';
+} from './dto.js';
 
 export const registerRoutes = async (fastify: FastifyInstance): Promise<void> => {
   // Health check

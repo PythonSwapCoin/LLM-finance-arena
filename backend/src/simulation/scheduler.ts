@@ -1,11 +1,11 @@
-import { simulationState } from './state';
-import { step, tradeWindow, advanceDay } from './engine';
-import { generateNextIntradayMarketData, generateNextDayMarketData, advanceIntradayHour, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode } from '../services/marketDataService';
-import { logger, LogLevel, LogCategory } from '../services/logger';
-import { saveSnapshot } from '../store/persistence';
-import { exportSimulationData } from '../services/exportService';
-import { exportLogs } from '../services/logExportService';
-import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours';
+import { simulationState } from './state.js';
+import { step, tradeWindow, advanceDay } from './engine.js';
+import { generateNextIntradayMarketData, generateNextDayMarketData, advanceIntradayHour, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode } from '../services/marketDataService.js';
+import { logger, LogLevel, LogCategory } from '../services/logger.js';
+import { saveSnapshot } from '../store/persistence.js';
+import { exportSimulationData } from '../services/exportService.js';
+import { exportLogs } from '../services/logExportService.js';
+import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
 
 // Intervals - different for real-time vs simulated/historical
 const getSimInterval = (): number => {

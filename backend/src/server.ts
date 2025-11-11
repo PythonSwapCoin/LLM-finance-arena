@@ -5,13 +5,13 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { registerRoutes } from './api/routes';
-import { simulationState } from './simulation/state';
-import { loadSnapshot, saveSnapshot } from './store/persistence';
-import { createInitialMarketData } from './services/marketDataService';
-import { S_P500_TICKERS } from './constants';
-import { logger, LogLevel, LogCategory } from './services/logger';
-import { startScheduler } from './simulation/scheduler';
+import { registerRoutes } from './api/routes.js';
+import { simulationState } from './simulation/state.js';
+import { loadSnapshot, saveSnapshot } from './store/persistence.js';
+import { createInitialMarketData } from './services/marketDataService.js';
+import { S_P500_TICKERS } from './constants.js';
+import { logger, LogLevel, LogCategory } from './services/logger.js';
+import { startScheduler } from './simulation/scheduler.js';
 
 const PORT = parseInt(process.env.BACKEND_PORT || '8080', 10);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
@@ -121,7 +121,7 @@ const start = async (): Promise<void> => {
     console.log(`📊 Simulation mode: ${simulationState.getMode()}`);
     console.log(`🔒 CORS allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   } catch (err) {
-    logger.log(require('./services/logger').LogLevel.ERROR, require('./services/logger').LogCategory.SYSTEM, 
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
       'Error starting server', { 
         error: err instanceof Error ? err.message : String(err) 
       });
@@ -134,7 +134,7 @@ const start = async (): Promise<void> => {
 process.on('SIGTERM', async () => {
   logger.logSimulationEvent('SIGTERM received, shutting down gracefully', {});
   await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-    logger.log(require('./services/logger').LogLevel.ERROR, require('./services/logger').LogCategory.SYSTEM, 
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
       'Failed to save snapshot on shutdown', { error: err });
   });
   await fastify.close();
@@ -144,7 +144,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   logger.logSimulationEvent('SIGINT received, shutting down gracefully', {});
   await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-    logger.log(require('./services/logger').LogLevel.ERROR, require('./services/logger').LogCategory.SYSTEM, 
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
       'Failed to save snapshot on shutdown', { error: err });
   });
   await fastify.close();

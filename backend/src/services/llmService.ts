@@ -1,6 +1,6 @@
-import type { Agent, MarketData, Trade, TradeAction } from '../types';
-import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT } from '../constants';
-import { logger, LogLevel, LogCategory } from './logger';
+import type { Agent, MarketData, Trade, TradeAction } from '../types.js';
+import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT } from '../constants.js';
+import { logger, LogLevel, LogCategory } from './logger.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 

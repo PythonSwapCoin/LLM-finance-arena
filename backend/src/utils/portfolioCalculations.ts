@@ -1,5 +1,5 @@
-import type { Portfolio, MarketData, PerformanceMetrics, Trade } from '../types';
-import { INITIAL_CASH, RISK_FREE_RATE, TRADING_DAYS_PER_YEAR } from '../constants';
+import type { Portfolio, MarketData, PerformanceMetrics, Trade } from '../types.js';
+import { INITIAL_CASH, RISK_FREE_RATE, TRADING_DAYS_PER_YEAR } from '../constants.js';
 
 export const calculatePortfolioValue = (portfolio: Portfolio, marketData: MarketData): number => {
   const positionsValue = Object.values(portfolio.positions).reduce((acc, position) => {

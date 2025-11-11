@@ -1,7 +1,7 @@
-import type { SimulationSnapshot, Agent, Benchmark, MarketData } from '../types';
-import { INITIAL_AGENTS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants';
-import { calculateAllMetrics } from '../utils/portfolioCalculations';
-import { getSimulationMode } from '../services/marketDataService';
+import type { SimulationSnapshot, Agent, Benchmark, MarketData } from '../types.js';
+import { INITIAL_AGENTS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants.js';
+import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
+import { getSimulationMode } from '../services/marketDataService.js';
 
 class SimulationState {
   private snapshot: SimulationSnapshot;

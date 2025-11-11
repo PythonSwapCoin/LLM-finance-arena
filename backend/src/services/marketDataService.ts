@@ -1,7 +1,7 @@
-import type { MarketData, TickerData } from '../types';
-import { Ticker, type HistoricalDataPoint } from './yfinanceService';
-import { logger, LogLevel, LogCategory } from './logger';
-import { S_P500_TICKERS } from '../constants';
+import type { MarketData, TickerData } from '../types.js';
+import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
+import { logger, LogLevel, LogCategory } from './logger.js';
+import { S_P500_TICKERS } from '../constants.js';
 
 const MODE = (process.env.MODE || 'simulated') as 'simulated' | 'realtime' | 'historical';
 const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY;

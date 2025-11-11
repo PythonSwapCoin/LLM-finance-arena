@@ -1,8 +1,8 @@
-import type { SimulationSnapshot, Agent } from '../types';
+import type { SimulationSnapshot, Agent } from '../types.js';
 import { promises as fs } from 'fs';
 import { dirname } from 'path';
-import { logger, LogLevel, LogCategory } from './logger';
-import { getHistoricalSimulationPeriod } from './marketDataService';
+import { logger, LogLevel, LogCategory } from './logger.js';
+import { getHistoricalSimulationPeriod } from './marketDataService.js';
 
 const EXPORT_DIR = './data/exports';
 
