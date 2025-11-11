@@ -1,4 +1,4 @@
-import type { SimulationSnapshot, Agent } from '../../../shared/types';
+import type { SimulationSnapshot, Agent } from '../types';
 import { promises as fs } from 'fs';
 import { dirname } from 'path';
 import { logger, LogLevel, LogCategory } from './logger';

@@ -84,7 +84,7 @@ export class Ticker {
         return null;
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
       const result = data.quoteSummary?.result?.[0];
 
       if (!result) {
@@ -172,7 +172,7 @@ export class Ticker {
         throw new Error(`Failed to fetch history for ${this.symbol}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
       const result = data.chart?.result?.[0];
 
       if (!result) {
@@ -229,7 +229,7 @@ export class Ticker {
         throw new Error(`Failed to fetch data for ${this.symbol}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
       const result = data.chart?.result?.[0];
 
       if (!result || !result.indicators?.quote?.[0]) {

@@ -1,4 +1,4 @@
-import type { SimulationSnapshot, Agent, Benchmark, MarketData, PerformanceMetrics } from '../../../shared/types';
+import type { SimulationSnapshot, Agent, Benchmark, MarketData, PerformanceMetrics } from '../types';
 
 // Response DTOs matching the old hook output shape
 export interface SimulationStateResponse {

@@ -1,4 +1,4 @@
-import type { Agent, MarketData, Trade, TradeAction } from '../../../shared/types';
+import type { Agent, MarketData, Trade, TradeAction } from '../types';
 import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT } from '../constants';
 import { logger, LogLevel, LogCategory } from './logger';
 
@@ -263,8 +263,8 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
       throw error;
     }
 
-    const data = await response.json();
-    const jsonText = data.choices[0]?.message?.content || '{}';
+    const data = await response.json() as any;
+    const jsonText = data.choices?.[0]?.message?.content || '{}';
     const responseTime = Date.now() - startTime;
     const tokensUsed = data.usage?.total_tokens;
     
@@ -382,10 +382,11 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
 
   } catch (error) {
     const responseTime = Date.now() - startTime;
-    logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
+    const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+    logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, errorMessage);
     console.error("Error fetching trade decisions:", error);
     // Never throw past the service boundary - return empty trades instead
-    return { trades: [], rationale: `Error communicating with AI model: ${error instanceof Error ? error.message : "Unknown error"}` };
+    return { trades: [], rationale: `Error communicating with AI model: ${errorMessage}` };
   }
 };
 

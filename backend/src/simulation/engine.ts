@@ -1,4 +1,4 @@
-import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics } from '../../../shared/types';
+import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics } from '../types';
 import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH } from '../constants';
 import { calculateAllMetrics } from '../utils/portfolioCalculations';
 import { getTradeDecisions } from '../services/llmService';

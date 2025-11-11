@@ -130,11 +130,14 @@ export const getNextMarketOpen = (date: Date = new Date(), config: MarketHoursCo
   next.setHours(cfg.openHour, 0, 0, 0);
   
   // If already past market open today, move to next day
-  if (date.getHours() >= cfg.closeHour || isHoliday(next)) {
+  const etTime = toET(next);
+  if (date.getHours() >= cfg.closeHour || isHoliday(etTime)) {
     next.setDate(next.getDate() + 1);
     // Skip weekends and holidays
-    while (isHoliday(next) || next.getDay() === 0 || next.getDay() === 6) {
+    let nextEtTime = toET(next);
+    while (isHoliday(nextEtTime) || nextEtTime.dayOfWeek === 0 || nextEtTime.dayOfWeek === 6) {
       next.setDate(next.getDate() + 1);
+      nextEtTime = toET(next);
     }
   }
   

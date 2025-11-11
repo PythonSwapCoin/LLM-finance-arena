@@ -1,4 +1,4 @@
-import type { Portfolio, MarketData, PerformanceMetrics, Trade } from '../../../shared/types';
+import type { Portfolio, MarketData, PerformanceMetrics, Trade } from '../types';
 import { INITIAL_CASH, RISK_FREE_RATE, TRADING_DAYS_PER_YEAR } from '../constants';
 
 export const calculatePortfolioValue = (portfolio: Portfolio, marketData: MarketData): number => {

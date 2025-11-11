@@ -1,4 +1,4 @@
-import type { SimulationSnapshot, Agent, Benchmark, MarketData } from '../../../shared/types';
+import type { SimulationSnapshot, Agent, Benchmark, MarketData } from '../types';
 import { INITIAL_AGENTS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants';
 import { calculateAllMetrics } from '../utils/portfolioCalculations';
 import { getSimulationMode } from '../services/marketDataService';

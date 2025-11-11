@@ -1,5 +1,5 @@
-import type { MarketData, TickerData } from '../../../shared/types';
-import { Ticker } from './yfinanceService';
+import type { MarketData, TickerData } from '../types';
+import { Ticker, type HistoricalDataPoint } from './yfinanceService';
 import { logger, LogLevel, LogCategory } from './logger';
 import { S_P500_TICKERS } from '../constants';
 
@@ -167,11 +167,11 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
     const startDate = new Date(targetTime.getTime() - (2 * 60 * 60 * 1000)); // Get 2 hours of data
     
     // Try 5-minute intervals first (most granular)
-    let history = await yfTicker.history({
+    let history: HistoricalDataPoint[] = await yfTicker.history({
       start: startDate,
       end: endDate,
       interval: '5m',
-    }).catch(() => []);
+    }).catch(() => [] as HistoricalDataPoint[]);
     
     // If no 5-minute data, try 15-minute intervals
     if (history.length === 0) {
@@ -179,7 +179,7 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
         start: startDate,
         end: endDate,
         interval: '15m',
-      }).catch(() => []);
+      }).catch(() => [] as HistoricalDataPoint[]);
     }
     
     // If no intraday data, try 1-hour intervals
@@ -188,7 +188,7 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
         start: new Date(targetTime.getTime() - (24 * 60 * 60 * 1000)), // Last 24 hours
         end: targetTime,
         interval: '1h',
-      }).catch(() => []);
+      }).catch(() => [] as HistoricalDataPoint[]);
     }
     
     // If we have intraday data, use the closest point to target time
@@ -256,7 +256,8 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
       `Could not fetch delayed data for ${ticker}, falling back to current data`, { ticker });
     return null;
   } catch (error) {
-    logger.logMarketData('Yahoo Finance (Delayed)', ticker, false, undefined, error);
+    const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+    logger.logMarketData('Yahoo Finance (Delayed)', ticker, false, undefined, errorMessage);
     return null;
   }
 };
@@ -331,8 +332,9 @@ const fetchYahooFinanceData = async (ticker: string, useCache: boolean = true): 
     return tickerData;
   } catch (error) {
     const responseTime = Date.now() - startTime;
-    logger.logMarketData('Yahoo Finance', ticker, false, undefined, error);
-    logger.logApiCall('Yahoo Finance', `fastInfo/${ticker}`, false, undefined, error, responseTime);
+    const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+    logger.logMarketData('Yahoo Finance', ticker, false, undefined, errorMessage);
+    logger.logApiCall('Yahoo Finance', `fastInfo/${ticker}`, false, undefined, errorMessage, responseTime);
     return null;
   }
 };
@@ -367,7 +369,7 @@ const fetchRealMarketDataWithCascade = async (tickers: string[], useCache: boole
           const responseTime = Date.now() - startTime;
           
           if (response.ok) {
-            const data = await response.json();
+            const data = await response.json() as any;
             
             if (data['Global Quote'] && data['Global Quote']['05. price']) {
               const price = parseFloat(data['Global Quote']['05. price']);
@@ -404,7 +406,7 @@ const fetchRealMarketDataWithCascade = async (tickers: string[], useCache: boole
           const responseTime = Date.now() - startTime;
           
           if (response.ok) {
-            const data = await response.json();
+            const data = await response.json() as any;
             
             if (data.results && data.results.length > 0) {
               const result = data.results[0];
@@ -522,7 +524,8 @@ const fetchHistoricalWeekData = async (tickers: string[]): Promise<{ [ticker: st
         continue;
       }
     } catch (error) {
-      logger.logMarketData('Yahoo Finance (Historical)', ticker, false, undefined, error);
+      const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+      logger.logMarketData('Yahoo Finance (Historical)', ticker, false, undefined, errorMessage);
       console.warn(`Error fetching historical data for ${ticker}:`, error);
     }
     

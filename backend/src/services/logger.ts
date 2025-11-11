@@ -1,4 +1,5 @@
 export enum LogLevel {
+  DEBUG = 'DEBUG',
   INFO = 'INFO',
   WARNING = 'WARNING',
   ERROR = 'ERROR',
@@ -37,7 +38,7 @@ class Logger {
   }
 
   private shouldLog(level: LogLevel): boolean {
-    const levels = [LogLevel.ERROR, LogLevel.WARNING, LogLevel.INFO, LogLevel.SUCCESS];
+    const levels = [LogLevel.ERROR, LogLevel.WARNING, LogLevel.INFO, LogLevel.SUCCESS, LogLevel.DEBUG];
     const currentIndex = levels.indexOf(this.logLevel);
     const messageIndex = levels.indexOf(level);
     return messageIndex <= currentIndex;

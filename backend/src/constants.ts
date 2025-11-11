@@ -1,4 +1,4 @@
-import type { Agent, Portfolio } from '../../shared/types';
+import type { Agent, Portfolio } from './types';
 
 export const S_P500_TICKERS: string[] = [
   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK-B', 'JPM', 'JNJ',

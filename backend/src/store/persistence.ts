@@ -1,4 +1,4 @@
-import type { SimulationSnapshot } from '../../../shared/types';
+import type { SimulationSnapshot } from '../types';
 import { promises as fs } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';

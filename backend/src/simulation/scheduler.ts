@@ -308,7 +308,6 @@ export const startScheduler = async (): Promise<void> => {
         // Reset firstTradeExecuted flag for new day
         // Update currentDate for the new day
         firstTradeExecuted = false;
-        const snapshot = simulationState.getSnapshot();
         let newCurrentDate: string;
         if (snapshot.mode === 'historical' && snapshot.startDate) {
           const start = new Date(snapshot.startDate);
