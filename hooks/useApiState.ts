@@ -1,22 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/apiClient';
-import type { Agent, Benchmark, MarketData } from '../types';
+import type { Agent, Benchmark, MarketData, MarketDataTelemetry } from '../types';
 
 const POLL_INTERVAL = 5000; // Poll every 5 seconds
 
 export const useApiState = () => {
-  const [simulationState, setSimulationState] = useState({ 
-    day: 0, 
-    intradayHour: 0, 
+  const [simulationState, setSimulationState] = useState({
+    day: 0,
+    intradayHour: 0,
     isLoading: false,
     startDate: undefined as string | undefined,
     currentDate: undefined as string | undefined,
+    isHistoricalSimulationComplete: false,
   });
   const [marketData, setMarketData] = useState<MarketData>({});
   const [agents, setAgents] = useState<Agent[]>([]);
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [simulationMode, setSimulationMode] = useState<'simulated' | 'realtime' | 'historical'>('simulated');
+  const [marketTelemetry, setMarketTelemetry] = useState<MarketDataTelemetry | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<{
     connected: boolean;
     lastChecked: string | null;
@@ -58,6 +60,7 @@ export const useApiState = () => {
         isLoading: response.isLoading,
         startDate: snapshot.startDate,
         currentDate: snapshot.currentDate,
+        isHistoricalSimulationComplete: response.isHistoricalSimulationComplete,
       });
       setMarketData(snapshot.marketData);
       setAgents(snapshot.agents as Agent[]);
@@ -65,12 +68,25 @@ export const useApiState = () => {
       // Use backend mode directly (already in correct format)
       const mode = snapshot.mode || 'simulated';
       setSimulationMode(mode);
+      setMarketTelemetry(response.marketTelemetry);
       setError(null);
       // Update connection status on successful fetch
       setConnectionStatus(prev => ({
         ...prev,
         connected: true,
         lastChecked: new Date().toISOString(),
+        backendInfo: {
+          ...(prev.backendInfo || {}),
+          simulation: {
+            mode: snapshot.mode,
+            day: snapshot.day,
+            intradayHour: snapshot.intradayHour,
+            agentsCount: snapshot.agents.length,
+            tickersCount: Object.keys(snapshot.marketData).length,
+            lastUpdated: snapshot.lastUpdated,
+          },
+          marketData: response.marketTelemetry,
+        },
       }));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch simulation state';
@@ -151,6 +167,7 @@ export const useApiState = () => {
     simulationState,
     marketData,
     simulationMode,
+    marketTelemetry,
     advanceDay,
     advanceIntraday,
     exportSimulationData,

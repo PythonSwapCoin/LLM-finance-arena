@@ -3,7 +3,12 @@ import { promises as fs } from 'fs';
 import { simulationState } from '../simulation/state.js';
 import { startScheduler, stopScheduler, isSchedulerRunning } from '../simulation/scheduler.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
-import { getSimulationMode, createInitialMarketData } from '../services/marketDataService.js';
+import {
+  getSimulationMode,
+  createInitialMarketData,
+  isHistoricalSimulationComplete,
+  getMarketDataTelemetry,
+} from '../services/marketDataService.js';
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { S_P500_TICKERS } from '../constants.js';
@@ -27,6 +32,7 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
   // Connection status endpoint - returns backend info for frontend verification
   fastify.get('/api/status', async () => {
     const snapshot = simulationState.getSnapshot();
+    const telemetry = getMarketDataTelemetry();
     return {
       status: 'connected',
       backend: 'online',
@@ -39,6 +45,11 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
         tickersCount: Object.keys(snapshot.marketData).length,
         lastUpdated: snapshot.lastUpdated,
       },
+      marketData: {
+        tickersCount: Object.keys(snapshot.marketData).length,
+        sources: telemetry.sources,
+        rateLimits: telemetry.rateLimits,
+      },
     };
   });
 
@@ -48,6 +59,8 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
     return {
       snapshot,
       isLoading: false, // Backend doesn't track loading state the same way
+      isHistoricalSimulationComplete: isHistoricalSimulationComplete(snapshot.day),
+      marketTelemetry: getMarketDataTelemetry(),
     };
   });
 

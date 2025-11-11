@@ -7,18 +7,11 @@ import type { Agent } from './types';
 import { TickerBar } from './components/TickerBar';
 import { MainPerformanceChart } from './components/MainPerformanceChart';
 import { InfoPanel } from './components/InfoPanel';
-// Note: isHistoricalSimulationComplete and getSimulationMode should come from API state
-// For now, using a simple check - historical mode stops after day 4
-const isHistoricalSimulationComplete = (day: number): boolean => {
-  // Historical simulation has 5 days (0-4), so stop when trying to go to day 5
-  return day > 4;
-};
-
 
 export default function App() {
-  const { agents, benchmarks, simulationState, marketData, simulationMode, connectionStatus, checkConnection } = useApiState();
+  const { agents, benchmarks, simulationState, marketData, simulationMode, marketTelemetry, connectionStatus, checkConnection } = useApiState();
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const isStopped = isHistoricalSimulationComplete(simulationState.day);
+  const isStopped = simulationState.isHistoricalSimulationComplete;
 
   const handleSelectAgent = (agent: Agent) => setSelectedAgent(agent);
   const handleCloseDetail = () => setSelectedAgent(null);
@@ -50,7 +43,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-arena-bg font-sans text-arena-text-primary antialiased">
-      <Header isLive={false} onToggleLive={() => {}} isStopped={isStopped} simulationMode={simulationMode} connectionStatus={connectionStatus} />
+      <Header
+        isLive={false}
+        onToggleLive={() => {}}
+        isStopped={isStopped}
+        simulationMode={simulationMode}
+        connectionStatus={connectionStatus}
+        marketTelemetry={marketTelemetry}
+      />
       <TickerBar marketData={marketData} />
       
       <main className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
@@ -69,13 +69,14 @@ export default function App() {
             </div>
           </div>
           <div className="lg:col-span-1">
-            <InfoPanel 
+            <InfoPanel
               agents={agents}
               isLoading={simulationState.isLoading}
               isStopped={isStopped}
               day={simulationState.day}
               intradayHour={simulationState.intradayHour}
               simulationMode={simulationMode}
+              isHistoricalComplete={simulationState.isHistoricalSimulationComplete}
             />
           </div>
         </div>
@@ -83,14 +84,14 @@ export default function App() {
         <div id="leaderboard" className="mt-8">
           <Leaderboard agents={agents} onSelectAgent={handleSelectAgent} />
         </div>
-        
-                {selectedAgent && (
-                  <AgentDetailView agent={selectedAgent} onClose={handleCloseDetail} marketData={marketData} />
-                )}
+
+        {selectedAgent && (
+          <AgentDetailView agent={selectedAgent} onClose={handleCloseDetail} marketData={marketData} />
+        )}
       </main>
 
       <footer className="text-center p-4 text-arena-text-tertiary text-xs">
-          <p>LLM Trading Arena Season 1 is now live. All trades are simulated and not financial advice.</p>
+        <p>LLM Trading Arena Season 1 is now live. All trades are simulated and not financial advice.</p>
       </footer>
     </div>
   );

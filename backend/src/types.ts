@@ -101,6 +101,35 @@ export interface Benchmark {
   performanceHistory: PerformanceMetrics[];
 }
 
+export interface MarketDataSourceTelemetry {
+  success: number;
+  failure: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError?: string;
+}
+
+export interface YahooRateLimitStatus {
+  windowMs: number;
+  maxRequestsPerWindow: number;
+  currentCount: number;
+  resetAt: string | null;
+  blockedRequests: number;
+  lastThrottledAt: string | null;
+  isThrottled: boolean;
+}
+
+export interface MarketDataTelemetry {
+  sources: {
+    yahoo: MarketDataSourceTelemetry;
+    alphaVantage: MarketDataSourceTelemetry;
+    polygon: MarketDataSourceTelemetry;
+  };
+  rateLimits: {
+    yahoo: YahooRateLimitStatus;
+  };
+}
+
 // Snapshot type for persistence
 export interface SimulationSnapshot {
   day: number;
