@@ -104,11 +104,17 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
 
 ## Step 3: Update CORS
 
-After deploying frontend, update backend `ALLOWED_ORIGINS`:
+After deploying frontend, update backend `ALLOWED_ORIGINS` in Render dashboard:
 
 ```
-ALLOWED_ORIGINS=https://your-frontend.vercel.app,https://your-frontend.netlify.app
+ALLOWED_ORIGINS=https://llm-finance-arena.vercel.app
 ```
+
+**Important Notes:**
+- Use the full URL with `https://` protocol
+- The backend now automatically allows all `*.vercel.app` domains (including preview deployments)
+- **You MUST restart the backend service in Render after changing environment variables**
+- To restart: Go to Render dashboard → Your service → Manual Deploy → Clear build cache & deploy
 
 ## Step 4: Verify Deployment
 

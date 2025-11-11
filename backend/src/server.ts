@@ -34,13 +34,32 @@ await fastify.register(helmet, {
 
 await fastify.register(cors, {
   origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
       cb(null, true);
-    } else {
-      cb(new Error('Not allowed by CORS'), false);
+      return;
     }
+    
+    // Check if origin is in allowed list
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      cb(null, true);
+      return;
+    }
+    
+    // Also allow Vercel preview deployments (they have patterns like *.vercel.app)
+    if (origin.includes('.vercel.app')) {
+      cb(null, true);
+      return;
+    }
+    
+    // Log rejected origins for debugging
+    console.log(`CORS: Rejected origin: ${origin}`);
+    console.log(`CORS: Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+    cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 });
 
 await fastify.register(rateLimit, {
