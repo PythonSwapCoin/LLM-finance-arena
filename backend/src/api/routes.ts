@@ -24,6 +24,24 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
 
+  // Connection status endpoint - returns backend info for frontend verification
+  fastify.get('/api/status', async () => {
+    const snapshot = simulationState.getSnapshot();
+    return {
+      status: 'connected',
+      backend: 'online',
+      timestamp: new Date().toISOString(),
+      simulation: {
+        mode: snapshot.mode,
+        day: snapshot.day,
+        intradayHour: snapshot.intradayHour,
+        agentsCount: snapshot.agents.length,
+        tickersCount: Object.keys(snapshot.marketData).length,
+        lastUpdated: snapshot.lastUpdated,
+      },
+    };
+  });
+
   // Get simulation state
   fastify.get('/api/simulation/state', async (): Promise<SimulationStateResponse> => {
     const snapshot = simulationState.getSnapshot();

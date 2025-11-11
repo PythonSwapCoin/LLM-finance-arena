@@ -17,6 +17,35 @@ export const useApiState = () => {
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [simulationMode, setSimulationMode] = useState<'simulated' | 'realtime' | 'historical'>('simulated');
+  const [connectionStatus, setConnectionStatus] = useState<{
+    connected: boolean;
+    lastChecked: string | null;
+    backendInfo: any;
+  }>({
+    connected: false,
+    lastChecked: null,
+    backendInfo: null,
+  });
+
+  const checkConnection = useCallback(async () => {
+    try {
+      const status = await apiClient.getStatus();
+      setConnectionStatus({
+        connected: true,
+        lastChecked: new Date().toISOString(),
+        backendInfo: status,
+      });
+      return true;
+    } catch (err) {
+      setConnectionStatus({
+        connected: false,
+        lastChecked: new Date().toISOString(),
+        backendInfo: null,
+      });
+      console.error('Connection check failed:', err);
+      return false;
+    }
+  }, []);
 
   const fetchState = useCallback(async () => {
     try {
@@ -37,24 +66,43 @@ export const useApiState = () => {
       const mode = snapshot.mode || 'simulated';
       setSimulationMode(mode);
       setError(null);
+      // Update connection status on successful fetch
+      setConnectionStatus(prev => ({
+        ...prev,
+        connected: true,
+        lastChecked: new Date().toISOString(),
+      }));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch simulation state';
       setError(errorMessage);
       console.error('Error fetching simulation state:', err);
+      // Update connection status on error
+      setConnectionStatus(prev => ({
+        ...prev,
+        connected: false,
+        lastChecked: new Date().toISOString(),
+      }));
     }
   }, []);
 
   useEffect(() => {
+    // Check connection status on mount
+    checkConnection();
+    
     // Initial fetch
     fetchState();
 
     // Set up polling
     const interval = setInterval(fetchState, POLL_INTERVAL);
 
+    // Check connection status every 30 seconds
+    const connectionInterval = setInterval(checkConnection, 30000);
+
     return () => {
       clearInterval(interval);
+      clearInterval(connectionInterval);
     };
-  }, [fetchState]);
+  }, [fetchState, checkConnection]);
 
   // Start simulation (idempotent)
   const startSimulation = useCallback(async () => {
@@ -109,6 +157,8 @@ export const useApiState = () => {
     startSimulation,
     stopSimulation,
     error,
+    connectionStatus,
+    checkConnection,
   };
 };
 

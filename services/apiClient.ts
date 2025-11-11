@@ -86,6 +86,22 @@ class ApiClient {
     return response.json();
   }
 
+  async getStatus(): Promise<{
+    status: string;
+    backend: string;
+    timestamp: string;
+    simulation: {
+      mode: string;
+      day: number;
+      intradayHour: number;
+      agentsCount: number;
+      tickersCount: number;
+      lastUpdated: string;
+    };
+  }> {
+    return this.request('/status');
+  }
+
   async getSimulationState(): Promise<SimulationStateResponse> {
     return this.request<SimulationStateResponse>('/simulation/state');
   }

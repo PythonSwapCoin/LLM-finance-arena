@@ -6,9 +6,14 @@ interface HeaderProps {
   onToggleLive: () => void;
   isStopped: boolean;
   simulationMode: 'simulated' | 'realtime' | 'historical';
+  connectionStatus?: {
+    connected: boolean;
+    lastChecked: string | null;
+    backendInfo: any;
+  };
 }
 
-export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive, isStopped, simulationMode }) => {
+export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive, isStopped, simulationMode, connectionStatus }) => {
   const getModeLabel = () => {
     switch (simulationMode) {
       case 'historical':
@@ -21,6 +26,9 @@ export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive, isStopped,
   };
 
   const modeInfo = getModeLabel();
+  
+  const isConnected = connectionStatus?.connected ?? false;
+  const backendInfo = connectionStatus?.backendInfo;
 
   return (
     <header className="bg-arena-bg border-b border-arena-border p-4 sticky top-0 z-20">
@@ -37,6 +45,10 @@ export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive, isStopped,
             <div className={`flex items-center space-x-2 px-3 py-1 rounded-full ${modeInfo.color} bg-opacity-20 border border-current ${modeInfo.textColor}`}>
               <div className={`w-2 h-2 rounded-full ${modeInfo.color}`}></div>
               <span className="text-xs font-semibold">{modeInfo.label}</span>
+            </div>
+            <div className={`flex items-center space-x-2 px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-500 bg-opacity-20 text-green-400' : 'bg-red-500 bg-opacity-20 text-red-400'}`} title={isConnected ? `Backend connected${backendInfo ? ` - Day ${backendInfo.simulation?.day || 0}, ${backendInfo.simulation?.agentsCount || 0} agents` : ''}` : 'Backend disconnected'}>
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span className="font-semibold">{isConnected ? 'BACKEND' : 'OFFLINE'}</span>
             </div>
             <a href="#leaderboard" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">LEADERBOARD</a>
             <a href="#" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">BLOG</a>

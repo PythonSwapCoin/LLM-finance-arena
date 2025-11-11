@@ -16,7 +16,7 @@ const isHistoricalSimulationComplete = (day: number): boolean => {
 
 
 export default function App() {
-  const { agents, benchmarks, simulationState, marketData, simulationMode } = useApiState();
+  const { agents, benchmarks, simulationState, marketData, simulationMode, connectionStatus, checkConnection } = useApiState();
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const isStopped = isHistoricalSimulationComplete(simulationState.day);
 
@@ -25,9 +25,32 @@ export default function App() {
 
   const allParticipants = [...agents, ...benchmarks];
 
+  // Log connection status to console for debugging and expose test function
+  React.useEffect(() => {
+    if (connectionStatus) {
+      console.log('🔌 Backend Connection Status:', {
+        connected: connectionStatus.connected,
+        lastChecked: connectionStatus.lastChecked,
+        backendInfo: connectionStatus.backendInfo,
+      });
+      
+      // Make checkConnection available globally for manual testing
+      (window as any).testBackendConnection = async () => {
+        console.log('🧪 Testing backend connection...');
+        const result = await checkConnection();
+        if (result) {
+          console.log('✅ Backend is connected!', connectionStatus.backendInfo);
+        } else {
+          console.error('❌ Backend connection failed!');
+        }
+        return result;
+      };
+    }
+  }, [connectionStatus, checkConnection]);
+
   return (
     <div className="min-h-screen bg-arena-bg font-sans text-arena-text-primary antialiased">
-      <Header isLive={false} onToggleLive={() => {}} isStopped={isStopped} simulationMode={simulationMode} />
+      <Header isLive={false} onToggleLive={() => {}} isStopped={isStopped} simulationMode={simulationMode} connectionStatus={connectionStatus} />
       <TickerBar marketData={marketData} />
       
       <main className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
