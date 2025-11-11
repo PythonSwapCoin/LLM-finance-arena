@@ -9,9 +9,18 @@ interface LeaderboardProps {
 
 type SortKey = keyof PerformanceMetrics | 'name';
 
-const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
-const formatNumber = (value: number) => value.toFixed(2);
-const formatValue = (value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatPercent = (value: number | null | undefined) => {
+  if (value == null || isNaN(value)) return '0.00%';
+  return `${(value * 100).toFixed(2)}%`;
+};
+const formatNumber = (value: number | null | undefined) => {
+  if (value == null || isNaN(value)) return '0.00';
+  return value.toFixed(2);
+};
+const formatValue = (value: number | null | undefined) => {
+  if (value == null || isNaN(value)) return '$0.00';
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
 const columns: { key: SortKey; label: string; format: (val: any) => string; className?: string }[] = [
   { key: 'name', label: 'Agent Name', format: (val) => val, className: 'text-left font-semibold' },
@@ -99,17 +108,20 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
                         </div>
                     </div>
                   </td>
-                  {columns.slice(1).map(col => (
-                     <td key={col.key} className={`p-3 font-mono ${col.className}`}>
+                  {columns.slice(1).map(col => {
+                    const value = latestPerf[col.key as keyof PerformanceMetrics] as number | null | undefined;
+                    return (
+                      <td key={col.key} className={`p-3 font-mono ${col.className}`}>
                         {col.key === 'totalReturn' || col.key === 'dailyReturn' ? (
-                          <span className={latestPerf[col.key as keyof PerformanceMetrics] >= 0 ? 'text-brand-positive' : 'text-brand-negative'}>
-                              {col.format(latestPerf[col.key as keyof PerformanceMetrics])}
+                          <span className={(value ?? 0) >= 0 ? 'text-brand-positive' : 'text-brand-negative'}>
+                              {col.format(value)}
                           </span>
                         ) : (
-                          col.format(latestPerf[col.key as keyof PerformanceMetrics])
+                          col.format(value)
                         )}
-                    </td>
-                  ))}
+                      </td>
+                    );
+                  })}
                   <td className="p-3 text-center">
                       <button onClick={() => onSelectAgent(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
                           <InformationCircleIcon className="h-6 w-6" />

@@ -22,16 +22,17 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
     const positions = Object.values(agent.portfolio.positions).filter((p: Position) => p.quantity > 0);
     
     // Calculate portfolio value for percentage calculations
-    const portfolioValue = latestPerf.totalValue;
+    const portfolioValue = latestPerf?.totalValue ?? agent.portfolio.cash;
     const cashValue = agent.portfolio.cash;
     
     // Calculate position values with current market prices if available
     const positionsWithValues = positions.map((pos: Position) => {
-      const currentPrice = marketData[pos.ticker]?.price || pos.averageCost; // Fallback to avg cost if no market data
+      const avgCost = pos.averageCost ?? 0;
+      const currentPrice = marketData[pos.ticker]?.price ?? avgCost; // Fallback to avg cost if no market data
       const positionValue = pos.quantity * currentPrice;
       const positionPercent = portfolioValue > 0 ? (positionValue / portfolioValue) * 100 : 0;
-      const totalGain = (currentPrice - pos.averageCost) * pos.quantity;
-      const totalGainPercent = pos.averageCost > 0 ? ((currentPrice - pos.averageCost) / pos.averageCost) * 100 : 0;
+      const totalGain = (currentPrice - avgCost) * pos.quantity;
+      const totalGainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
       return {
         ...pos,
         currentPrice,
@@ -39,6 +40,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
         positionPercent,
         totalGain,
         totalGainPercent,
+        averageCost: avgCost,
       };
     });
     
@@ -69,10 +71,10 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
 
                 {/* Key Metrics */}
                 <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <StatCard label="Total Value" value={`$${latestPerf.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-                    <StatCard label="Total Return" value={`${(latestPerf.totalReturn * 100).toFixed(2)}%`} className={latestPerf.totalReturn >= 0 ? 'text-brand-positive' : 'text-brand-negative'} />
-                    <StatCard label="Sharpe Ratio" value={latestPerf.sharpeRatio.toFixed(2)} />
-                    <StatCard label="Max Drawdown" value={`${(latestPerf.maxDrawdown * 100).toFixed(2)}%`} className="text-brand-negative"/>
+                    <StatCard label="Total Value" value={`$${(latestPerf?.totalValue ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                    <StatCard label="Total Return" value={`${((latestPerf?.totalReturn ?? 0) * 100).toFixed(2)}%`} className={(latestPerf?.totalReturn ?? 0) >= 0 ? 'text-brand-positive' : 'text-brand-negative'} />
+                    <StatCard label="Sharpe Ratio" value={(latestPerf?.sharpeRatio ?? 0).toFixed(2)} />
+                    <StatCard label="Max Drawdown" value={`${((latestPerf?.maxDrawdown ?? 0) * 100).toFixed(2)}%`} className="text-brand-negative"/>
                 </div>
 
                 {/* Rationale */}
@@ -111,11 +113,11 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                     <tr key={pos.ticker}>
                                         <td className="p-2 font-mono">{pos.ticker}</td>
                                         <td className="p-2 font-mono text-right">{pos.quantity}</td>
-                                        <td className="p-2 font-mono text-right">${pos.averageCost.toFixed(2)}</td>
-                                        <td className="p-2 font-mono text-right">${pos.currentPrice.toFixed(2)}</td>
-                                        <td className="p-2 font-mono text-right">{pos.positionPercent.toFixed(2)}%</td>
-                                        <td className={`p-2 font-mono text-right ${pos.totalGain >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            ${pos.totalGain.toFixed(2)} ({pos.totalGainPercent >= 0 ? '+' : ''}{pos.totalGainPercent.toFixed(2)}%)
+                                        <td className="p-2 font-mono text-right">${(pos.averageCost ?? 0).toFixed(2)}</td>
+                                        <td className="p-2 font-mono text-right">${(pos.currentPrice ?? 0).toFixed(2)}</td>
+                                        <td className="p-2 font-mono text-right">{(pos.positionPercent ?? 0).toFixed(2)}%</td>
+                                        <td className={`p-2 font-mono text-right ${(pos.totalGain ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            ${(pos.totalGain ?? 0).toFixed(2)} ({(pos.totalGainPercent ?? 0) >= 0 ? '+' : ''}{(pos.totalGainPercent ?? 0).toFixed(2)}%)
                                         </td>
                                     </tr>
                                 )) : null}
@@ -148,7 +150,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                         <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
                                         <td className="p-2 font-mono">{trade.ticker}</td>
                                         <td className="p-2 font-mono text-right">{trade.quantity}</td>
-                                        <td className="p-2 font-mono text-right">${trade.price.toFixed(2)}</td>
+                                        <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
                                     </tr>
                                 )) : <tr><td colSpan={5} className="p-4 text-center text-arena-text-secondary">No trades executed yet.</td></tr>}
                             </tbody>
@@ -183,10 +185,10 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                 <td className="p-2 font-mono text-center">{trade.timestamp + 1}</td>
                                 <td className="p-2 font-mono">{trade.ticker}</td>
                                 <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
-                                <td className="p-2 font-mono text-right">${trade.price.toFixed(2)}</td>
-                                <td className="p-2 font-mono text-right">{trade.fairValue ? `$${trade.fairValue.toFixed(2)}` : '-'}</td>
-                                <td className="p-2 font-mono text-right">{trade.topOfBox ? `$${trade.topOfBox.toFixed(2)}` : '-'}</td>
-                                <td className="p-2 font-mono text-right">{trade.bottomOfBox ? `$${trade.bottomOfBox.toFixed(2)}` : '-'}</td>
+                                <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
+                                <td className="p-2 font-mono text-right">{trade.fairValue != null ? `$${(trade.fairValue ?? 0).toFixed(2)}` : '-'}</td>
+                                <td className="p-2 font-mono text-right">{trade.topOfBox != null ? `$${(trade.topOfBox ?? 0).toFixed(2)}` : '-'}</td>
+                                <td className="p-2 font-mono text-right">{trade.bottomOfBox != null ? `$${(trade.bottomOfBox ?? 0).toFixed(2)}` : '-'}</td>
                                 <td className="p-2 text-arena-text-secondary text-xs">{trade.justification || '-'}</td>
                               </tr>
                             ))}

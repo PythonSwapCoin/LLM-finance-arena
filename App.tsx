@@ -1,106 +1,58 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { Leaderboard } from './components/Leaderboard';
 import { AgentDetailView } from './components/AgentDetailView';
-import { useSimulation } from './hooks/useSimulation';
+import { useApiState } from './hooks/useApiState';
 import type { Agent } from './types';
 import { TickerBar } from './components/TickerBar';
 import { MainPerformanceChart } from './components/MainPerformanceChart';
 import { InfoPanel } from './components/InfoPanel';
-import { isHistoricalSimulationComplete, getSimulationMode } from './services/marketDataService';
-import { logger } from './services/logger';
+// Note: isHistoricalSimulationComplete and getSimulationMode should come from API state
+// For now, using a simple check - historical mode stops after day 4
+const isHistoricalSimulationComplete = (day: number): boolean => {
+  // Historical simulation has 5 days (0-4), so stop when trying to go to day 5
+  return day > 4;
+};
+
 
 export default function App() {
-  const { agents, benchmarks, simulationState, marketData, advanceDay, advanceIntraday, exportSimulationData } = useSimulation();
+  const { agents, benchmarks, simulationState, marketData, simulationMode } = useApiState();
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [isLive, setIsLive] = useState(false);
-  const [isStopped, setIsStopped] = useState(false);
-  const liveIntervalRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    // Auto-stop if historical simulation is complete
-    if (isHistoricalSimulationComplete(simulationState.day) && !isStopped) {
-      setIsLive(false);
-      setIsStopped(true);
-      setTimeout(() => {
-        exportSimulationData();
-      }, 500);
-    }
-  }, [simulationState.day, isStopped, exportSimulationData]);
-
-  useEffect(() => {
-    if (isLive && !simulationState.isLoading && !isStopped && !isHistoricalSimulationComplete(simulationState.day)) {
-      liveIntervalRef.current = window.setInterval(() => {
-        // Advance intraday first (every 30 minutes: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6)
-        // After 13 intraday updates (hour 6.5), advance to next day
-        // Check current hour to decide whether to advance intraday or day
-        if (simulationState.intradayHour < 6) {
-          advanceIntraday();
-        } else {
-          // At hour 6, we've completed the day, advance to next day
-          advanceDay();
-        }
-      }, 3000); // Advance every 3 seconds
-    } else if ((!isLive || isStopped || isHistoricalSimulationComplete(simulationState.day)) && liveIntervalRef.current) {
-        clearInterval(liveIntervalRef.current);
-        liveIntervalRef.current = null;
-    }
-    return () => {
-      if (liveIntervalRef.current) {
-        clearInterval(liveIntervalRef.current);
-      }
-    };
-  }, [isLive, advanceDay, advanceIntraday, simulationState.isLoading, isStopped, simulationState.day, simulationState.intradayHour]);
+  const isStopped = isHistoricalSimulationComplete(simulationState.day);
 
   const handleSelectAgent = (agent: Agent) => setSelectedAgent(agent);
   const handleCloseDetail = () => setSelectedAgent(null);
-  const toggleLiveMode = () => {
-    if (isStopped) return; // Can't resume if stopped
-    setIsLive(prev => !prev);
-  };
-  
-  const handleStop = () => {
-    setIsLive(false);
-    setIsStopped(true);
-    logger.logSimulationEvent('Simulation stopped by user', { day: simulationState.day });
-    // Wait a moment for any ongoing simulation to finish, then export
-    setTimeout(() => {
-      exportSimulationData();
-      // Also export logs when simulation stops
-      logger.exportLogs();
-    }, 500);
-  };
-
-  const handleExportLogs = () => {
-    logger.exportLogs();
-  };
 
   const allParticipants = [...agents, ...benchmarks];
-  const simulationMode = getSimulationMode();
 
   return (
     <div className="min-h-screen bg-arena-bg font-sans text-arena-text-primary antialiased">
-      <Header isLive={isLive} onToggleLive={toggleLiveMode} isStopped={isStopped} simulationMode={simulationMode} />
+      <Header isLive={false} onToggleLive={() => {}} isStopped={isStopped} simulationMode={simulationMode} />
       <TickerBar marketData={marketData} />
       
       <main className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-arena-surface rounded-lg shadow-lg p-4 h-[60vh] flex flex-col">
+          <div className="lg:col-span-2 bg-arena-surface rounded-lg shadow-lg p-4 h-[60vh] min-h-[400px] flex flex-col">
             <h2 className="text-lg font-semibold text-arena-text-primary mb-4 px-2">Total Account Value</h2>
-            <div className="flex-grow">
-              <MainPerformanceChart participants={allParticipants} />
+            <div className="flex-grow min-h-0">
+              <MainPerformanceChart 
+                participants={allParticipants}
+                startDate={simulationState.startDate}
+                currentDate={simulationState.currentDate}
+                simulationMode={simulationMode}
+                day={simulationState.day}
+                intradayHour={simulationState.intradayHour}
+              />
             </div>
           </div>
           <div className="lg:col-span-1">
             <InfoPanel 
               agents={agents}
-              onAdvanceDay={advanceDay}
-              onStop={handleStop}
-              onExportLogs={handleExportLogs}
               isLoading={simulationState.isLoading}
-              isLive={isLive}
               isStopped={isStopped}
               day={simulationState.day}
+              intradayHour={simulationState.intradayHour}
+              simulationMode={simulationMode}
             />
           </div>
         </div>

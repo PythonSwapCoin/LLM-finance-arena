@@ -1,6 +1,10 @@
 # Environment Variables Setup Guide
 
-## Quick Start
+## Architecture Change
+
+**Important**: With the backend architecture, API keys are now **server-side only** and should never be exposed to the browser.
+
+## Frontend Setup (`.env.local`)
 
 1. **Copy the example file:**
    ```bash
@@ -13,26 +17,39 @@
 
 2. **Edit `.env.local` and configure:**
 
-## Required Configuration
+### Required Configuration
+
+```env
+# Backend API URL
+VITE_API_BASE=http://localhost:8080/api
+```
+
+**Note**: API keys are no longer needed in the frontend. They are configured server-side only.
+
+## Backend Setup (`.env` in `/backend`)
+
+See `BACKEND_SETUP.md` for complete backend configuration.
+
+### Required Configuration
 
 ### LLM Provider (Required)
 ```env
-VITE_OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 Get your key from: https://openrouter.ai/keys
 
-## Market Data Mode Selection
+**Important**: This key is server-side only and never sent to the browser.
 
-**Choose ONE mode by uncommenting the appropriate line:**
+## Backend Market Data Mode Selection
+
+**Configure in backend `.env` file:**
 
 ### Mode 1: Simulated Data (Default)
 **Best for:** Testing and development
 **API Keys:** None needed
 
 ```env
-# Leave both variables commented/omitted
-# VITE_USE_REAL_DATA=false
-# VITE_USE_HISTORICAL_SIMULATION=false
+MODE=simulated
 ```
 
 ### Mode 2: Real-Time Market Data
@@ -40,10 +57,14 @@ Get your key from: https://openrouter.ai/keys
 **API Keys:** Optional (Yahoo Finance works without keys)
 
 ```env
-VITE_USE_REAL_DATA=true
+MODE=realtime
 # Optional API keys (Yahoo Finance is used by default, no key needed):
-# VITE_ALPHA_VANTAGE_API_KEY=your_key_here
-# VITE_POLYGON_API_KEY=your_key_here
+ALPHA_VANTAGE_API_KEY=your_key_here
+POLYGON_API_KEY=your_key_here
+
+# Optional: Use 30-minute delayed data to avoid rate limits (recommended)
+USE_DELAYED_DATA=true
+DATA_DELAY_MINUTES=30
 ```
 
 **Data Sources (in order):**
@@ -51,14 +72,21 @@ VITE_USE_REAL_DATA=true
 2. Alpha Vantage (if key provided, fallback)
 3. Polygon.io (if key provided, fallback)
 
+**Delayed Data Mode (Recommended):**
+- Set `USE_DELAYED_DATA=true` to use 30-minute delayed data
+- Uses historical endpoints which are less rate-limited
+- Data will be 30 minutes old (or whatever you set in `DATA_DELAY_MINUTES`)
+- Helps avoid Yahoo Finance rate limits
+- Set `DATA_DELAY_MINUTES=30` (or 15, 20, etc.) to customize the delay
+
 ### Mode 3: Historical Simulation
 **Best for:** Backtesting with real historical data
 **API Keys:** None needed
 
 ```env
-VITE_USE_HISTORICAL_SIMULATION=true
+MODE=historical
 # Optional: Set custom start date (must be a Monday, defaults to first week of 2025)
-# VITE_HISTORICAL_SIMULATION_START_DATE=2025-01-06
+HISTORICAL_SIMULATION_START_DATE=2025-01-06
 ```
 
 **What it does:**
@@ -69,36 +97,59 @@ VITE_USE_HISTORICAL_SIMULATION=true
 - Automatically stops after 5 days (completes the full week)
 
 **Custom Date:**
-- Set `VITE_HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different week
+- Set `HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different week
 - The date will be adjusted to the nearest Monday
-- Example: `VITE_HISTORICAL_SIMULATION_START_DATE=2024-06-03` (will use June 3-7, 2024)
+- Example: `HISTORICAL_SIMULATION_START_DATE=2024-06-03` (will use June 3-7, 2024)
 
 ## Important Notes
 
-- **Only enable ONE mode at a time**
-- If both `VITE_USE_REAL_DATA` and `VITE_USE_HISTORICAL_SIMULATION` are enabled, historical mode takes precedence
-- The console will show which mode is active when you start the app
-- **After changing `.env.local`, you MUST restart the dev server** (Vite reads env variables at startup)
-- Check the browser console for environment variable detection logs to verify your settings
+- **API keys are server-side only** - Never put API keys in frontend `.env.local`
+- **Only enable ONE mode at a time** in backend `.env`
+- The backend console will show which mode is active when you start the server
+- **After changing backend `.env`, you MUST restart the backend server**
+- **After changing frontend `.env.local`, you MUST restart the frontend dev server**
 
-## Example `.env.local` Files
+## Example Configuration Files
 
-### Simulated Mode (Default)
+### Frontend `.env.local`
 ```env
-VITE_OPENROUTER_API_KEY=sk-or-v1-xxxxx
-# No other variables needed
+VITE_API_BASE=http://localhost:8080/api
 ```
 
-### Real-Time Mode
+### Backend `.env` (Simulated Mode)
 ```env
-VITE_OPENROUTER_API_KEY=sk-or-v1-xxxxx
-VITE_USE_REAL_DATA=true
-VITE_ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+BACKEND_PORT=8080
+ALLOWED_ORIGINS=http://localhost:3000
+MODE=simulated
+OPENROUTER_API_KEY=sk-or-v1-xxxxx
 ```
 
-### Historical Simulation Mode
+### Backend `.env` (Real-Time Mode - with delayed data)
 ```env
-VITE_OPENROUTER_API_KEY=sk-or-v1-xxxxx
-VITE_USE_HISTORICAL_SIMULATION=true
+BACKEND_PORT=8080
+ALLOWED_ORIGINS=http://localhost:3000
+MODE=realtime
+OPENROUTER_API_KEY=sk-or-v1-xxxxx
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+
+# Use 30-minute delayed data to avoid rate limits (recommended)
+USE_DELAYED_DATA=true
+DATA_DELAY_MINUTES=30
 ```
+
+### Backend `.env` (Historical Mode)
+```env
+BACKEND_PORT=8080
+ALLOWED_ORIGINS=http://localhost:3000
+MODE=historical
+OPENROUTER_API_KEY=sk-or-v1-xxxxx
+HISTORICAL_SIMULATION_START_DATE=2025-01-06
+```
+
+## Security Notes
+
+- ✅ API keys in backend `.env` - **Secure** (never sent to browser)
+- ❌ API keys in frontend `.env.local` - **Insecure** (exposed in client bundle)
+- Always use environment variables for sensitive data
+- Never commit `.env` or `.env.local` files to version control
 

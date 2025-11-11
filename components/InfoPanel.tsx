@@ -1,23 +1,17 @@
 import React from 'react';
 import type { Agent } from '../types';
-import { ArrowPathIcon, PlayIcon, StopIcon } from './icons/Icons';
-import { getSimulationMode, isHistoricalSimulationComplete } from '../services/marketDataService';
 
 interface InfoPanelProps {
   agents: Agent[];
-  onAdvanceDay: () => void;
-  onStop: () => void;
-  onExportLogs?: () => void;
   isLoading: boolean;
-  isLive: boolean;
   isStopped: boolean;
   day: number;
   intradayHour?: number;
+  simulationMode?: 'simulated' | 'realtime' | 'historical';
 }
 
-export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, onStop, onExportLogs, isLoading, isLive, isStopped, day, intradayHour = 0 }) => {
-  const simulationMode = getSimulationMode();
-  const isHistoricalComplete = isHistoricalSimulationComplete(day);
+export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopped, day, intradayHour = 0, simulationMode = 'simulated' }) => {
+  const isHistoricalComplete = day > 4; // Historical simulation has 5 days (0-4), complete when day > 4
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
 
   const highestPerformer = agentsWithPerf.length > 0
@@ -41,7 +35,7 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, onSt
         <div className="flex justify-between items-center border-b border-arena-border pb-4">
             <div>
                 <span className="text-arena-text-secondary">Trading Day</span>
-                <p className="text-3xl font-bold text-arena-text-primary">{day + 1}</p>
+                <p className="text-3xl font-bold text-arena-text-primary">{day}</p>
                 {intradayHour > 0 && (
                   <span className="text-xs text-arena-text-secondary block mt-1">
                     Intraday: {Math.floor(intradayHour)}:{(intradayHour % 1 * 60).toFixed(0).padStart(2, '0')}
@@ -53,45 +47,9 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, onSt
                 {isHistoricalComplete && simulationMode === 'historical' && (
                   <span className="text-xs text-blue-400 block mt-1 font-semibold">✓ Historical Week Complete (5 days)</span>
                 )}
-                {simulationMode === 'historical' && !isHistoricalComplete && (
-                  <span className="text-xs text-blue-400 block mt-1">Historical Mode: {day + 1}/5 days</span>
-                )}
-            </div>
-            <div className="flex gap-2">
-              {!isStopped && (
-                <button
-                  onClick={onAdvanceDay}
-                  disabled={isLoading || isLive}
-                  className="flex items-center justify-center bg-arena-surface hover:bg-arena-border disabled:opacity-50 disabled:cursor-not-allowed border border-arena-border text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                >
-                  {isLoading ? (
-                    <ArrowPathIcon className="animate-spin h-5 w-5 mr-2" />
-                  ) : (
-                    <PlayIcon className="h-5 w-5 mr-2" />
+                  {simulationMode === 'historical' && !isHistoricalComplete && (
+                    <span className="text-xs text-blue-400 block mt-1">Historical Mode: Day {day}/4</span>
                   )}
-                  {isLoading ? 'Simulating...' : 'Next Day'}
-                </button>
-              )}
-              {day > 0 && !isStopped && (
-                <button
-                  onClick={onStop}
-                  disabled={isLoading}
-                  className="flex items-center justify-center bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed border border-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                  title="Stop simulation and export results"
-                >
-                  <StopIcon className="h-5 w-5 mr-2" />
-                  Stop & Export
-                </button>
-              )}
-              {onExportLogs && (
-                <button
-                  onClick={onExportLogs}
-                  className="flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed border border-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 text-xs"
-                  title="Export system logs"
-                >
-                  📋 Logs
-                </button>
-              )}
             </div>
         </div>
 
