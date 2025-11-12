@@ -67,7 +67,14 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                 <div className="md:col-span-2 bg-arena-bg p-4 rounded-lg">
                     <h3 className="text-lg font-semibold mb-2">Equity Curve</h3>
                     <div className="h-64">
-                      <PerformanceChart data={agent.performanceHistory} dataKey="totalValue" color={agent.color}/>
+                      <PerformanceChart
+                        data={agent.performanceHistory}
+                        dataKey="totalValue"
+                        color={agent.color}
+                        startDate={startDate}
+                        currentDate={currentDate}
+                        simulationMode={simulationMode}
+                      />
                     </div>
                 </div>
 

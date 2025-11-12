@@ -1,6 +1,19 @@
 import type { Portfolio, MarketData, PerformanceMetrics, Trade } from '../types.js';
 import { INITIAL_CASH, RISK_FREE_RATE, TRADING_DAYS_PER_YEAR } from '../constants.js';
 
+const getDayIdentifier = (timestamp: number): string => {
+  if (!Number.isFinite(timestamp)) {
+    return 'unknown';
+  }
+
+  if (timestamp > 1_000_000_000) {
+    const date = new Date(timestamp * 1000);
+    return `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`;
+  }
+
+  return Math.floor(timestamp).toString();
+};
+
 export const calculatePortfolioValue = (portfolio: Portfolio, marketData: MarketData): number => {
   const positionsValue = Object.values(portfolio.positions).reduce((acc, position) => {
     const currentPrice = marketData[position.ticker]?.price || 0;
@@ -20,7 +33,11 @@ export const calculateAllMetrics = (
   const totalReturn = (totalValue / INITIAL_CASH) - 1;
   
   const prevValue = history.length > 0 ? history[history.length - 1].totalValue : INITIAL_CASH;
-  const dailyReturn = history.length > 0 ? (totalValue / prevValue) - 1 : 0;
+  const currentDayId = getDayIdentifier(day);
+  const hasPreviousDay = history.some(entry => getDayIdentifier(entry.timestamp) !== currentDayId);
+  const dailyReturn = hasPreviousDay && prevValue !== 0
+    ? (totalValue / prevValue) - 1
+    : totalReturn;
 
   const dailyReturns = [...history.map(h => h.dailyReturn), dailyReturn];
 
