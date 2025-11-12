@@ -36,6 +36,13 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
     }
   }, [agents, selectedAgentId]);
 
+  const sortedMessages = useMemo(() => {
+    if (!chat) {
+      return [];
+    }
+    return [...chat.messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }, [chat]);
+
   if (!chat) {
     return (
       <div className={`bg-arena-surface rounded-lg shadow-lg p-3 sm:p-4 ${className ?? ''}`}>
@@ -46,9 +53,6 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
   }
 
   const maxLength = chat.config.maxMessageLength;
-  const sortedMessages = useMemo(() => {
-    return [...chat.messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  }, [chat.messages]);
 
   const normalizedName = username.trim().toLowerCase();
   const userMessagesThisRound = chat.messages.filter(messageItem =>
