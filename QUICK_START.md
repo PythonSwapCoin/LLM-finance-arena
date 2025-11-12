@@ -31,30 +31,22 @@ npm install
 ### Step 3: Choose Your Mode
 
 #### Mode 1: Simulated Data (Default - Fast Testing)
-- No additional configuration needed
+- No additional configuration needed beyond your OpenRouter key
 - Uses randomly generated market data
 - Perfect for testing the UI and functionality
 - Runs fast (3 seconds per update)
 
 #### Mode 2: Real-Time Market Data
-Add to `.env.local`:
-```env
-VITE_USE_REAL_DATA=true
-```
-- Fetches real market data from Yahoo Finance (no API key needed)
-- Falls back to Alpha Vantage or Polygon.io if you have keys
-- Updates every 30 minutes (when running in real-time mode)
-- LLMs trade every 2 hours (at market open, 10 AM, 12 PM, 2 PM ET)
+- Edit `backend/.env` and set `MODE=realtime`
+- Optional: set `USE_DELAYED_DATA=true` to lean on delayed quotes for fewer rate limits
+- Yahoo Finance provides quotes, with Alpha Vantage/Polygon as fallbacks if you supply keys
+- Default intervals: price ticks every 2 minutes, trades every 6 minutes (configurable via `REALTIME_SIM_INTERVAL_MS` and `REALTIME_TRADE_INTERVAL_MS`)
 
 #### Mode 3: Historical Simulation
-Add to `.env.local`:
-```env
-VITE_USE_HISTORICAL_SIMULATION=true
-```
-- Uses real historical data for a specific week
-- Default: First week of 2025 (Jan 6-10)
-- Automatically stops after 5 days
-- Perfect for backtesting
+- Edit `backend/.env`, set `MODE=historical`, and provide `HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD`
+- Replays the specified trading week end-to-end
+- Automatically stops after five market days
+- Perfect for backtesting and regression testing
 
 ### Step 4: Run the Application
 ```bash
