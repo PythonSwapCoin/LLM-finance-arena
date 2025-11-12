@@ -1,9 +1,18 @@
-import type { SimulationSnapshot, Agent, Benchmark, MarketData, PerformanceMetrics } from '../types.js';
+import type {
+  SimulationSnapshot,
+  Agent,
+  Benchmark,
+  MarketData,
+  PerformanceMetrics,
+  MarketDataTelemetry,
+} from '../types.js';
 
 // Response DTOs matching the old hook output shape
 export interface SimulationStateResponse {
   snapshot: SimulationSnapshot;
   isLoading: boolean;
+  isHistoricalSimulationComplete: boolean;
+  marketTelemetry: MarketDataTelemetry;
 }
 
 export interface AgentsResponse {

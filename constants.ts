@@ -1,9 +1,23 @@
 import type { Agent, Portfolio } from './types';
 
-export const S_P500_TICKERS: string[] = [
+const DEFAULT_TICKERS: string[] = [
   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK-B', 'JPM', 'JNJ',
   'V', 'UNH', 'PG', 'MA', 'HD', 'BAC', 'DIS', 'PFE', 'XOM', 'CVX'
 ];
+
+const parseTickers = (rawList: string | undefined | null): string[] => {
+  if (!rawList) {
+    return [];
+  }
+  return rawList
+    .split(',')
+    .map(ticker => ticker.trim().toUpperCase())
+    .filter(Boolean);
+};
+
+const configuredTickers = parseTickers(import.meta.env.VITE_ARENA_TICKERS || import.meta.env.VITE_S_P500_TICKERS);
+
+export const S_P500_TICKERS: string[] = configuredTickers.length > 0 ? configuredTickers : DEFAULT_TICKERS;
 
 export const INITIAL_CASH = 10000;
 export const RISK_FREE_RATE = 0.02; // Annual risk-free rate for Sharpe ratio

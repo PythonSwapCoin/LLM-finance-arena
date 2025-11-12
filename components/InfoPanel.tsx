@@ -8,10 +8,11 @@ interface InfoPanelProps {
   day: number;
   intradayHour?: number;
   simulationMode?: 'simulated' | 'realtime' | 'historical';
+  isHistoricalComplete?: boolean;
 }
 
-export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopped, day, intradayHour = 0, simulationMode = 'simulated' }) => {
-  const isHistoricalComplete = day > 4; // Historical simulation has 5 days (0-4), complete when day > 4
+export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopped, day, intradayHour = 0, simulationMode = 'simulated', isHistoricalComplete }) => {
+  const historicalComplete = simulationMode === 'historical' ? Boolean(isHistoricalComplete) : false;
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
 
   const highestPerformer = agentsWithPerf.length > 0
@@ -44,10 +45,10 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopp
                 {isStopped && (
                   <span className="text-xs text-arena-text-tertiary block mt-1">Simulation Stopped</span>
                 )}
-                {isHistoricalComplete && simulationMode === 'historical' && (
+                {historicalComplete && simulationMode === 'historical' && (
                   <span className="text-xs text-blue-400 block mt-1 font-semibold">✓ Historical Week Complete (5 days)</span>
                 )}
-                  {simulationMode === 'historical' && !isHistoricalComplete && (
+                  {simulationMode === 'historical' && !historicalComplete && (
                     <span className="text-xs text-blue-400 block mt-1">Historical Mode: Day {day}/4</span>
                   )}
             </div>

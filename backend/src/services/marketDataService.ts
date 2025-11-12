@@ -1,4 +1,4 @@
-import type { MarketData, TickerData } from '../types.js';
+import type { MarketData, TickerData, MarketDataTelemetry } from '../types.js';
 import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 import { S_P500_TICKERS } from '../constants.js';
@@ -9,6 +9,7 @@ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const HISTORICAL_SIMULATION_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE;
 const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true'; // Use 15-30 min delayed data to avoid rate limits
 const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '15', 10); // Default 15 minutes delay
+const ENABLE_YAHOO_DETAILED_INFO = process.env.ENABLE_YAHOO_DETAILED_INFO === 'true';
 
 // Historical data cache
 let historicalDataCache: { [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] } = {};
@@ -38,7 +39,80 @@ const getYahooRateLimitSettings = () => {
     // Real-time endpoints - test showed no delays work, but be conservative: 2 requests per second
     return { window: 1000, max: 2 };
   }
+
+  return null;
 };
+
+type MarketDataSource = 'yahoo' | 'alphaVantage' | 'polygon';
+
+interface MarketDataSourceStats {
+  success: number;
+  failure: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError?: string;
+}
+
+interface YahooRateLimitTelemetry {
+  windowMs: number;
+  maxRequestsPerWindow: number;
+  currentCount: number;
+  resetAt: number | null;
+  blockedRequests: number;
+  lastThrottledAt: string | null;
+  isThrottled: boolean;
+}
+
+const createSourceStats = (): MarketDataSourceStats => ({
+  success: 0,
+  failure: 0,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+});
+
+const initialYahooSettings = getYahooRateLimitSettings();
+
+const marketDataTelemetry: {
+  sources: Record<MarketDataSource, MarketDataSourceStats>;
+  rateLimits: { yahoo: YahooRateLimitTelemetry };
+} = {
+  sources: {
+    yahoo: createSourceStats(),
+    alphaVantage: createSourceStats(),
+    polygon: createSourceStats(),
+  },
+  rateLimits: {
+    yahoo: {
+      windowMs: initialYahooSettings.window,
+      maxRequestsPerWindow: initialYahooSettings.max,
+      currentCount: 0,
+      resetAt: null,
+      blockedRequests: 0,
+      lastThrottledAt: null,
+      isThrottled: false,
+    },
+  },
+};
+
+const recordMarketDataResult = (
+  source: MarketDataSource,
+  success: boolean,
+  error?: string
+) => {
+  const stats = marketDataTelemetry.sources[source];
+  const now = new Date().toISOString();
+
+  if (success) {
+    stats.success += 1;
+    stats.lastSuccessAt = now;
+  } else {
+    stats.failure += 1;
+    stats.lastFailureAt = now;
+    stats.lastError = error;
+  }
+};
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function checkRateLimit(key: string): boolean {
   const now = Date.now();
@@ -57,27 +131,52 @@ function checkRateLimit(key: string): boolean {
   return true;
 }
 
-function checkYahooGlobalRateLimit(): boolean {
-  const now = Date.now();
+const ensureYahooGlobalRateLimit = async (): Promise<void> => {
+  if (USE_DELAYED_DATA) {
+    return;
+  }
+
   const settings = getYahooRateLimitSettings();
-  
-  if (!yahooGlobalRateLimit || now > yahooGlobalRateLimit.resetAt) {
-    // Reset window
-    yahooGlobalRateLimit = { count: 1, resetAt: now + settings.window };
-    return true;
+  const telemetry = marketDataTelemetry.rateLimits.yahoo;
+
+  while (true) {
+    const now = Date.now();
+
+    if (!yahooGlobalRateLimit || now >= yahooGlobalRateLimit.resetAt) {
+      yahooGlobalRateLimit = { count: 0, resetAt: now + settings.window };
+      telemetry.windowMs = settings.window;
+      telemetry.maxRequestsPerWindow = settings.max;
+      telemetry.currentCount = 0;
+      telemetry.resetAt = yahooGlobalRateLimit.resetAt;
+      telemetry.isThrottled = false;
+    }
+
+    if (yahooGlobalRateLimit.count < settings.max) {
+      yahooGlobalRateLimit.count += 1;
+      telemetry.currentCount = yahooGlobalRateLimit.count;
+      telemetry.resetAt = yahooGlobalRateLimit.resetAt;
+      return;
+    }
+
+    const waitTime = Math.max(yahooGlobalRateLimit.resetAt - now, 0);
+    telemetry.blockedRequests += 1;
+    telemetry.lastThrottledAt = new Date().toISOString();
+    telemetry.isThrottled = true;
+
+    logger.log(
+      LogLevel.WARNING,
+      LogCategory.MARKET_DATA,
+      `Yahoo Finance rate limit reached, waiting ${waitTime}ms before retrying`,
+      { waitTime, count: yahooGlobalRateLimit.count, limit: settings.max }
+    );
+
+    if (waitTime > 0) {
+      await sleep(waitTime);
+    } else {
+      await sleep(settings.window);
+    }
   }
-  
-  if (yahooGlobalRateLimit.count >= settings.max) {
-    // Log rate limit hit with details
-    const timeUntilReset = yahooGlobalRateLimit.resetAt - now;
-    logger.log(LogLevel.DEBUG, LogCategory.MARKET_DATA, 
-      `Yahoo Finance rate limit check: ${yahooGlobalRateLimit.count}/${settings.max} requests, ${timeUntilReset}ms until reset`, {});
-    return false;
-  }
-  
-  yahooGlobalRateLimit.count++;
-  return true;
-}
+};
 
 // Cache for market data (to avoid refetching fresh data)
 const marketDataCache = new Map<string, { data: TickerData; timestamp: number }>();
@@ -221,6 +320,7 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
       
       setCachedMarketData(ticker, tickerData);
       logger.logMarketData(`Yahoo Finance (Delayed ${delayMinutes}m)`, ticker, true, tickerData.price);
+      recordMarketDataResult('yahoo', true);
       return tickerData;
     }
     
@@ -247,6 +347,7 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
       
       setCachedMarketData(ticker, tickerData);
       logger.logMarketData(`Yahoo Finance (Delayed ${delayMinutes}m - Daily)`, ticker, true, tickerData.price);
+      recordMarketDataResult('yahoo', true);
       return tickerData;
     }
     
@@ -257,9 +358,13 @@ const fetchDelayedYahooFinanceData = async (ticker: string, delayMinutes: number
     return null;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
-    logger.logMarketData('Yahoo Finance (Delayed)', ticker, false, undefined, errorMessage);
-    return null;
+    logger.logMarketData(`Yahoo Finance (Delayed ${delayMinutes}m)`, ticker, false, undefined, errorMessage);
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+      `Error fetching delayed data for ${ticker}: ${errorMessage}`, { ticker });
+    recordMarketDataResult('yahoo', false, errorMessage);
   }
+
+  return null;
 };
 
 const fetchYahooFinanceData = async (ticker: string, useCache: boolean = true): Promise<TickerData | null> => {
@@ -277,35 +382,17 @@ const fetchYahooFinanceData = async (ticker: string, useCache: boolean = true): 
     }
   }
   
-  // For delayed data, skip proactive rate limiting (historical endpoints are very lenient)
-  // For real-time, do a lightweight check but don't block aggressively
-  if (!USE_DELAYED_DATA) {
-    // Lightweight rate limit check - only block if we've clearly hit a limit
-    // Test showed no delays work fine, so we're being very permissive
-    const settings = getYahooRateLimitSettings();
-    if (yahooGlobalRateLimit && yahooGlobalRateLimit.count >= settings.max) {
-      const now = Date.now();
-      if (yahooGlobalRateLimit.resetAt > now) {
-        // Only wait if we're clearly over the limit
-        const waitTime = Math.min(yahooGlobalRateLimit.resetAt - now, 1000); // Max 1 second wait
-        if (waitTime > 100) {
-          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
-            `Rate limit check: waiting ${waitTime}ms`, { ticker, waitTime });
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-      }
-    }
-  }
+  await ensureYahooGlobalRateLimit();
 
   const startTime = Date.now();
   try {
     const yfTicker = new Ticker(ticker);
-    
+
     // For real-time mode: only use fastInfo() to reduce API calls
     const fastInfo = await yfTicker.fastInfo().catch(() => null);
-    
+
     const responseTime = Date.now() - startTime;
-    
+
     if (!fastInfo) {
       throw new Error('Failed to fetch price data');
     }
@@ -322,19 +409,21 @@ const fetchYahooFinanceData = async (ticker: string, useCache: boolean = true): 
       logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
         `Invalid market data for ${ticker}, using fallback`, { ticker, price: tickerData.price });
     }
-    
+
     // Cache the data
     setCachedMarketData(ticker, tickerData);
-    
+
     logger.logMarketData('Yahoo Finance', ticker, true, tickerData.price);
     logger.logApiCall('Yahoo Finance', `fastInfo/${ticker}`, true, 200, undefined, responseTime);
-    
+    recordMarketDataResult('yahoo', true);
+
     return tickerData;
   } catch (error) {
     const responseTime = Date.now() - startTime;
     const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
     logger.logMarketData('Yahoo Finance', ticker, false, undefined, errorMessage);
     logger.logApiCall('Yahoo Finance', `fastInfo/${ticker}`, false, undefined, errorMessage, responseTime);
+    recordMarketDataResult('yahoo', false, errorMessage);
     return null;
   }
 };
@@ -385,14 +474,23 @@ const fetchRealMarketDataWithCascade = async (tickers: string[], useCache: boole
               sourceUsed = 'Alpha Vantage';
               logger.logMarketData('Alpha Vantage', ticker, true, price);
               logger.logApiCall('Alpha Vantage', 'GLOBAL_QUOTE', true, response.status, undefined, responseTime);
+              recordMarketDataResult('alphaVantage', true);
             }
+          }
+          if (!tickerData) {
+            const failureMessage = response.ok
+              ? 'Alpha Vantage response missing data'
+              : `Alpha Vantage HTTP ${response.status}`;
+            recordMarketDataResult('alphaVantage', false, failureMessage);
           }
         } catch (error) {
           console.warn(`Alpha Vantage failed for ${ticker}`);
+          const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+          recordMarketDataResult('alphaVantage', false, errorMessage);
         }
       }
     }
-    
+
     // Try Polygon
     if (!tickerData && POLYGON_API_KEY) {
       if (!checkRateLimit('polygon')) {
@@ -424,10 +522,19 @@ const fetchRealMarketDataWithCascade = async (tickers: string[], useCache: boole
               sourceUsed = 'Polygon.io';
               logger.logMarketData('Polygon.io', ticker, true, currentPrice);
               logger.logApiCall('Polygon.io', 'prev', true, response.status, undefined, responseTime);
+              recordMarketDataResult('polygon', true);
             }
+          }
+          if (!tickerData) {
+            const failureMessage = response.ok
+              ? 'Polygon response missing data'
+              : `Polygon HTTP ${response.status}`;
+            recordMarketDataResult('polygon', false, failureMessage);
           }
         } catch (error) {
           console.warn(`Polygon failed for ${ticker}`);
+          const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+          recordMarketDataResult('polygon', false, errorMessage);
         }
       }
     }
@@ -566,10 +673,11 @@ const createSimulatedMarketData = (tickers: string[]): MarketData => {
 
 // Optional: Fetch detailed info for a ticker (for initial setup, not for regular updates)
 const fetchYahooFinanceDetailedInfo = async (ticker: string, baseData: TickerData): Promise<TickerData> => {
-  // Only fetch detailed info if we haven't hit rate limits and it's worth it
-  if (!checkYahooGlobalRateLimit() || !checkRateLimit('yahoo')) {
+  if (!checkRateLimit('yahoo')) {
     return baseData; // Return base data if rate limited
   }
+
+  await ensureYahooGlobalRateLimit();
   
   try {
     const yfTicker = new Ticker(ticker);
@@ -605,13 +713,15 @@ const fetchYahooFinanceDetailedInfo = async (ticker: string, baseData: TickerDat
       
       // Update cache with enriched data
       setCachedMarketData(ticker, baseData);
+      recordMarketDataResult('yahoo', true);
     }
   } catch (error) {
     // Silently fail - we have base data already
-    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
       `Failed to fetch detailed info for ${ticker}`, { error });
+    recordMarketDataResult('yahoo', false, error instanceof Error ? error.message : String(error));
   }
-  
+
   return baseData;
 };
 
@@ -659,10 +769,20 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
     // For initial load, disable cache to ensure fresh data
     // If using delayed data, fetchYahooFinanceData will automatically use delayed endpoints
     const marketData = await fetchRealMarketDataWithCascade(tickers, false);
-    
-    // Note: We skip detailed info fetching to avoid rate limits
-    // The fastInfo() data is sufficient for trading decisions
-    
+
+    if (ENABLE_YAHOO_DETAILED_INFO && !USE_DELAYED_DATA) {
+      logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+        'Enriching initial market data with Yahoo Finance detailed metrics',
+        { tickers: tickers.length });
+
+      for (const ticker of Object.keys(marketData)) {
+        const baseData = marketData[ticker];
+        if (baseData) {
+          marketData[ticker] = await fetchYahooFinanceDetailedInfo(ticker, { ...baseData });
+        }
+      }
+    }
+
     return marketData;
   }
   console.log('📊 ✅ Simulated Market Data Mode (Default)');
@@ -766,7 +886,7 @@ export const generateNextIntradayMarketData = async (previousMarketData: MarketD
 
 export const generateNextDayMarketData = async (previousMarketData: MarketData): Promise<MarketData> => {
   currentIntradayHour = 0;
-  
+
   if (MODE === 'historical') {
     currentHistoricalDay++;
     const tickers = Object.keys(previousMarketData);
@@ -828,6 +948,28 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     };
   });
   return newMarketData;
+};
+
+export const getMarketDataTelemetry = (): MarketDataTelemetry => {
+  const { sources, rateLimits } = marketDataTelemetry;
+  return {
+    sources: {
+      yahoo: { ...sources.yahoo },
+      alphaVantage: { ...sources.alphaVantage },
+      polygon: { ...sources.polygon },
+    },
+    rateLimits: {
+      yahoo: {
+        windowMs: rateLimits.yahoo.windowMs,
+        maxRequestsPerWindow: rateLimits.yahoo.maxRequestsPerWindow,
+        currentCount: rateLimits.yahoo.currentCount,
+        resetAt: rateLimits.yahoo.resetAt ? new Date(rateLimits.yahoo.resetAt).toISOString() : null,
+        blockedRequests: rateLimits.yahoo.blockedRequests,
+        lastThrottledAt: rateLimits.yahoo.lastThrottledAt,
+        isThrottled: rateLimits.yahoo.isThrottled,
+      },
+    },
+  };
 };
 
 export const advanceIntradayHour = (): { hour: number; shouldAdvanceDay: boolean } => {

@@ -1,3 +1,5 @@
+import type { MarketDataTelemetry } from '../types';
+
 // API client for backend communication
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
 
@@ -16,6 +18,8 @@ export interface SimulationStateResponse {
     lastUpdated: string;
   };
   isLoading: boolean;
+  isHistoricalSimulationComplete: boolean;
+  marketTelemetry: MarketDataTelemetry;
 }
 
 export interface AgentsResponse {
@@ -97,6 +101,11 @@ class ApiClient {
       agentsCount: number;
       tickersCount: number;
       lastUpdated: string;
+    };
+    marketData?: {
+      tickersCount: number;
+      sources: MarketDataTelemetry['sources'];
+      rateLimits: MarketDataTelemetry['rateLimits'];
     };
   }> {
     return this.request('/status');
