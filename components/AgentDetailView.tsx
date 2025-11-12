@@ -16,10 +16,34 @@ const StatCard: React.FC<{ label: string; value: string; className?: string }> =
 );
 
 
+const formatTradeTimestamp = (day: number) => `Day ${day}`;
+
 export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose }) => {
-    const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
+    const latestPerf = agent.performanceHistory.at(-1);
     const positions = Object.values(agent.portfolio.positions).filter((p: Position) => p.quantity > 0);
-    
+
+    if (!latestPerf) {
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4" onClick={onClose}>
+          <div className="bg-arena-surface rounded-lg shadow-2xl w-full max-w-xl border border-arena-border p-6 text-center" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 rounded-full" style={{backgroundColor: agent.color}}></div>
+                <div className="text-left">
+                  <h2 className="text-xl font-bold text-arena-text-primary">{agent.name}</h2>
+                  <p className="text-sm text-arena-text-secondary">{agent.model}</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="text-arena-text-secondary hover:text-arena-text-primary">
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+            <p className="text-arena-text-secondary">No performance data is available yet. Run the simulation to generate results.</p>
+          </div>
+        </div>
+      );
+    }
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4" onClick={onClose}>
         <div className="bg-arena-surface rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-arena-border" onClick={e => e.stopPropagation()}>
@@ -100,9 +124,9 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                 </tr>
                             </thead>
                              <tbody className="divide-y divide-arena-border">
-                                {agent.tradeHistory.length > 0 ? [...agent.tradeHistory].reverse().slice(0, 20).map(trade => (
-                                    <tr key={`${trade.timestamp}-${trade.ticker}-${trade.action}-${Math.random()}`}>
-                                        <td className="p-2 font-mono text-center">{trade.timestamp}</td>
+                                {agent.tradeHistory.length > 0 ? [...agent.tradeHistory].reverse().slice(0, 20).map((trade, index) => (
+                                    <tr key={`${trade.timestamp}-${trade.ticker}-${trade.action}-${index}`}>
+                                        <td className="p-2 font-mono text-center">{formatTradeTimestamp(trade.timestamp)}</td>
                                         <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
                                         <td className="p-2 font-mono">{trade.ticker}</td>
                                         <td className="p-2 font-mono text-right">{trade.quantity}</td>

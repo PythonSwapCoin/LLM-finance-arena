@@ -2,11 +2,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { Agent, MarketData, Trade, TradeAction } from '../types';
 import { MAX_POSITION_SIZE_PERCENT } from '../constants';
 
-const API_KEY = process.env.API_KEY;
-if (!API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const API_KEY = import.meta.env.VITE_API_KEY as string | undefined;
+const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
 const PROMPT_TEMPLATES = {
     'gemini-pro-balanced': `You are a virtual portfolio manager operating within a simulated equity-trading environment.
@@ -46,8 +43,16 @@ export const getTradeDecisions = async (
   marketData: MarketData,
   day: number
 ): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[], rationale: string }> => {
+  if (!ai) {
+    console.warn("Gemini API key is not configured; skipping trade generation for", agent.id);
+    return {
+      trades: [],
+      rationale: 'No trades executed because the Gemini API key is not configured.',
+    };
+  }
+
   const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => acc + pos.quantity * (marketData[pos.ticker]?.price || 0), agent.portfolio.cash);
-  
+
   const systemInstruction = getAgentPrompt(agent);
 
   const prompt = `
@@ -71,7 +76,7 @@ export const getTradeDecisions = async (
     `;
     
   try {
-    const response = await ai.models.generateContent({
+    const generation = await ai.models.generateContent({
       model: agent.model,
       contents: prompt,
       config: {
@@ -102,9 +107,21 @@ export const getTradeDecisions = async (
       }
     });
 
-    const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText);
-    
+    const jsonText =
+      typeof generation?.response?.text === 'function'
+        ? generation.response.text()
+        : typeof generation?.text === 'function'
+          ? generation.text()
+          : typeof (generation as any)?.text === 'string'
+            ? (generation as any).text
+            : '';
+
+    if (!jsonText) {
+      throw new Error('Empty response from Gemini model');
+    }
+
+    const result = JSON.parse(jsonText.trim());
+
     // Validate trades
     const validTrades = (result.trades as any[])
       .filter(t => t.action !== 'hold' && t.quantity > 0 && marketData[t.ticker])
