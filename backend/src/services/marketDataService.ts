@@ -3,7 +3,32 @@ import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 import { S_P500_TICKERS } from '../constants.js';
 
-const MODE = (process.env.MODE || 'simulated') as 'simulated' | 'realtime' | 'historical';
+const resolveMode = (): 'simulated' | 'realtime' | 'historical' => {
+  const raw = (process.env.MODE || 'simulated').toLowerCase();
+
+  if (raw === 'simulation' || raw === 'simulated') {
+    return 'simulated';
+  }
+
+  if (raw === 'real-time' || raw === 'real_time' || raw === 'realtime') {
+    return 'realtime';
+  }
+
+  if (raw === 'historical') {
+    return 'historical';
+  }
+
+  logger.log(
+    LogLevel.WARNING,
+    LogCategory.SYSTEM,
+    `Unrecognized MODE "${raw}" – defaulting to simulated`,
+    { rawMode: raw }
+  );
+
+  return 'simulated';
+};
+
+const MODE = resolveMode();
 const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY;
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const HISTORICAL_SIMULATION_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE;
@@ -211,6 +236,12 @@ function setCachedMarketData(ticker: string, data: TickerData): void {
   marketDataCache.set(ticker, { data, timestamp: Date.now() });
 }
 
+const setToMarketOpen = (date: Date): Date => {
+  const marketOpen = new Date(date);
+  marketOpen.setHours(9, 30, 0, 0);
+  return marketOpen;
+};
+
 export const getHistoricalSimulationStartDate = (): Date => {
   if (HISTORICAL_SIMULATION_START_DATE) {
     const date = new Date(HISTORICAL_SIMULATION_START_DATE);
@@ -218,13 +249,11 @@ export const getHistoricalSimulationStartDate = (): Date => {
       const dayOfWeek = date.getDay();
       const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 1 ? 0 : 8 - dayOfWeek);
       date.setDate(date.getDate() + daysToMonday);
-      date.setHours(0, 0, 0, 0);
-      return date;
+      return setToMarketOpen(date);
     }
   }
   const defaultDate = new Date('2025-01-06');
-  defaultDate.setHours(0, 0, 0, 0);
-  return defaultDate;
+  return setToMarketOpen(defaultDate);
 };
 
 export const isHistoricalSimulationComplete = (simulationDay?: number): boolean => {
