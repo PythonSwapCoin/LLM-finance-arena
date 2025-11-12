@@ -1,11 +1,13 @@
 import { simulationState } from './state.js';
 import { step, tradeWindow, advanceDay } from './engine.js';
-import { generateNextIntradayMarketData, generateNextDayMarketData, advanceIntradayHour, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode } from '../services/marketDataService.js';
+import { generateNextIntradayMarketData, generateNextDayMarketData, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult } from '../services/marketDataService.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { saveSnapshot } from '../store/persistence.js';
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 // Intervals - different for real-time vs simulated/historical
 const getSimInterval = (): number => {
@@ -42,6 +44,8 @@ const EXPORT_INTERVAL_MS = parseInt(process.env.EXPORT_INTERVAL_MS || '86400000'
 let priceTickInterval: NodeJS.Timeout | null = null;
 let tradeWindowInterval: NodeJS.Timeout | null = null;
 let exportInterval: NodeJS.Timeout | null = null;
+let realtimePriceLoopPromise: Promise<void> | null = null;
+let realtimeLoopAbortController: { stop: boolean } | null = null;
 let isRunning = false;
 let lastExportDay = -1;
 let lastMarketDay: Date | null = null; // Track last market day for real-time mode
@@ -65,7 +69,7 @@ export const startScheduler = async (): Promise<void> => {
   });
 
   // Price tick handler function
-  const priceTickHandler = async () => {
+  const priceTickHandler = async (prefetchedRealtimeData?: RealtimePrefetchResult | null) => {
     try {
       const snapshot = simulationState.getSnapshot();
       
@@ -223,10 +227,26 @@ export const startScheduler = async (): Promise<void> => {
           useDelayedData: USE_DELAYED_DATA
         });
         
+        if (prefetchedRealtimeData) {
+          logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+            'Using prefetched market data for real-time tick', {
+              receivedTickers: Object.keys(prefetchedRealtimeData.marketData).length,
+              missingTickers: prefetchedRealtimeData.missingTickers.length,
+              prefetchDurationMs: prefetchedRealtimeData.durationMs,
+            });
+        } else {
+          logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+            'No prefetched market data available, fetching synchronously', {});
+        }
+
         const newMarketData = await generateNextIntradayMarketData(
-          snapshot.marketData, 
-          snapshot.day, 
-          intradayHour
+          snapshot.marketData,
+          snapshot.day,
+          intradayHour,
+          {
+            prefetchedData: prefetchedRealtimeData?.marketData,
+            missingTickers: prefetchedRealtimeData?.missingTickers,
+          }
         );
         
         if (!newMarketData || Object.keys(newMarketData).length === 0) {
@@ -478,23 +498,106 @@ export const startScheduler = async (): Promise<void> => {
     }
   };
   
-  // For real-time mode with delayed data, trigger immediate first tick
   if (mode === 'realtime') {
+    const guardMs = parseInt(process.env.REALTIME_FETCH_GUARD_MS || '5000', 10);
+    const batchSize = parseInt(process.env.REALTIME_FETCH_BATCH_SIZE || '8', 10);
+    const minPauseMs = parseInt(process.env.REALTIME_FETCH_MIN_PAUSE_MS || '150', 10);
     const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
-    if (USE_DELAYED_DATA) {
-      logger.logSimulationEvent('Triggering immediate first price tick for real-time delayed data mode', {});
-      // Run first tick immediately (don't await - let it run in background)
-      setTimeout(() => {
-        priceTickHandler().catch(err => {
-          logger.log(LogLevel.ERROR, LogCategory.SIMULATION, 
-            'Error in immediate price tick', { error: err instanceof Error ? err.message : String(err) });
-        });
-      }, 2000); // Wait 2 seconds after startup to ensure everything is initialized
-    }
-  }
 
-  // Price tick: update market data and portfolio values
-  priceTickInterval = setInterval(priceTickHandler, simInterval);
+    const abortController = { stop: false };
+    realtimeLoopAbortController = abortController;
+
+    const runRealtimePriceLoop = async (): Promise<void> => {
+      if (USE_DELAYED_DATA) {
+        // Maintain small startup delay to ensure downstream services are ready
+        await sleep(2000);
+      }
+
+      let pendingPrefetch: Promise<RealtimePrefetchResult> | null = null;
+      let firstIteration = true;
+
+      while (isRunning && !abortController.stop) {
+        const loopStart = Date.now();
+        let prefetchedResult: RealtimePrefetchResult | null = null;
+
+        if (!firstIteration && pendingPrefetch) {
+          try {
+            prefetchedResult = await pendingPrefetch;
+          } catch (error) {
+            logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
+              'Real-time prefetch failed to resolve before tick', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            prefetchedResult = null;
+          }
+          pendingPrefetch = null;
+        }
+
+        await priceTickHandler(prefetchedResult);
+
+        if (!isRunning || abortController.stop) {
+          break;
+        }
+
+        const tickers = Object.keys(simulationState.getSnapshot().marketData);
+        if (tickers.length > 0) {
+          pendingPrefetch = prefetchRealtimeMarketData(tickers, {
+            intervalMs: simInterval,
+            guardMs,
+            batchSize,
+            minPauseMs,
+            useCache: false,
+          }).catch(error => {
+            logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
+              'Real-time prefetch encountered an error', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            return {
+              marketData: {},
+              missingTickers: tickers,
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+              durationMs: 0,
+              totalTickers: tickers.length,
+            } as RealtimePrefetchResult;
+          });
+        } else {
+          pendingPrefetch = null;
+        }
+
+        const elapsed = Date.now() - loopStart;
+        const remaining = Math.max(simInterval - elapsed, 0);
+        if (remaining > 0) {
+          await sleep(remaining);
+        }
+
+        firstIteration = false;
+      }
+
+      if (pendingPrefetch) {
+        try {
+          await pendingPrefetch;
+        } catch (error) {
+          logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
+            'Pending prefetch rejected during realtime loop shutdown', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+        }
+      }
+    };
+
+    realtimePriceLoopPromise = runRealtimePriceLoop().catch(error => {
+      logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
+        'Real-time price loop terminated unexpectedly', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+    });
+
+    priceTickInterval = null;
+  } else {
+    // Price tick: update market data and portfolio values
+    priceTickInterval = setInterval(priceTickHandler, simInterval);
+  }
 
   // Trade window: execute trades
   // For real-time: every 30 minutes (first trade after 30 minutes) - use interval
@@ -678,6 +781,13 @@ export const stopScheduler = (): void => {
 
   isRunning = false;
   logger.logSimulationEvent('Stopping simulation scheduler', {});
+
+  if (realtimeLoopAbortController) {
+    realtimeLoopAbortController.stop = true;
+    realtimeLoopAbortController = null;
+  }
+
+  realtimePriceLoopPromise = null;
 
   if (priceTickInterval) {
     clearInterval(priceTickInterval);
