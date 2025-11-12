@@ -59,7 +59,9 @@ REALTIME_SIM_INTERVAL_MS=600000  # Price tick interval (10 minutes)
 REALTIME_TRADE_INTERVAL_MS=1800000  # Trade window interval (30 minutes)
 
 # Persistence
-PERSIST_PATH=./data/snapshot.json
+# Point this to a persistent volume or mounted path so data survives restarts
+PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
+SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
 
 # Simulation Control
 RESET_SIMULATION=false  # Set to 'true' to reset simulation on startup (deletes snapshot and starts from day 0)
@@ -168,7 +170,8 @@ Returns log entries. Query parameters:
 - `POLYGON_API_KEY`: Polygon.io API key (fallback data source)
 - `SIM_INTERVAL_MS`: Price tick interval in milliseconds (default: 30000 = 30 seconds)
 - `TRADE_INTERVAL_MS`: Trade window interval in milliseconds (default: 7200000 = 2 hours)
-- `PERSIST_PATH`: Path to snapshot JSON file (default: `./data/snapshot.json`)
+- `PERSIST_PATH`: Path to snapshot JSON file (default: `./data/snapshot.json` – override to point at persistent storage in prod)
+- `SNAPSHOT_AUTOSAVE_INTERVAL_MS`: Additional autosave interval in milliseconds (default: 900000 = 15 minutes). Set to `0` or negative to disable.
 - `RESET_SIMULATION`: Set to `true` to reset simulation on startup (deletes snapshot, starts from day 0). Default: `false` (continues from saved state)
 - `LOG_LEVEL`: Logging verbosity (default: INFO)
 
@@ -195,6 +198,7 @@ The backend automatically persists the simulation state to a JSON file after eac
 - Price tick
 - Trade window execution
 - Day advancement
+- Autosave interval flush (configurable via `SNAPSHOT_AUTOSAVE_INTERVAL_MS`, default 900000 ms / 15 minutes)
 
 On startup, the backend:
 - **By default**: Loads the last saved snapshot and continues from where it left off
@@ -210,7 +214,7 @@ You can also reset the simulation via API: `POST /api/simulation/reset`
 1. Set environment variables in your deployment platform
 2. Set build command: `cd backend && npm install && npm run build`
 3. Set start command: `cd backend && npm start`
-4. Ensure `PERSIST_PATH` points to a persistent volume (or use Postgres adapter in Phase 2)
+4. Ensure `PERSIST_PATH` points to a persistent volume (or use Postgres adapter in Phase 2) and tune `SNAPSHOT_AUTOSAVE_INTERVAL_MS` for how often to force disk writes between simulation events
 
 ### Docker (Example)
 

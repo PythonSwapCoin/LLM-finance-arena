@@ -7,14 +7,80 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { registerRoutes } from './api/routes.js';
 import { simulationState } from './simulation/state.js';
-import { loadSnapshot, saveSnapshot } from './store/persistence.js';
+import { getPersistFilePath, loadSnapshot, saveSnapshot } from './store/persistence.js';
 import { createInitialMarketData } from './services/marketDataService.js';
 import { S_P500_TICKERS } from './constants.js';
 import { logger, LogLevel, LogCategory } from './services/logger.js';
-import { startScheduler } from './simulation/scheduler.js';
+import { startScheduler, stopScheduler } from './simulation/scheduler.js';
 
 const PORT = parseInt(process.env.BACKEND_PORT || '8080', 10);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
+const SNAPSHOT_AUTOSAVE_INTERVAL_MS = parseInt(process.env.SNAPSHOT_AUTOSAVE_INTERVAL_MS || '900000', 10);
+
+let snapshotAutosaveInterval: NodeJS.Timeout | null = null;
+let isShuttingDown = false;
+
+const startSnapshotAutosave = (): void => {
+  if (SNAPSHOT_AUTOSAVE_INTERVAL_MS <= 0) {
+    logger.log(LogLevel.INFO, LogCategory.SYSTEM,
+      'Snapshot autosave disabled', { intervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS });
+    return;
+  }
+
+  if (snapshotAutosaveInterval) {
+    clearInterval(snapshotAutosaveInterval);
+  }
+
+  snapshotAutosaveInterval = setInterval(async () => {
+    try {
+      await saveSnapshot(simulationState.getSnapshot());
+    } catch (error) {
+      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+        'Failed to persist snapshot during autosave', { error });
+    }
+  }, SNAPSHOT_AUTOSAVE_INTERVAL_MS);
+
+  logger.logSimulationEvent('Snapshot autosave enabled', {
+    intervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS,
+  });
+};
+
+const stopSnapshotAutosave = (): void => {
+  if (snapshotAutosaveInterval) {
+    clearInterval(snapshotAutosaveInterval);
+    snapshotAutosaveInterval = null;
+    logger.logSimulationEvent('Snapshot autosave stopped', {});
+  }
+};
+
+const shutdown = async ({ reason, exitCode, error }: { reason: string; exitCode: number; error?: unknown }): Promise<void> => {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
+
+  if (error) {
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+      `${reason} - initiating shutdown`, { error });
+  } else {
+    logger.logSimulationEvent(`${reason} - initiating shutdown`, {});
+  }
+
+  stopSnapshotAutosave();
+  stopScheduler();
+
+  await saveSnapshot(simulationState.getSnapshot()).catch(err => {
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+      'Failed to save snapshot during shutdown', { error: err });
+  });
+
+  await fastify.close().catch(err => {
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+      'Failed to close Fastify instance during shutdown', { error: err });
+  });
+
+  process.exit(exitCode);
+};
 
 // Verify environment variables are loaded
 if (process.env.OPENROUTER_API_KEY) {
@@ -73,24 +139,33 @@ await fastify.register(registerRoutes);
 // Initialize simulation state
 const initializeSimulation = async (): Promise<void> => {
   logger.logSimulationEvent('Initializing simulation', { tickers: S_P500_TICKERS.length });
-  
+
   const RESET_SIMULATION = process.env.RESET_SIMULATION === 'true';
-  
+  const persistFilePath = getPersistFilePath();
+
+  logger.logSimulationEvent('Simulation persistence configured', {
+    path: persistFilePath,
+    resetOnStartup: RESET_SIMULATION,
+    autosaveIntervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS,
+  });
+
+  if (!process.env.PERSIST_PATH) {
+    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+      'PERSIST_PATH not set; using default relative path. Mount a persistent volume or override PERSIST_PATH to retain data across restarts.',
+      { defaultPath: persistFilePath });
+  }
+
   // If RESET_SIMULATION is true, delete the snapshot and start fresh
   if (RESET_SIMULATION) {
     logger.logSimulationEvent('RESET_SIMULATION=true, starting fresh simulation', {});
     try {
       const { promises: fs } = await import('fs');
-      const snapshotPath = process.env.PERSIST_PATH || './data/snapshot.json';
-      const fullPath = snapshotPath.startsWith('/') 
-        ? snapshotPath 
-        : `${process.cwd()}/${snapshotPath}`;
-      await fs.unlink(fullPath).catch(() => {
+      await fs.unlink(persistFilePath).catch(() => {
         // File doesn't exist, that's fine
       });
-      logger.logSimulationEvent('Deleted existing snapshot', { path: fullPath });
+      logger.logSimulationEvent('Deleted existing snapshot', { path: persistFilePath });
     } catch (error) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM, 
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
         'Failed to delete snapshot for reset', { error });
     }
   }
@@ -108,15 +183,15 @@ const initializeSimulation = async (): Promise<void> => {
     // Initialize fresh
     logger.logSimulationEvent('Creating fresh simulation', {});
     const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
-      await simulationState.initialize(initialMarketData);
-    
+    await simulationState.initialize(initialMarketData);
+
     // Save initial state
     await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-      logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
         'Failed to save initial snapshot', { error: err });
     });
   }
-  
+
   // Auto-start scheduler
   await startScheduler();
   logger.logSimulationEvent('Simulation scheduler started', {});
@@ -126,10 +201,11 @@ const initializeSimulation = async (): Promise<void> => {
 const start = async (): Promise<void> => {
   try {
     await initializeSimulation();
-    
-    await fastify.listen({ 
-      port: PORT, 
-      host: '0.0.0.0' 
+    startSnapshotAutosave();
+
+    await fastify.listen({
+      port: PORT,
+      host: '0.0.0.0'
     });
     
     logger.logSimulationEvent('Backend server started', { 
@@ -149,25 +225,25 @@ const start = async (): Promise<void> => {
   }
 };
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.logSimulationEvent('SIGTERM received, shutting down gracefully', {});
-  await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-      'Failed to save snapshot on shutdown', { error: err });
-  });
-  await fastify.close();
-  process.exit(0);
+// Graceful shutdown and fatal error handling
+process.on('SIGTERM', () => {
+  void shutdown({ reason: 'SIGTERM received', exitCode: 0 });
 });
 
-process.on('SIGINT', async () => {
-  logger.logSimulationEvent('SIGINT received, shutting down gracefully', {});
-  await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-      'Failed to save snapshot on shutdown', { error: err });
-  });
-  await fastify.close();
-  process.exit(0);
+process.on('SIGINT', () => {
+  void shutdown({ reason: 'SIGINT received', exitCode: 0 });
+});
+
+process.on('uncaughtException', error => {
+  logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+    'Uncaught exception detected', { error });
+  void shutdown({ reason: 'Uncaught exception', exitCode: 1, error });
+});
+
+process.on('unhandledRejection', error => {
+  logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+    'Unhandled promise rejection detected', { error });
+  void shutdown({ reason: 'Unhandled promise rejection', exitCode: 1, error });
 });
 
 start();

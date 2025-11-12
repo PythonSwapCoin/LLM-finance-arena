@@ -37,7 +37,8 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
    OPENROUTER_API_KEY=sk-or-v1-your-key-here
    SIM_INTERVAL_MS=30000
    TRADE_INTERVAL_MS=7200000
-   PERSIST_PATH=./data/snapshot.json
+   PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
+   SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
    LOG_LEVEL=INFO
    ```
 
@@ -55,7 +56,7 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
    - Build: `npm install && npm run build`
    - Start: `npm start`
 5. **Add environment variables** (same as Render)
-6. **Railway provides persistent storage** for the `data/` directory
+6. **Railway provides persistent storage** for the `data/` directory — point `PERSIST_PATH` at that mounted volume so restarts reuse the snapshot
 
 ### Option C: Fly.io (Good for 24/7)
 
@@ -126,7 +127,8 @@ ALLOWED_ORIGINS=https://llm-finance-arena.vercel.app
 
 ### Backend Persistence
 
-- **Render/Railway**: Use their persistent disk/volume for `data/` directory
+- **Render/Railway**: Use their persistent disk/volume for the snapshot file defined by `PERSIST_PATH`
+- Configure `SNAPSHOT_AUTOSAVE_INTERVAL_MS` (default 15 minutes) to control how frequently the backend flushes state to disk in addition to the existing per-event saves
 - **Fly.io**: Volumes persist automatically
 - **JSON files**: Work fine for Phase 1, but consider Postgres for production
 
@@ -156,7 +158,8 @@ MODE=simulated
 OPENROUTER_API_KEY=sk-or-v1-...
 SIM_INTERVAL_MS=30000
 TRADE_INTERVAL_MS=7200000
-PERSIST_PATH=./data/snapshot.json
+PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
+SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
 LOG_LEVEL=INFO
 ```
 
