@@ -13,15 +13,17 @@ import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { S_P500_TICKERS } from '../constants.js';
 import { getPersistFilePath, saveSnapshot } from '../store/persistence.js';
-import type { 
-  SimulationStateResponse, 
-  AgentsResponse, 
-  MarketDataResponse, 
-  BenchmarksResponse, 
-  HistoryResponse, 
-  StartStopResponse, 
-  LogsResponse 
+import type {
+  SimulationStateResponse,
+  AgentsResponse,
+  MarketDataResponse,
+  BenchmarksResponse,
+  HistoryResponse,
+  StartStopResponse,
+  LogsResponse,
+  ChatMessageResponse,
 } from './dto.js';
+import { addUserMessageToChat } from '../services/chatService.js';
 
 export const registerRoutes = async (fastify: FastifyInstance): Promise<void> => {
   // Health check
@@ -180,6 +182,19 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
       return { 
         ok: false, 
         error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  });
+
+  fastify.post<{ Body: { username: string; agentId: string; content: string } }>('/api/chat/messages', async (request, reply): Promise<ChatMessageResponse | { error: string }> => {
+    try {
+      const { username, agentId, content } = request.body;
+      const result = addUserMessageToChat({ username, agentId, content });
+      return result;
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: error instanceof Error ? error.message : 'Failed to send chat message',
       };
     }
   });

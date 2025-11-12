@@ -7,9 +7,10 @@ import type { Agent } from './types';
 import { TickerBar } from './components/TickerBar';
 import { MainPerformanceChart } from './components/MainPerformanceChart';
 import { InfoPanel } from './components/InfoPanel';
+import { LiveChat } from './components/LiveChat';
 
 export default function App() {
-  const { agents, benchmarks, simulationState, marketData, simulationMode, marketTelemetry, connectionStatus, checkConnection } = useApiState();
+  const { agents, benchmarks, simulationState, marketData, simulationMode, marketTelemetry, connectionStatus, checkConnection, chat, sendChatMessage } = useApiState();
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isMobileInfoOpen, setMobileInfoOpen] = useState(false);
   const isStopped = simulationState.isHistoricalSimulationComplete;
@@ -42,6 +43,11 @@ export default function App() {
     }
   }, [connectionStatus, checkConnection]);
 
+  const currentRoundId = React.useMemo(() => {
+    const safeHour = Number.isFinite(simulationState.intradayHour) ? simulationState.intradayHour : 0;
+    return `${simulationState.day}-${safeHour.toFixed(3)}`;
+  }, [simulationState.day, simulationState.intradayHour]);
+
   return (
     <div className="min-h-screen bg-arena-bg font-sans text-arena-text-primary antialiased">
       <Header
@@ -69,7 +75,7 @@ export default function App() {
               />
             </div>
           </div>
-          <div className="hidden lg:block lg:col-span-1">
+          <div className="hidden lg:flex lg:col-span-1 flex-col gap-6">
             <InfoPanel
               agents={agents}
               isLoading={simulationState.isLoading}
@@ -79,6 +85,13 @@ export default function App() {
               simulationMode={simulationMode}
               isHistoricalComplete={simulationState.isHistoricalSimulationComplete}
               variant="desktop"
+            />
+            <LiveChat
+              chat={chat}
+              agents={agents}
+              currentRoundId={currentRoundId}
+              onSendMessage={sendChatMessage}
+              className="flex-1"
             />
           </div>
         </div>
@@ -118,6 +131,15 @@ export default function App() {
               />
             </div>
           )}
+        </div>
+
+        <div className="mt-6 lg:hidden">
+          <LiveChat
+            chat={chat}
+            agents={agents}
+            currentRoundId={currentRoundId}
+            onSendMessage={sendChatMessage}
+          />
         </div>
 
         <div id="leaderboard" className="mt-8">

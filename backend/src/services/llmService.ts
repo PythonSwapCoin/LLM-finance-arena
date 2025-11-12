@@ -1,5 +1,6 @@
 import type { Agent, MarketData, Trade, TradeAction } from '../types.js';
 import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
+import { sanitizeOutgoingMessage } from '../utils/chatUtils.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -54,17 +55,25 @@ const exponentialBackoff = async <T>(
   throw lastError || new Error('Max retries exceeded');
 };
 
+interface ChatPromptContext {
+  enabled: boolean;
+  messages: Array<{ sender: string; content: string }>;
+  maxReplyLength: number;
+}
+
 export const getTradeDecisions = async (
   agent: Agent,
   marketData: MarketData,
   day: number,
-  timeoutMs: number = 30000
-): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[], rationale: string }> => {
+  timeoutMs: number = 30000,
+  chatContext?: ChatPromptContext
+): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string; reply?: string }> => {
   if (!OPENROUTER_API_KEY) {
     // Return empty trades gracefully instead of throwing
-    logger.log(LogLevel.WARNING, LogCategory.LLM, 
+    logger.log(LogLevel.WARNING, LogCategory.LLM,
       `OPENROUTER_API_KEY not set for ${agent.name}, returning empty trades`, { agent: agent.name });
-    return { trades: [], rationale: 'API key not configured - holding positions.' };
+    const fallbackReply = chatContext?.enabled ? 'Unable to respond right now.' : undefined;
+    return { trades: [], rationale: 'API key not configured - holding positions.', reply: fallbackReply };
   }
 
   const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => 
@@ -96,7 +105,8 @@ export const getTradeDecisions = async (
   
   if (availableTickers.length === 0) {
     console.error(`[${agent.name}] No market data available! Cannot make trading decisions.`);
-    return { trades: [], rationale: "No market data available - cannot make trading decisions." };
+    const fallbackReply = chatContext?.enabled ? 'Unable to respond right now.' : undefined;
+    return { trades: [], rationale: "No market data available - cannot make trading decisions.", reply: fallbackReply };
   }
 
   const tradingFeeBpsDisplay = (TRADING_FEE_RATE * 10000).toFixed(2);
@@ -105,6 +115,17 @@ export const getTradeDecisions = async (
   const tradingCostLine = TRADING_FEE_RATE > 0
     ? `${tradingFeeBpsDisplay} bps (${tradingFeePercentDisplay}% of notional) with a $${minFeeDisplay} minimum`
     : `$${minFeeDisplay} per trade`;
+
+  const communityMessages = chatContext?.messages ?? [];
+  const chatSection = chatContext?.enabled
+    ? `
+=== COMMUNITY LIVE CHAT ===
+${communityMessages.length > 0
+  ? communityMessages.map((message, index) => `${index + 1}. ${message.sender}: ${message.content}`).join('\n')
+  : 'No new community messages this round. Share a quick update in your reply field.'}
+Your reply must be one sentence, at most ${chatContext.maxReplyLength} characters, and must not contain links or promotional content.
+`
+    : '';
 
   const prompt = `
 You are a portfolio manager making trading decisions for Day ${day}.
@@ -128,18 +149,20 @@ Available tickers: ${availableTickers.join(', ')}
 - Available Cash: $${availableCash.toFixed(2)}
 - Total Portfolio Value: $${portfolioValue.toFixed(2)}
 - Current Positions:
-${currentPositions.length > 0 
+${currentPositions.length > 0
   ? currentPositions.map(p => {
-      const prevEst = p.lastFairValue !== undefined 
+      const prevEst = p.lastFairValue !== undefined
         ? ` | Your Previous Fair Value Estimate: $${p.lastFairValue.toFixed(2)} | Top=$${p.lastTopOfBox?.toFixed(2) ?? 'N/A'}, Bottom=$${p.lastBottomOfBox?.toFixed(2) ?? 'N/A'}`
         : '';
-      const fairValueComparison = p.lastFairValue !== undefined 
+      const fairValueComparison = p.lastFairValue !== undefined
         ? ` | Current price vs your fair value: ${p.currentPrice > p.lastFairValue ? 'OVERVALUED (price > fair value)' : p.currentPrice < p.lastFairValue ? 'UNDERVALUED (price < fair value)' : 'AT FAIR VALUE'}`
         : '';
       return `  - ${p.ticker}: ${p.quantity} shares @ avg $${p.avgCost.toFixed(2)} | Current: $${p.currentPrice.toFixed(2)} | Value: $${p.positionValue.toFixed(2)} (${p.positionPercent}%) | P&L: $${p.unrealizedGain.toFixed(2)} (${p.unrealizedGainPercent}%)${prevEst}${fairValueComparison}`;
     }).join('\n')
   : '  No positions held.'
 }
+
+${chatSection}
 
 === TRADING RULES ===
 1. You can only BUY if you have enough cash: quantity × current_price ≤ available_cash
@@ -160,6 +183,7 @@ You must return a JSON object with:
    - "topOfBox": The 10% best case scenario price by next day (in dollars)
    - "bottomOfBox": The 10% worst case scenario price by next day (in dollars)
    - "justification": A one sentence explanation for this specific trade
+3. "reply": A short (single sentence) public message for the community (${chatContext?.maxReplyLength ?? 140} characters max, no links)
 
 Example response:
 {
@@ -174,7 +198,8 @@ Example response:
       "bottomOfBox": 178.00,
       "justification": "AAPL is undervalued with strong fundamentals and positive momentum."
     }
-  ]
+  ],
+  "reply": "Thanks for the support—staying nimble today."
 }
 
 IMPORTANT:
@@ -184,6 +209,7 @@ IMPORTANT:
 - If you have cash available, you should make buy trades to invest it
 - Holding 100% cash is not acceptable - you are a portfolio manager, not a cash holder
 - If you don't want to trade, return an empty trades array: {"rationale": "...", "trades": []}
+- Your reply must be respectful, one sentence, and contain no URLs or promotional content
 `;
 
   const startTime = Date.now();
@@ -399,7 +425,13 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
         return trade;
       });
 
-    return { trades: validTrades, rationale: result.rationale || "No rationale provided." };
+    let reply: string | undefined;
+    if (chatContext?.enabled) {
+      const sanitized = sanitizeOutgoingMessage(result.reply ?? '', chatContext.maxReplyLength);
+      reply = sanitized || 'Thanks for the update!';
+    }
+
+    return { trades: validTrades, rationale: result.rationale || "No rationale provided.", reply };
 
   } catch (error) {
     const responseTime = Date.now() - startTime;
@@ -407,7 +439,8 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, errorMessage);
     console.error("Error fetching trade decisions:", error);
     // Never throw past the service boundary - return empty trades instead
-    return { trades: [], rationale: `Error communicating with AI model: ${errorMessage}` };
+    const fallbackReply = chatContext?.enabled ? 'Unable to respond right now.' : undefined;
+    return { trades: [], rationale: `Error communicating with AI model: ${errorMessage}`, reply: fallbackReply };
   }
 };
 

@@ -1,8 +1,10 @@
-import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics } from '../types.js';
+import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics, ChatState } from '../types.js';
 import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getTradeDecisions } from '../services/llmService.js';
 import { logger } from '../services/logger.js';
+import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatService.js';
+import { createRoundId } from '../utils/chatUtils.js';
 
 const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
   if (value === undefined) {
@@ -51,6 +53,12 @@ const calculateExecutionFee = (notional: number): number => {
 };
 
 const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+interface AgentChatContext {
+  enabled: boolean;
+  messages: Array<{ sender: string; content: string }>;
+  maxReplyLength: number;
+}
 
 const processAgentsWithPacing = async <T>(
   agents: Agent[],
@@ -110,14 +118,15 @@ const handleTradeWindowAgent = async (
     mode: 'simulated' | 'realtime' | 'historical' | undefined;
     timestamp: number;
     currentTimestamp?: number;
+    chatContext?: AgentChatContext;
   }
-): Promise<Agent> => {
-  const { marketData, day, intradayHour, mode, timestamp, currentTimestamp } = options;
+): Promise<{ agent: Agent; reply?: string }> => {
+  const { marketData, day, intradayHour, mode, timestamp, currentTimestamp, chatContext } = options;
 
   try {
     const tradeDecision = await Promise.race([
-      getTradeDecisions(agent, marketData, day, 30000),
-      new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string }>((_, reject) =>
+      getTradeDecisions(agent, marketData, day, 30000, chatContext),
+      new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string; reply?: string }>((_, reject) =>
         setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
       )
     ]).catch(error => {
@@ -128,10 +137,15 @@ const handleTradeWindowAgent = async (
         hour: intradayHour,
         error: error instanceof Error ? error.message : String(error)
       });
-      return { trades: [], rationale: `Trade decision unavailable - holding positions. ${error instanceof Error ? error.message : String(error)}` };
+      const fallbackReply = chatContext?.enabled ? 'Unable to provide an update right now.' : undefined;
+      return {
+        trades: [],
+        rationale: `Trade decision unavailable - holding positions. ${error instanceof Error ? error.message : String(error)}`,
+        reply: fallbackReply,
+      };
     });
 
-    const { trades: decidedTrades, rationale } = tradeDecision;
+    const { trades: decidedTrades, rationale, reply } = tradeDecision;
     const newTradeHistory = [...agent.tradeHistory];
     const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
 
@@ -242,16 +256,19 @@ const handleTradeWindowAgent = async (
     };
 
     return {
-      ...agent,
-      portfolio: newPortfolio,
-      tradeHistory: newTradeHistory,
-      performanceHistory: [...agent.performanceHistory, newMetrics],
-      rationale,
-      rationaleHistory: {
-        ...agent.rationaleHistory,
-        [day]: rationale
+      agent: {
+        ...agent,
+        portfolio: newPortfolio,
+        tradeHistory: newTradeHistory,
+        performanceHistory: [...agent.performanceHistory, newMetrics],
+        rationale,
+        rationaleHistory: {
+          ...agent.rationaleHistory,
+          [day]: rationale
+        },
+        memory: updatedMemory,
       },
-      memory: updatedMemory,
+      reply,
     };
   } catch (error) {
     console.error(`Failed to process agent ${agent.name}:`, error);
@@ -265,13 +282,16 @@ const handleTradeWindowAgent = async (
     const newMetrics = calculateAllMetrics(agent.portfolio, marketData, agent.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
     return {
-      ...agent,
-      performanceHistory: [...agent.performanceHistory, newMetrics],
-      rationale: errorRationale,
-      rationaleHistory: {
-        ...agent.rationaleHistory,
-        [day]: errorRationale
-      }
+      agent: {
+        ...agent,
+        performanceHistory: [...agent.performanceHistory, newMetrics],
+        rationale: errorRationale,
+        rationaleHistory: {
+          ...agent.rationaleHistory,
+          [day]: errorRationale
+        }
+      },
+      reply: chatContext?.enabled ? 'Unable to respond right now.' : undefined,
     };
   }
 };
@@ -529,6 +549,7 @@ export const tradeWindow = async (
     marketData: MarketData;
     agents: Agent[];
     benchmarks: Benchmark[];
+    chat: ChatState;
     mode?: 'simulated' | 'realtime' | 'historical';
     currentTimestamp?: number;
   }
@@ -538,29 +559,61 @@ export const tradeWindow = async (
   marketData: MarketData;
   agents: Agent[];
   benchmarks: Benchmark[];
+  chat: ChatState;
 }> => {
-  const { day, intradayHour, marketData, agents, benchmarks, mode, currentTimestamp } = currentSnapshot;
-  
+  const { day, intradayHour, marketData, agents, benchmarks, chat, mode, currentTimestamp } = currentSnapshot;
+
   // Determine timestamp: for real-time mode use actual timestamp, otherwise use day-based timestamp
   // Always initialize timestamp to ensure it's never undefined
   let timestamp: number = day + (intradayHour / 10); // Default: day-based timestamp
-  
+
   if (mode === 'realtime' && currentTimestamp !== undefined) {
     // For real-time mode: use actual timestamp (milliseconds since epoch)
     // Convert to seconds for consistency with performance history
     timestamp = currentTimestamp / 1000; // Convert to seconds
   }
 
-  const updatedAgents: Agent[] = await processAgentsWithPacing(agents, mode, agent =>
-    handleTradeWindowAgent(agent, {
+  const roundId = createRoundId(day, intradayHour);
+  const agentResults = await processAgentsWithPacing(agents, mode, agent => {
+    const messages = chat.config.enabled
+      ? chat.messages
+        .filter(message =>
+          message.roundId === roundId
+            && message.agentId === agent.id
+            && message.senderType === 'user'
+        )
+        .slice(0, chat.config.maxMessagesPerAgent)
+        .map(message => ({ sender: message.sender, content: message.content }))
+      : [];
+
+    return handleTradeWindowAgent(agent, {
       marketData,
       day,
       intradayHour,
       mode,
       timestamp,
       currentTimestamp,
-    })
-  );
+      chatContext: {
+        enabled: chat.config.enabled,
+        messages,
+        maxReplyLength: chat.config.maxMessageLength,
+      },
+    });
+  });
+
+  const updatedAgents: Agent[] = agentResults.map(result => result.agent);
+
+  const agentReplies: AgentReplyInput[] = agentResults
+    .filter(result => Boolean(result.reply && result.reply.trim()))
+    .map(result => ({
+      agent: result.agent,
+      roundId,
+      reply: result.reply,
+    }));
+
+  const updatedChat = chat.config.enabled
+    ? applyAgentRepliesToChat(chat, agentReplies)
+    : chat;
 
   // Update benchmarks after trades
   const updatedBenchmarks = benchmarks.map(b => {
@@ -595,6 +648,7 @@ export const tradeWindow = async (
     marketData,
     agents: updatedAgents,
     benchmarks: updatedBenchmarks,
+    chat: updatedChat,
   };
 };
 
