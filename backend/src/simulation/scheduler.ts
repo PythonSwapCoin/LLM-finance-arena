@@ -96,15 +96,20 @@ export const startScheduler = async (): Promise<void> => {
 
       const mode = getSimulationMode();
       const now = new Date();
-      const marketOpen = isMarketOpen(now);
       const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
+      const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+      const effectiveTime = USE_DELAYED_DATA
+        ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000))
+        : now;
+      const realtimeMarketOpen = isMarketOpen(now);
+      const marketOpen = isMarketOpen(effectiveTime);
       
       // Real-time mode: process when market is open OR when using delayed data
       // (delayed data mode should work even if market hours check fails due to timezone issues)
       if (mode === 'realtime') {
         // Get ET time for logging and calculations
         // Convert current time to ET timezone
-        const utc = new Date(now.toISOString());
+        const utc = new Date(effectiveTime.toISOString());
         const year = utc.getUTCFullYear();
         const month = utc.getUTCMonth();
         const day = utc.getUTCDate();
@@ -135,11 +140,13 @@ export const startScheduler = async (): Promise<void> => {
         const etDateObj = new Date(Date.UTC(year, month, day + etDayOffset));
         
         // Log market status
-        logger.log(LogLevel.INFO, LogCategory.SIMULATION, 
+        logger.log(LogLevel.INFO, LogCategory.SIMULATION,
           `Price tick check: marketOpen=${marketOpen}, delayedData=${USE_DELAYED_DATA}, ET time=${etTimeString}`, {
             localTime: now.toISOString(),
+            effectiveTime: effectiveTime.toISOString(),
             etTime: etTimeString,
             marketOpen,
+            realtimeMarketOpen,
             useDelayedData: USE_DELAYED_DATA
           });
         
@@ -202,7 +209,7 @@ export const startScheduler = async (): Promise<void> => {
           }
         }
         
-        // Map real market time to intraday hours (9:30 AM - 4:00 PM ET = 6.5 hours)
+        // Map effective market time (real or delayed) to intraday hours (9:30 AM - 4:00 PM ET = 6.5 hours)
         // Market opens at 9:30 AM ET and closes at 4:00 PM ET
         const marketOpenHour = 9.5; // 9:30 AM ET
         const marketCloseHour = 16; // 4:00 PM ET
@@ -227,10 +234,10 @@ export const startScheduler = async (): Promise<void> => {
           }
         }
         
-        logger.logSimulationEvent(`Price tick: real-time market data`, { 
-          day: snapshot.day, 
+        logger.logSimulationEvent(`Price tick: real-time market data`, {
+          day: snapshot.day,
           intradayHour: intradayHour.toFixed(2),
-          marketTime: now.toISOString(),
+          marketTime: effectiveTime.toISOString(),
           etTime: etTimeString,
           marketOpen: marketOpen,
           useDelayedData: USE_DELAYED_DATA
@@ -268,15 +275,13 @@ export const startScheduler = async (): Promise<void> => {
         }
         
         // Update currentDate and currentTimestamp for delayed data mode
-        const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
         let newCurrentDate: string;
         let currentTimestamp: number;
-        
+
         if (USE_DELAYED_DATA) {
           // For delayed data: use (current time - delay) as the data time
-          const dataTime = new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000));
-          newCurrentDate = dataTime.toISOString();
-          currentTimestamp = dataTime.getTime();
+          newCurrentDate = effectiveTime.toISOString();
+          currentTimestamp = effectiveTime.getTime();
         } else {
           // For real-time: use current ET time with intraday offset
           // Calculate ET time as a Date object
@@ -641,9 +646,15 @@ export const startScheduler = async (): Promise<void> => {
 
       const now = new Date();
       const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
-      
+      const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+      const effectiveTime = USE_DELAYED_DATA
+        ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000))
+        : now;
+      const realtimeMarketOpen = isMarketOpen(now);
+      const marketOpen = isMarketOpen(effectiveTime);
+
       // Calculate ET time for logging (needed before market check)
-      const utc = new Date(now.toISOString());
+      const utc = new Date(effectiveTime.toISOString());
       const year = utc.getUTCFullYear();
       const hour = utc.getUTCHours();
       const minute = utc.getUTCMinutes();
@@ -660,21 +671,28 @@ export const startScheduler = async (): Promise<void> => {
       const etHour = Math.floor(etMinutesOfDay / 60);
       const etMinute = etMinutesOfDay % 60;
       const etTimeString = `${etHour.toString().padStart(2, '0')}:${etMinute.toString().padStart(2, '0')} ET`;
-      
-      const marketOpen = isMarketOpen(now);
-      
+
       // Only allow trading if market is open
       if (!marketOpen) {
         if (USE_DELAYED_DATA) {
           logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-            'Market closed but executing delayed data trade window', { marketOpen, etTime: etTimeString });
+            'Market closed but executing delayed data trade window', {
+              marketOpen,
+              realtimeMarketOpen,
+              etTime: etTimeString,
+              effectiveTime: effectiveTime.toISOString(),
+            });
         } else {
           logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-            'Skipping trade window: market closed', { marketOpen, etTime: etTimeString });
+            'Skipping trade window: market closed', {
+              marketOpen,
+              realtimeMarketOpen,
+              etTime: etTimeString,
+            });
           return; // Skip trading when market is closed
         }
       }
-      
+
       // Calculate intraday hour for reference
       const marketOpenHour = 9.5; // 9:30 AM ET
       const currentHourET = etHour + (etMinute / 60);
@@ -699,10 +717,10 @@ export const startScheduler = async (): Promise<void> => {
           return;
         }
         // Execute first trade
-        logger.logSimulationEvent('First trade window: executing trades', { 
-          day: snapshot.day, 
+        logger.logSimulationEvent('First trade window: executing trades', {
+          day: snapshot.day,
           intradayHour: intradayHour.toFixed(3),
-          marketTime: now.toISOString(),
+          marketTime: effectiveTime.toISOString(),
           etTime: etTimeString,
           tradeIntervalMinutes: (tradeIntervalMs / 60000).toFixed(1)
         });
@@ -710,10 +728,10 @@ export const startScheduler = async (): Promise<void> => {
       } else {
         // Subsequent trades: since the interval fires every tradeIntervalMs,
         // we just execute the trade (the interval itself is the window)
-        logger.logSimulationEvent('Trade window: executing trades', { 
-          day: snapshot.day, 
+        logger.logSimulationEvent('Trade window: executing trades', {
+          day: snapshot.day,
           intradayHour: intradayHour.toFixed(3),
-          marketTime: now.toISOString(),
+          marketTime: effectiveTime.toISOString(),
           etTime: etTimeString
         });
       }
@@ -726,10 +744,7 @@ export const startScheduler = async (): Promise<void> => {
       }
 
       // Get current timestamp for real-time mode
-      const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
-      const currentTimestamp = USE_DELAYED_DATA 
-        ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000)).getTime()
-        : now.getTime();
+      const currentTimestamp = effectiveTime.getTime();
       
       const updatedSnapshot = await tradeWindow({
         ...snapshot,
