@@ -32,8 +32,16 @@ export const getTradeDecisions = async (
   day: number,
   timeoutMs: number = 30000 // 30 second timeout
 ): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[], rationale: string }> => {
+  if (!ai) {
+    console.warn("Gemini API key is not configured; skipping trade generation for", agent.id);
+    return {
+      trades: [],
+      rationale: 'No trades executed because the Gemini API key is not configured.',
+    };
+  }
+
   const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => acc + pos.quantity * (marketData[pos.ticker]?.price || 0), agent.portfolio.cash);
-  
+
   const systemInstruction = getAgentPrompt(agent);
 
   // Calculate available cash and current position values for better decision making
