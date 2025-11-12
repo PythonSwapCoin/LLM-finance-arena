@@ -94,6 +94,15 @@ Note: The intervals are automatically set based on mode:
 - **Real-time mode**: Uses `REALTIME_SIM_INTERVAL_MS` and `REALTIME_TRADE_INTERVAL_MS`
 - **Simulated/Historical mode**: Uses `SIM_INTERVAL_MS` and `TRADE_INTERVAL_MS`
 
+### API pacing options
+
+- `LLM_REQUEST_SPACING_MS`: Staggers agent calls sequentially with a fixed delay between each request.
+- `LLM_AUTO_SPACING`: When set to `true`, derives a delay automatically from the active simulation interval (e.g. `REALTIME_SIM_INTERVAL_MS / number_of_agents`).
+- `LLM_MIN_REQUEST_SPACING_MS`: Guarantees a minimum delay when auto spacing is enabled.
+- `LLM_MAX_CONCURRENT_REQUESTS`: Limits the number of concurrent LLM calls when spacing is disabled but you still need to cap bursts.
+
+These knobs make it straightforward to trade API tickets for latency. In practice, a good starting point is `LLM_AUTO_SPACING=true` with `LLM_MIN_REQUEST_SPACING_MS=2000`, which spaces decisions across a 10-minute `REALTIME_SIM_INTERVAL_MS` while still finishing before the next tick.
+
 ## Expected Behavior
 
 ### During Market Hours (9:30 AM - 4:00 PM ET)

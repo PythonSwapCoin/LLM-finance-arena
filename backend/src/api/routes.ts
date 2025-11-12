@@ -12,7 +12,7 @@ import {
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { S_P500_TICKERS } from '../constants.js';
-import { saveSnapshot } from '../store/persistence.js';
+import { getPersistFilePath, saveSnapshot } from '../store/persistence.js';
 import type { 
   SimulationStateResponse, 
   AgentsResponse, 
@@ -190,15 +190,12 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
       stopScheduler();
       
       // Delete snapshot file
-      const snapshotPath = process.env.PERSIST_PATH || './data/snapshot.json';
-      const fullPath = snapshotPath.startsWith('/') 
-        ? snapshotPath 
-        : `${process.cwd()}/${snapshotPath}`;
-      
-      await fs.unlink(fullPath).catch(() => {
+      const persistFilePath = getPersistFilePath();
+
+      await fs.unlink(persistFilePath).catch(() => {
         // File doesn't exist, that's fine
       });
-      
+
       // Reinitialize simulation
       const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
       await simulationState.initialize(initialMarketData);
@@ -211,11 +208,11 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
       
       // Restart scheduler
       await startScheduler();
-      
-      logger.logSimulationEvent('Simulation reset successfully', {});
-      
-      return { 
-        ok: true, 
+
+      logger.logSimulationEvent('Simulation reset successfully', { path: persistFilePath });
+
+      return {
+        ok: true,
         message: 'Simulation reset successfully - starting from day 0'
       };
     } catch (error) {

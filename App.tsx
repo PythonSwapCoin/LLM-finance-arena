@@ -86,7 +86,14 @@ export default function App() {
         </div>
 
         {selectedAgent && (
-          <AgentDetailView agent={selectedAgent} onClose={handleCloseDetail} marketData={marketData} />
+          <AgentDetailView
+            agent={selectedAgent}
+            onClose={handleCloseDetail}
+            marketData={marketData}
+            startDate={simulationState.startDate}
+            currentDate={simulationState.currentDate}
+            simulationMode={simulationMode}
+          />
         )}
       </main>
 

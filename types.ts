@@ -47,6 +47,7 @@ export interface Trade {
   topOfBox?: number; // 10% best case scenario price by next day
   bottomOfBox?: number; // 10% worst case scenario price by next day
   justification?: string; // One sentence justification for the trade
+  fees?: number; // Execution fees charged for the trade
 }
 
 export interface Position {

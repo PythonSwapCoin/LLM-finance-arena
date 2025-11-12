@@ -183,13 +183,15 @@ class Logger {
     quantity: number,
     price: number,
     success: boolean,
-    error?: string
+    error?: string,
+    fees?: number
   ): void {
     const level = success ? LogLevel.SUCCESS : LogLevel.ERROR;
+    const feeSuffix = fees !== undefined ? ` (fees $${fees.toFixed(2)})` : '';
     const message = success
-      ? `Trade executed: ${agentName} ${action} ${quantity} ${ticker} @ $${price.toFixed(2)}`
+      ? `Trade executed: ${agentName} ${action} ${quantity} ${ticker} @ $${price.toFixed(2)}${feeSuffix}`
       : `Trade failed: ${agentName} ${action} ${quantity} ${ticker}`;
-    
+
     this.log(
       level,
       LogCategory.TRADE,
@@ -200,6 +202,7 @@ class Logger {
         action,
         quantity,
         price,
+        fees,
       },
       error
     );

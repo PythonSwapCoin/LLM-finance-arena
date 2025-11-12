@@ -2,11 +2,15 @@ import React from 'react';
 import type { Agent, Position } from '../types';
 import { PerformanceChart } from './PerformanceChart';
 import { XMarkIcon } from './icons/Icons';
+import { formatTradeTimestamp } from '../utils/timeFormatting';
 
 interface AgentDetailViewProps {
   agent: Agent;
   onClose: () => void;
   marketData?: { [ticker: string]: { price: number } }; // Optional market data for current prices
+  startDate?: string;
+  currentDate?: string;
+  simulationMode?: 'simulated' | 'realtime' | 'historical';
 }
 
 const StatCard: React.FC<{ label: string; value: string; className?: string }> = ({ label, value, className = '' }) => (
@@ -15,9 +19,7 @@ const StatCard: React.FC<{ label: string; value: string; className?: string }> =
         <p className={`text-xl font-bold ${className}`}>{value}</p>
     </div>
 );
-
-
-export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose, marketData = {} }) => {
+export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose, marketData = {}, startDate, currentDate, simulationMode }) => {
     const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
     const positions = Object.values(agent.portfolio.positions).filter((p: Position) => p.quantity > 0);
     
@@ -136,23 +138,25 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                         <table className="w-full text-sm text-left">
                            <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
                                 <tr>
-                                    <th className="p-2">Day</th>
+                                    <th className="p-2">When</th>
                                     <th className="p-2">Action</th>
                                     <th className="p-2">Ticker</th>
                                     <th className="p-2 text-right">Qty</th>
                                     <th className="p-2 text-right">Price</th>
+                                    <th className="p-2 text-right">Fees</th>
                                 </tr>
                             </thead>
                              <tbody className="divide-y divide-arena-border">
                                 {agent.tradeHistory.length > 0 ? [...agent.tradeHistory].reverse().slice(0, 20).map(trade => (
                                     <tr key={`${trade.timestamp}-${trade.ticker}-${trade.action}-${Math.random()}`}>
-                                        <td className="p-2 font-mono text-center">{trade.timestamp + 1}</td>
+                                        <td className="p-2 font-mono text-center">{formatTradeTimestamp(trade.timestamp, startDate, currentDate, simulationMode)}</td>
                                         <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
                                         <td className="p-2 font-mono">{trade.ticker}</td>
                                         <td className="p-2 font-mono text-right">{trade.quantity}</td>
                                         <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
+                                        <td className="p-2 font-mono text-right">{trade.fees !== undefined ? `$${trade.fees.toFixed(2)}` : '-'}</td>
                                     </tr>
-                                )) : <tr><td colSpan={5} className="p-4 text-center text-arena-text-secondary">No trades executed yet.</td></tr>}
+                                )) : <tr><td colSpan={6} className="p-4 text-center text-arena-text-secondary">No trades executed yet.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -166,7 +170,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                       <table className="w-full text-sm text-left">
                         <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
                           <tr>
-                            <th className="p-2">Day</th>
+                            <th className="p-2">When</th>
                             <th className="p-2">Ticker</th>
                             <th className="p-2">Action</th>
                             <th className="p-2 text-right">Price</th>
@@ -182,7 +186,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                             .reverse()
                             .map(trade => (
                               <tr key={`valuation-${trade.timestamp}-${trade.ticker}-${trade.action}-${Math.random()}`}>
-                                <td className="p-2 font-mono text-center">{trade.timestamp + 1}</td>
+                                <td className="p-2 font-mono text-center">{formatTradeTimestamp(trade.timestamp, startDate, currentDate, simulationMode)}</td>
                                 <td className="p-2 font-mono">{trade.ticker}</td>
                                 <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
                                 <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
