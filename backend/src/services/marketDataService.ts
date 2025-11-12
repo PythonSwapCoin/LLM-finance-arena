@@ -94,6 +94,23 @@ const marketDataTelemetry: {
   },
 };
 
+export interface RealtimePrefetchOptions {
+  intervalMs: number;
+  guardMs?: number;
+  batchSize?: number;
+  minPauseMs?: number;
+  useCache?: boolean;
+}
+
+export interface RealtimePrefetchResult {
+  marketData: MarketData;
+  missingTickers: string[];
+  startedAt: number;
+  finishedAt: number;
+  durationMs: number;
+  totalTickers: number;
+}
+
 const recordMarketDataResult = (
   source: MarketDataSource,
   success: boolean,
@@ -428,142 +445,260 @@ const fetchYahooFinanceData = async (ticker: string, useCache: boolean = true): 
   }
 };
 
+const fetchTickerWithCascade = async (ticker: string, useCache: boolean): Promise<TickerData> => {
+  let tickerData: TickerData | null = null;
+  let sourceUsed = '';
+
+  try {
+    tickerData = await fetchYahooFinanceData(ticker, useCache);
+    if (tickerData) {
+      sourceUsed = 'Yahoo Finance';
+    }
+  } catch (error) {
+    console.warn(`Yahoo Finance failed for ${ticker}, trying next source...`);
+  }
+
+  if (!tickerData && ALPHA_VANTAGE_API_KEY) {
+    if (!checkRateLimit('alphavantage')) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `Rate limit exceeded for Alpha Vantage`, { ticker });
+    } else {
+      const startTime = Date.now();
+      try {
+        const endpoint = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+        const response = await fetch(endpoint);
+        const responseTime = Date.now() - startTime;
+
+        if (response.ok) {
+          const data = await response.json() as any;
+
+          if (data['Global Quote'] && data['Global Quote']['05. price']) {
+            const price = parseFloat(data['Global Quote']['05. price']);
+            const change = parseFloat(data['Global Quote']['09. change'] || '0');
+            const changePercent = parseFloat(data['Global Quote']['10. change percent']?.replace('%', '') || '0') / 100;
+
+            tickerData = {
+              ticker,
+              price,
+              dailyChange: change,
+              dailyChangePercent: changePercent,
+            };
+            sourceUsed = 'Alpha Vantage';
+            logger.logMarketData('Alpha Vantage', ticker, true, price);
+            logger.logApiCall('Alpha Vantage', 'GLOBAL_QUOTE', true, response.status, undefined, responseTime);
+            recordMarketDataResult('alphaVantage', true);
+          }
+        }
+        if (!tickerData) {
+          const failureMessage = response.ok
+            ? 'Alpha Vantage response missing data'
+            : `Alpha Vantage HTTP ${response.status}`;
+          recordMarketDataResult('alphaVantage', false, failureMessage);
+        }
+      } catch (error) {
+        console.warn(`Alpha Vantage failed for ${ticker}`);
+        const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+        recordMarketDataResult('alphaVantage', false, errorMessage);
+      }
+    }
+  }
+
+  if (!tickerData && POLYGON_API_KEY) {
+    if (!checkRateLimit('polygon')) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `Rate limit exceeded for Polygon`, { ticker });
+    } else {
+      const startTime = Date.now();
+      try {
+        const endpoint = `https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+        const response = await fetch(endpoint);
+        const responseTime = Date.now() - startTime;
+
+        if (response.ok) {
+          const data = await response.json() as any;
+
+          if (data.results && data.results.length > 0) {
+            const result = data.results[0];
+            const currentPrice = result.c;
+            const openPrice = result.o;
+            const dailyChange = currentPrice - openPrice;
+            const dailyChangePercent = openPrice > 0 ? dailyChange / openPrice : 0;
+
+            tickerData = {
+              ticker,
+              price: currentPrice,
+              dailyChange,
+              dailyChangePercent,
+            };
+            sourceUsed = 'Polygon.io';
+            logger.logMarketData('Polygon.io', ticker, true, currentPrice);
+            logger.logApiCall('Polygon.io', 'prev', true, response.status, undefined, responseTime);
+            recordMarketDataResult('polygon', true);
+          }
+        }
+        if (!tickerData) {
+          const failureMessage = response.ok
+            ? 'Polygon response missing data'
+            : `Polygon HTTP ${response.status}`;
+          recordMarketDataResult('polygon', false, failureMessage);
+        }
+      } catch (error) {
+        console.warn(`Polygon failed for ${ticker}`);
+        const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+        recordMarketDataResult('polygon', false, errorMessage);
+      }
+    }
+  }
+
+  if (!tickerData) {
+    const fallbackPrice = 50 + Math.random() * 250;
+    tickerData = {
+      ticker,
+      price: fallbackPrice,
+      dailyChange: 0,
+      dailyChangePercent: 0,
+    };
+    sourceUsed = 'Simulated (fallback)';
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+      `All data sources failed for ${ticker}, using simulated data`, { ticker, fallbackPrice });
+  }
+
+  logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+    `Market data fetched for ${ticker} using ${sourceUsed}`, {
+      ticker,
+      price: tickerData.price,
+      source: sourceUsed,
+    });
+
+  return tickerData;
+};
+
 const fetchRealMarketDataWithCascade = async (tickers: string[], useCache: boolean = true): Promise<MarketData> => {
   const marketData: MarketData = {};
-  
-  for (const ticker of tickers) {
-    let tickerData: TickerData | null = null;
-    let sourceUsed = '';
-    
-    // Try Yahoo Finance first
-    try {
-      tickerData = await fetchYahooFinanceData(ticker, useCache);
-      if (tickerData) {
-        sourceUsed = 'Yahoo Finance';
-      }
-    } catch (error) {
-      console.warn(`Yahoo Finance failed for ${ticker}, trying next source...`);
-    }
-    
-    // Try Alpha Vantage
-    if (!tickerData && ALPHA_VANTAGE_API_KEY) {
-      if (!checkRateLimit('alphavantage')) {
-        logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
-          `Rate limit exceeded for Alpha Vantage`, { ticker });
-      } else {
-        const startTime = Date.now();
-        try {
-          const endpoint = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_API_KEY}`;
-          const response = await fetch(endpoint);
-          const responseTime = Date.now() - startTime;
-          
-          if (response.ok) {
-            const data = await response.json() as any;
-            
-            if (data['Global Quote'] && data['Global Quote']['05. price']) {
-              const price = parseFloat(data['Global Quote']['05. price']);
-              const change = parseFloat(data['Global Quote']['09. change'] || '0');
-              const changePercent = parseFloat(data['Global Quote']['10. change percent']?.replace('%', '') || '0') / 100;
-              
-              tickerData = {
-                ticker,
-                price,
-                dailyChange: change,
-                dailyChangePercent: changePercent,
-              };
-              sourceUsed = 'Alpha Vantage';
-              logger.logMarketData('Alpha Vantage', ticker, true, price);
-              logger.logApiCall('Alpha Vantage', 'GLOBAL_QUOTE', true, response.status, undefined, responseTime);
-              recordMarketDataResult('alphaVantage', true);
-            }
-          }
-          if (!tickerData) {
-            const failureMessage = response.ok
-              ? 'Alpha Vantage response missing data'
-              : `Alpha Vantage HTTP ${response.status}`;
-            recordMarketDataResult('alphaVantage', false, failureMessage);
-          }
-        } catch (error) {
-          console.warn(`Alpha Vantage failed for ${ticker}`);
-          const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
-          recordMarketDataResult('alphaVantage', false, errorMessage);
-        }
-      }
-    }
 
-    // Try Polygon
-    if (!tickerData && POLYGON_API_KEY) {
-      if (!checkRateLimit('polygon')) {
-        logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
-          `Rate limit exceeded for Polygon`, { ticker });
-      } else {
-        const startTime = Date.now();
-        try {
-          const endpoint = `https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-          const response = await fetch(endpoint);
-          const responseTime = Date.now() - startTime;
-          
-          if (response.ok) {
-            const data = await response.json() as any;
-            
-            if (data.results && data.results.length > 0) {
-              const result = data.results[0];
-              const currentPrice = result.c;
-              const openPrice = result.o;
-              const dailyChange = currentPrice - openPrice;
-              const dailyChangePercent = openPrice > 0 ? dailyChange / openPrice : 0;
-              
-              tickerData = {
-                ticker,
-                price: currentPrice,
-                dailyChange,
-                dailyChangePercent,
-              };
-              sourceUsed = 'Polygon.io';
-              logger.logMarketData('Polygon.io', ticker, true, currentPrice);
-              logger.logApiCall('Polygon.io', 'prev', true, response.status, undefined, responseTime);
-              recordMarketDataResult('polygon', true);
-            }
-          }
-          if (!tickerData) {
-            const failureMessage = response.ok
-              ? 'Polygon response missing data'
-              : `Polygon HTTP ${response.status}`;
-            recordMarketDataResult('polygon', false, failureMessage);
-          }
-        } catch (error) {
-          console.warn(`Polygon failed for ${ticker}`);
-          const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
-          recordMarketDataResult('polygon', false, errorMessage);
-        }
-      }
-    }
-    
-    // Fallback to simulated
-    if (!tickerData) {
-      const fallbackPrice = 50 + Math.random() * 250;
-      tickerData = {
-        ticker,
-        price: fallbackPrice,
-        dailyChange: 0,
-        dailyChangePercent: 0,
-      };
-      sourceUsed = 'Simulated (fallback)';
-      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
-        `All data sources failed for ${ticker}, using simulated data`, { ticker, fallbackPrice });
-    }
-    
-    marketData[ticker] = tickerData;
-    
-    // Rate limiting delay: 
-    // - For delayed data (historical endpoints): 100ms is fine (historical endpoints are very lenient)
-    // - For real-time data: 200ms (test showed no delays work, minimal delay for safety)
-    // Since test showed no delays work fine, we use very minimal delays
+  for (const ticker of tickers) {
+    marketData[ticker] = await fetchTickerWithCascade(ticker, useCache);
+
     const minDelay = USE_DELAYED_DATA ? 100 : 200;
     await new Promise(resolve => setTimeout(resolve, minDelay));
   }
-  
+
   return marketData;
+};
+
+export const prefetchRealtimeMarketData = async (
+  tickers: string[],
+  options: RealtimePrefetchOptions,
+): Promise<RealtimePrefetchResult> => {
+  const {
+    intervalMs,
+    guardMs = parseInt(process.env.REALTIME_FETCH_GUARD_MS || '5000', 10),
+    batchSize = parseInt(process.env.REALTIME_FETCH_BATCH_SIZE || '8', 10),
+    minPauseMs = parseInt(process.env.REALTIME_FETCH_MIN_PAUSE_MS || '150', 10),
+    useCache = false,
+  } = options;
+
+  const startedAt = Date.now();
+  const marketData: MarketData = {};
+  const missingTickers: string[] = [];
+  const totalTickers = tickers.length;
+
+  if (totalTickers === 0) {
+    return {
+      marketData,
+      missingTickers,
+      startedAt,
+      finishedAt: startedAt,
+      durationMs: 0,
+      totalTickers,
+    };
+  }
+
+  const effectiveBatchSize = Math.max(batchSize, 1);
+  const batches: string[][] = [];
+  for (let i = 0; i < tickers.length; i += effectiveBatchSize) {
+    batches.push(tickers.slice(i, i + effectiveBatchSize));
+  }
+
+  const targetBudget = Math.max(intervalMs - guardMs, 0);
+
+  logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+    'Starting real-time prefetch for next tick', {
+      tickers: totalTickers,
+      batches: batches.length,
+      intervalMs,
+      guardMs,
+      batchSize: effectiveBatchSize,
+      targetBudget,
+    });
+
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batchTickers = batches[batchIndex];
+    const results = await Promise.all(batchTickers.map(async ticker => {
+      try {
+        const data = await fetchTickerWithCascade(ticker, useCache);
+        return { ticker, data };
+      } catch (error) {
+        logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
+          'Error during real-time prefetch fetch', {
+            ticker,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        return { ticker, data: null };
+      }
+    }));
+
+    results.forEach(result => {
+      if (result.data) {
+        marketData[result.ticker] = result.data;
+      } else {
+        missingTickers.push(result.ticker);
+      }
+    });
+
+    if (batchIndex < batches.length - 1 && targetBudget > 0) {
+      const elapsed = Date.now() - startedAt;
+      const remainingBatches = batches.length - batchIndex - 1;
+      const remainingBudget = Math.max(targetBudget - elapsed, 0);
+      let pauseMs = remainingBatches > 0
+        ? Math.floor(remainingBudget / remainingBatches)
+        : 0;
+      pauseMs = Math.max(pauseMs, minPauseMs);
+      if (pauseMs > 0) {
+        await sleep(pauseMs);
+      }
+    }
+  }
+
+  const finishedAt = Date.now();
+  const durationMs = finishedAt - startedAt;
+
+  if (durationMs > intervalMs) {
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+      'Real-time prefetch exceeded interval duration', {
+        durationMs,
+        intervalMs,
+        guardMs,
+        tickers: totalTickers,
+      });
+  }
+
+  if (missingTickers.length > 0) {
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+      'Prefetch completed with missing tickers', {
+        missingCount: missingTickers.length,
+        sample: missingTickers.slice(0, 5),
+      });
+  }
+
+  return {
+    marketData,
+    missingTickers,
+    startedAt,
+    finishedAt,
+    durationMs,
+    totalTickers,
+  };
 };
 
 const fetchHistoricalWeekData = async (tickers: string[]): Promise<{ [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] }> => {
@@ -797,7 +932,12 @@ const getIntradayPrice = (basePrice: number, dailyChangePercent: number, intrada
   return basePrice + intradayVariation + (basePrice * volatility);
 };
 
-export const generateNextIntradayMarketData = async (previousMarketData: MarketData, day: number, intradayHour: number): Promise<MarketData> => {
+export const generateNextIntradayMarketData = async (
+  previousMarketData: MarketData,
+  day: number,
+  intradayHour: number,
+  options?: { prefetchedData?: MarketData; missingTickers?: string[] }
+): Promise<MarketData> => {
   if (MODE === 'historical') {
     let tickers = Object.keys(previousMarketData);
     if (tickers.length === 0) {
@@ -850,17 +990,40 @@ export const generateNextIntradayMarketData = async (previousMarketData: MarketD
     return marketData;
   } else if (MODE === 'realtime') {
     const tickers = Object.keys(previousMarketData);
-    // Use cache for real-time updates (cache TTL is 1 minute, which matches our 10-minute update interval)
-    const newMarketData = await fetchRealMarketDataWithCascade(tickers, true);
-    
-    // If cascade fails for some tickers, use previous data as fallback
+    let fetchedData: MarketData = {};
+    let usedPrefetch = false;
+
+    if (options?.prefetchedData && Object.keys(options.prefetchedData).length > 0) {
+      fetchedData = { ...options.prefetchedData };
+      usedPrefetch = true;
+      const missing = options.missingTickers ?? tickers.filter(ticker => !fetchedData[ticker]);
+      if (missing.length > 0) {
+        logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+          'Prefetched data missing tickers, fetching fallbacks', {
+            missingCount: missing.length,
+          });
+        const fallbackData = await fetchRealMarketDataWithCascade(missing, false);
+        fetchedData = { ...fetchedData, ...fallbackData };
+      }
+    } else {
+      // Use cache for real-time updates (cache TTL is 1 minute, which matches our default update interval)
+      fetchedData = await fetchRealMarketDataWithCascade(tickers, true);
+    }
+
+    if (usedPrefetch) {
+      logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+        'Applying prefetched real-time market data to snapshot', {
+          tickers: Object.keys(fetchedData).length,
+        });
+    }
+
     const result: MarketData = { ...previousMarketData };
-    Object.keys(newMarketData).forEach(ticker => {
-      if (newMarketData[ticker]) {
-        result[ticker] = newMarketData[ticker];
+    Object.keys(fetchedData).forEach(ticker => {
+      if (fetchedData[ticker]) {
+        result[ticker] = fetchedData[ticker];
       }
     });
-    
+
     return result;
   }
   
