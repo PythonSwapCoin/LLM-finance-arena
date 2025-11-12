@@ -54,12 +54,18 @@ class SimulationState {
     let startDate: string;
     let currentDate: string;
 
+    const getMarketOpenDate = (source: Date): string => {
+      const marketOpen = new Date(source);
+      marketOpen.setHours(9, 30, 0, 0);
+      return marketOpen.toISOString();
+    };
+
     if (mode === 'historical') {
       // Use historical period start date
       const { getHistoricalSimulationStartDate } = await import('../services/marketDataService');
       const histStart = getHistoricalSimulationStartDate();
       startDate = histStart.toISOString();
-      currentDate = histStart.toISOString();
+      currentDate = startDate;
     } else if (mode === 'realtime') {
       // Use current date/time for real-time start
       startDate = now.toISOString();
@@ -77,9 +83,9 @@ class SimulationState {
         currentDate = now.toISOString();
       }
     } else {
-      // Simulated: use current date as starting point
-      startDate = now.toISOString();
-      currentDate = now.toISOString();
+      // Simulated: begin at the market open of the current day
+      startDate = getMarketOpenDate(now);
+      currentDate = startDate;
     }
 
     // For real-time mode, also set currentTimestamp

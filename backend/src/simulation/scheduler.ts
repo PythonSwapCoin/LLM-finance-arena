@@ -185,12 +185,21 @@ export const startScheduler = async (): Promise<void> => {
         // Process only if market is open
         // Even with delayed data, stop processing when market is closed
         if (!marketOpen) {
-          logger.log(LogLevel.INFO, LogCategory.SIMULATION, 
-            `Skipping price tick: market closed (ET time: ${etTimeString})`, {
-              etTime: etTimeString,
-              marketOpen
-            });
-          return; // Skip processing when market is closed
+          if (USE_DELAYED_DATA) {
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              `Market closed (ET time: ${etTimeString}) but processing delayed data tick`, {
+                etTime: etTimeString,
+                marketOpen,
+                useDelayedData: USE_DELAYED_DATA
+              });
+          } else {
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              `Skipping price tick: market closed (ET time: ${etTimeString})`, {
+                etTime: etTimeString,
+                marketOpen
+              });
+            return; // Skip processing when market is closed
+          }
         }
         
         // Map real market time to intraday hours (9:30 AM - 4:00 PM ET = 6.5 hours)
@@ -656,9 +665,14 @@ export const startScheduler = async (): Promise<void> => {
       
       // Only allow trading if market is open
       if (!marketOpen) {
-        logger.log(LogLevel.INFO, LogCategory.SIMULATION, 
-          'Skipping trade window: market closed', { marketOpen, etTime: etTimeString });
-        return; // Skip trading when market is closed
+        if (USE_DELAYED_DATA) {
+          logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+            'Market closed but executing delayed data trade window', { marketOpen, etTime: etTimeString });
+        } else {
+          logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+            'Skipping trade window: market closed', { marketOpen, etTime: etTimeString });
+          return; // Skip trading when market is closed
+        }
       }
       
       // Calculate intraday hour for reference
