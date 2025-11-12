@@ -1,20 +1,23 @@
 import type { SimulationSnapshot } from '../types.js';
 import { promises as fs } from 'fs';
-import { dirname } from 'path';
+import { dirname, isAbsolute, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const PERSIST_PATH = process.env.PERSIST_PATH || './data/snapshot.json';
+const DEFAULT_PERSIST_PATH = './data/snapshot.json';
+
+export const getPersistFilePath = (): string => {
+  const persistPath = process.env.PERSIST_PATH || DEFAULT_PERSIST_PATH;
+  return isAbsolute(persistPath) ? persistPath : resolve(process.cwd(), persistPath);
+};
 
 // JSON file adapter
 export const loadSnapshot = async (): Promise<SimulationSnapshot | null> => {
   try {
-    const fullPath = PERSIST_PATH.startsWith('/') 
-      ? PERSIST_PATH 
-      : `${process.cwd()}/${PERSIST_PATH}`;
+    const fullPath = getPersistFilePath();
     
     // Ensure directory exists
     const dir = dirname(fullPath);
@@ -44,9 +47,7 @@ export const loadSnapshot = async (): Promise<SimulationSnapshot | null> => {
 
 export const saveSnapshot = async (snapshot: SimulationSnapshot): Promise<void> => {
   try {
-    const fullPath = PERSIST_PATH.startsWith('/') 
-      ? PERSIST_PATH 
-      : `${process.cwd()}/${PERSIST_PATH}`;
+    const fullPath = getPersistFilePath();
     
     // Ensure directory exists
     const dir = dirname(fullPath);

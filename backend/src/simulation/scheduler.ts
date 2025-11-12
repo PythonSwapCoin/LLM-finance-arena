@@ -693,6 +693,11 @@ export const stopScheduler = (): void => {
     clearInterval(exportInterval);
     exportInterval = null;
   }
+
+  saveSnapshot(simulationState.getSnapshot()).catch(err => {
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+      'Failed to persist snapshot when stopping scheduler', { error: err });
+  });
 };
 
 export const isSchedulerRunning = (): boolean => {
