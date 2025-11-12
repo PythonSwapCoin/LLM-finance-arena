@@ -5,6 +5,15 @@ const DEFAULT_TICKERS: string[] = [
   'V', 'UNH', 'PG', 'MA', 'HD', 'BAC', 'DIS', 'PFE', 'XOM', 'CVX'
 ];
 
+const parseNumberEnv = (value: string | undefined | null, fallback: number): number => {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const parseTickers = (rawList: string | undefined | null): string[] => {
   if (!rawList) {
     return [];
@@ -16,8 +25,12 @@ const parseTickers = (rawList: string | undefined | null): string[] => {
 };
 
 const configuredTickers = parseTickers(process.env.ARENA_TICKERS || process.env.S_P500_TICKERS);
+const resolvedTickers = configuredTickers.length > 0 ? configuredTickers : DEFAULT_TICKERS;
 
-export const S_P500_TICKERS: string[] = configuredTickers.length > 0 ? configuredTickers : DEFAULT_TICKERS;
+const requestedTickerCount = Math.floor(Math.max(1, parseNumberEnv(process.env.ARENA_TICKER_COUNT, resolvedTickers.length)));
+const limitedTickerCount = Math.min(requestedTickerCount, resolvedTickers.length);
+
+export const S_P500_TICKERS: string[] = resolvedTickers.slice(0, limitedTickerCount);
 
 export const INITIAL_CASH = 10000;
 export const RISK_FREE_RATE = 0.02;
@@ -29,15 +42,6 @@ export const AGENT_COLORS = ['#8884d8', '#ffc658', '#82ca9d', '#ff8042', '#00C49
 export const BENCHMARK_COLORS = {
   [S_P500_BENCHMARK_ID]: '#A3A3A3',
   [AI_MANAGERS_INDEX_ID]: '#F5F5F5'
-};
-
-const parseNumberEnv = (value: string | undefined | null, fallback: number): number => {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 const tradingFeeBps = Math.max(0, parseNumberEnv(process.env.TRADING_FEE_BPS, 5));

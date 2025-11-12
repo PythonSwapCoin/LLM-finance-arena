@@ -37,7 +37,7 @@ LLM Finance Arena is a full-stack benchmarking platform that evaluates large-lan
    ```bash
    cp .env.example .env.local
    ```
-   Edit `.env.local` to add `VITE_OPENROUTER_API_KEY` and optional market data flags (`VITE_USE_REAL_DATA`, `VITE_USE_HISTORICAL_SIMULATION`, etc.).
+   The only frontend variable is `VITE_API_BASE`, which points the UI at your backend (defaults to `http://localhost:8080/api`).
 3. **Install backend dependencies**
    ```bash
    cd backend
@@ -62,10 +62,17 @@ LLM Finance Arena is a full-stack benchmarking platform that evaluates large-lan
 
 ## Simulation Modes
 - **Simulated (default):** High-frequency random ticks—no external APIs required; great for quick demos and component development.
-- **Real-time:** Fetches live quotes through a Yahoo → Alpha Vantage → Polygon cascade. Enable by setting `MODE=realtime` on the backend and `VITE_USE_REAL_DATA=true` on the frontend.
-- **Historical week:** Replays a specific trading week end-to-end. Set `MODE=historical` plus `HISTORICAL_SIMULATION_START_DATE` server-side and `VITE_USE_HISTORICAL_SIMULATION=true` client-side.
+- **Real-time:** Fetches live quotes through a Yahoo → Alpha Vantage → Polygon cascade. Enable by setting `MODE=realtime` on the backend and providing the appropriate market-data API keys.
+- **Historical week:** Replays a specific trading week end-to-end. Set `MODE=historical` plus `HISTORICAL_SIMULATION_START_DATE` on the backend configuration.
 
 Each mode drives the same set of REST endpoints, so the UI updates automatically when the backend switches modes.
+
+## Trading Universe, Fees, and Cadence
+- **What the bots can buy:** The backend exposes a curated list of tickers to every agent. Override it with `ARENA_TICKERS=AAPL,MSFT,...` or cap the breadth with `ARENA_TICKER_COUNT` (default uses the first 20 symbols from the built-in S&P heavyweights).
+- **Starting capital & sizing:** Agents begin with $10,000 (configurable via `INITIAL_CASH`) and cannot allocate more than `MAX_POSITION_SIZE_PERCENT` of portfolio value to any single name.
+- **Execution costs:** Set `TRADING_FEE_BPS` (basis points) and `MIN_TRADE_FEE` to model per-trade commissions; the defaults charge 5 bps with a $0.25 floor. These fees are applied whenever the engine executes a buy or sell.
+- **Cadence of decisions:** The scheduler asks each agent for trades on a rolling interval—`TRADE_INTERVAL_MS` (default 2 hours) in simulated/historical modes and `REALTIME_TRADE_INTERVAL_MS` (default 30 minutes) in real-time. Between those checkpoints, intraday price ticks continue to update portfolio marks.
+- **Mandatory activity:** The shared LLM system prompt enforces at least one trade per day when cash is available, ensuring agents stay invested instead of sitting in 100% cash.
 
 ## Backend API Surface
 Key endpoints exposed by `backend/src/api/routes.ts`:
