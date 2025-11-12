@@ -1,10 +1,36 @@
-import type { SimulationSnapshot, Agent, Benchmark, MarketData } from '../types.js';
+import type { SimulationSnapshot, Agent, Benchmark, MarketData, ChatState, ChatConfig, ChatMessage } from '../types.js';
 import { INITIAL_AGENTS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getSimulationMode } from '../services/marketDataService.js';
+import { cloneChatMessages } from '../utils/chatUtils.js';
 
 class SimulationState {
   private snapshot: SimulationSnapshot;
+
+  private buildChatConfig(): ChatConfig {
+    const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
+      if (value === undefined) {
+        return fallback;
+      }
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
+    return {
+      enabled: (process.env.CHAT_ENABLED ?? 'true') !== 'false',
+      maxMessagesPerAgent: Math.max(1, parseIntWithDefault(process.env.CHAT_MAX_MESSAGES_PER_AGENT, 3)),
+      maxMessagesPerUser: Math.max(1, parseIntWithDefault(process.env.CHAT_MAX_MESSAGES_PER_USER, 2)),
+      maxMessageLength: Math.max(40, parseIntWithDefault(process.env.CHAT_MESSAGE_MAX_LENGTH, 140)),
+    };
+  }
+
+  private createChatState(messages: ChatMessage[] = []): ChatState {
+    const config = this.buildChatConfig();
+    return {
+      config,
+      messages: cloneChatMessages(messages),
+    };
+  }
 
   constructor() {
     this.snapshot = {
@@ -14,6 +40,7 @@ class SimulationState {
       agents: [],
       benchmarks: [],
       mode: getSimulationMode(),
+      chat: this.createChatState(),
       lastUpdated: new Date().toISOString(),
     };
   }
@@ -111,18 +138,31 @@ class SimulationState {
       startDate,
       currentDate,
       currentTimestamp,
+      chat: this.createChatState(),
       lastUpdated: new Date().toISOString(),
     };
   }
 
   getSnapshot(): SimulationSnapshot {
-    return { ...this.snapshot };
+    return {
+      ...this.snapshot,
+      chat: {
+        config: { ...this.snapshot.chat.config },
+        messages: cloneChatMessages(this.snapshot.chat.messages),
+      },
+    };
   }
 
   updateSnapshot(updates: Partial<SimulationSnapshot>): void {
     this.snapshot = {
       ...this.snapshot,
       ...updates,
+      chat: updates.chat
+        ? {
+            config: { ...updates.chat.config },
+            messages: cloneChatMessages(updates.chat.messages),
+          }
+        : this.snapshot.chat,
       lastUpdated: new Date().toISOString(),
     };
   }
@@ -176,8 +216,27 @@ class SimulationState {
     this.snapshot.lastUpdated = new Date().toISOString();
   }
 
+  getChat(): ChatState {
+    return {
+      config: { ...this.snapshot.chat.config },
+      messages: cloneChatMessages(this.snapshot.chat.messages),
+    };
+  }
+
+  setChat(chat: ChatState): void {
+    this.snapshot.chat = {
+      config: { ...chat.config },
+      messages: cloneChatMessages(chat.messages),
+    };
+    this.snapshot.lastUpdated = new Date().toISOString();
+  }
+
   loadFromSnapshot(snapshot: SimulationSnapshot): void {
-    this.snapshot = { ...snapshot };
+    const restoredChat = snapshot.chat ? this.createChatState(snapshot.chat.messages) : this.createChatState();
+    this.snapshot = {
+      ...snapshot,
+      chat: restoredChat,
+    };
   }
 }
 

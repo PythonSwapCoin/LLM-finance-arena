@@ -64,6 +64,31 @@ export interface Portfolio {
   positions: { [ticker: string]: Position };
 }
 
+export type ChatSenderType = 'user' | 'agent';
+
+export interface ChatMessage {
+  id: string;
+  agentId: string;
+  agentName: string;
+  sender: string;
+  senderType: ChatSenderType;
+  content: string;
+  roundId: string;
+  createdAt: string;
+}
+
+export interface ChatConfig {
+  enabled: boolean;
+  maxMessagesPerAgent: number;
+  maxMessagesPerUser: number;
+  maxMessageLength: number;
+}
+
+export interface ChatState {
+  config: ChatConfig;
+  messages: ChatMessage[];
+}
+
 export interface PerformanceMetrics {
   totalValue: number;
   totalReturn: number;

@@ -1,4 +1,4 @@
-import type { MarketDataTelemetry } from '../types';
+import type { MarketDataTelemetry, ChatState, ChatMessage } from '../types';
 
 // API client for backend communication
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
@@ -10,6 +10,7 @@ export interface SimulationStateResponse {
     marketData: { [ticker: string]: any };
     agents: any[];
     benchmarks: any[];
+    chat: ChatState;
     mode: 'simulated' | 'realtime' | 'historical';
     historicalPeriod?: {
       start: string;
@@ -66,6 +67,11 @@ export interface LogsResponse {
   }>;
 }
 
+export interface ChatMessageResponse {
+  chat: ChatState;
+  message: ChatMessage;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -82,12 +88,28 @@ class ApiClient {
         ...options?.headers,
       },
     });
+    const rawBody = await response.text();
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      let errorMessage = `API request failed: ${response.status} ${response.statusText}`;
+      if (rawBody) {
+        try {
+          const errorData = JSON.parse(rawBody);
+          if (errorData?.error) {
+            errorMessage = errorData.error;
+          }
+        } catch {
+          errorMessage = rawBody;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
-    return response.json();
+    if (!rawBody) {
+      return undefined as T;
+    }
+
+    return JSON.parse(rawBody) as T;
   }
 
   async getStatus(): Promise<{
@@ -149,6 +171,13 @@ class ApiClient {
     if (limit) params.append('limit', limit.toString());
     const query = params.toString();
     return this.request<LogsResponse>(`/logs${query ? `?${query}` : ''}`);
+  }
+
+  async sendChatMessage(payload: { username: string; agentId: string; content: string }): Promise<ChatMessageResponse> {
+    return this.request<ChatMessageResponse>('/chat/messages', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 }
 

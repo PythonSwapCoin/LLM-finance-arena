@@ -5,6 +5,8 @@ import type {
   MarketData,
   PerformanceMetrics,
   MarketDataTelemetry,
+  ChatState,
+  ChatMessage,
 } from '../types.js';
 
 // Response DTOs matching the old hook output shape
@@ -57,5 +59,10 @@ export interface LogsResponse {
     details?: any;
     error?: string;
   }>;
+}
+
+export interface ChatMessageResponse {
+  chat: ChatState;
+  message: ChatMessage;
 }
 
