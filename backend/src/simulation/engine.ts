@@ -101,6 +101,326 @@ const processAgentsWithPacing = async <T>(
   return results;
 };
 
+const handleTradeWindowAgent = async (
+  agent: Agent,
+  options: {
+    marketData: MarketData;
+    day: number;
+    intradayHour: number;
+    mode: 'simulated' | 'realtime' | 'historical' | undefined;
+    timestamp: number;
+    currentTimestamp?: number;
+  }
+): Promise<Agent> => {
+  const { marketData, day, intradayHour, mode, timestamp, currentTimestamp } = options;
+
+  try {
+    const tradeDecision = await Promise.race([
+      getTradeDecisions(agent, marketData, day, 30000),
+      new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string }>((_, reject) =>
+        setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
+      )
+    ]).catch(error => {
+      console.warn(`[${agent.name}] Trade decision timeout or error:`, error);
+      logger.logSimulationEvent(`Trade decision error for ${agent.name}`, {
+        agent: agent.name,
+        day,
+        hour: intradayHour,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return { trades: [], rationale: `Trade decision unavailable - holding positions. ${error instanceof Error ? error.message : String(error)}` };
+    });
+
+    const { trades: decidedTrades, rationale } = tradeDecision;
+    const newTradeHistory = [...agent.tradeHistory];
+    const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
+
+    decidedTrades.forEach(trade => {
+      const tradePrice = marketData[trade.ticker]?.price;
+      if (!tradePrice) {
+        console.warn(`[${agent.name}] Skipping trade for ${trade.ticker} - price not available`);
+        return;
+      }
+
+      if (trade.action === 'buy') {
+        const notional = trade.quantity * tradePrice;
+        const fees = calculateExecutionFee(notional);
+        const totalCost = notional + fees;
+
+        if (newPortfolio.cash >= totalCost) {
+          newPortfolio.cash -= totalCost;
+          const existingPosition = newPortfolio.positions[trade.ticker];
+          if (existingPosition) {
+            const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + notional;
+            existingPosition.quantity += trade.quantity;
+            existingPosition.averageCost = aggregateCost / existingPosition.quantity;
+            if (trade.fairValue !== undefined) {
+              existingPosition.lastFairValue = trade.fairValue;
+              existingPosition.lastTopOfBox = trade.topOfBox;
+              existingPosition.lastBottomOfBox = trade.bottomOfBox;
+            }
+          } else {
+            newPortfolio.positions[trade.ticker] = {
+              ticker: trade.ticker,
+              quantity: trade.quantity,
+              averageCost: tradePrice,
+              lastFairValue: trade.fairValue,
+              lastTopOfBox: trade.topOfBox,
+              lastBottomOfBox: trade.bottomOfBox,
+            };
+          }
+          newTradeHistory.push({
+            ...trade,
+            price: tradePrice,
+            timestamp,
+            fairValue: trade.fairValue,
+            topOfBox: trade.topOfBox,
+            bottomOfBox: trade.bottomOfBox,
+            justification: trade.justification,
+            fees,
+          });
+          logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
+        } else {
+          const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
+          console.warn(`[${agent.name}] Insufficient cash for ${trade.quantity} shares of ${trade.ticker}`);
+          logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
+        }
+      } else if (trade.action === 'sell') {
+        const existingPosition = newPortfolio.positions[trade.ticker];
+        if (existingPosition && existingPosition.quantity > 0) {
+          const quantityToSell = Math.min(trade.quantity, existingPosition.quantity);
+          if (quantityToSell < trade.quantity) {
+            console.warn(`[${agent.name}] Attempted to sell ${trade.quantity} shares of ${trade.ticker} but only owns ${existingPosition.quantity}. Selling ${quantityToSell} instead.`);
+          }
+          const notional = quantityToSell * tradePrice;
+          const fees = quantityToSell > 0 ? calculateExecutionFee(notional) : 0;
+          newPortfolio.cash += notional - fees;
+          existingPosition.quantity -= quantityToSell;
+          if (existingPosition.quantity === 0) {
+            delete newPortfolio.positions[trade.ticker];
+          }
+          newTradeHistory.push({
+            ...trade,
+            quantity: quantityToSell,
+            price: tradePrice,
+            timestamp,
+            fairValue: trade.fairValue,
+            topOfBox: trade.topOfBox,
+            bottomOfBox: trade.bottomOfBox,
+            justification: trade.justification,
+            fees,
+          });
+          logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true, undefined, fees);
+        } else {
+          const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
+          console.warn(`[${agent.name}] Cannot sell ${trade.quantity} shares of ${trade.ticker} - ${errorMsg}`);
+          logger.logTrade(agent.name, trade.ticker, 'sell', trade.quantity, tradePrice, false, errorMsg);
+        }
+      }
+    });
+
+    const intradayTrades = newTradeHistory.filter(t => {
+      if (mode === 'realtime' && currentTimestamp !== undefined) {
+        const tradeTimestamp = currentTimestamp / 1000;
+        return Math.abs(t.timestamp - tradeTimestamp) < 60;
+      }
+      const timestampDiff = Math.abs(t.timestamp - timestamp);
+      return timestampDiff < 0.01;
+    });
+    const newMetrics = calculateAllMetrics(newPortfolio, marketData, agent.performanceHistory, timestamp, intradayTrades);
+    newMetrics.intradayHour = intradayHour;
+
+    const updatedMemory = {
+      recentTrades: [...(agent.memory?.recentTrades || []), ...decidedTrades.map(t => {
+        const executedPrice = marketData[t.ticker]?.price || 0;
+        const estimatedNotional = t.quantity * executedPrice;
+        const fees = executedPrice > 0 ? calculateExecutionFee(estimatedNotional) : undefined;
+        return { ...t, price: executedPrice, timestamp, fees } as Trade;
+      })].slice(-10),
+      pastRationales: [...(agent.memory?.pastRationales || []), rationale].slice(-5),
+      pastPerformance: [...(agent.memory?.pastPerformance || []), newMetrics].slice(-10),
+    };
+
+    return {
+      ...agent,
+      portfolio: newPortfolio,
+      tradeHistory: newTradeHistory,
+      performanceHistory: [...agent.performanceHistory, newMetrics],
+      rationale,
+      rationaleHistory: {
+        ...agent.rationaleHistory,
+        [day]: rationale
+      },
+      memory: updatedMemory,
+    };
+  } catch (error) {
+    console.error(`Failed to process agent ${agent.name}:`, error);
+    logger.logSimulationEvent(`Agent processing failed: ${agent.name}`, {
+      agent: agent.name,
+      day,
+      hour: intradayHour,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    const errorRationale = `Error: Could not retrieve trade decision. Holding positions. ${error}`;
+    const newMetrics = calculateAllMetrics(agent.portfolio, marketData, agent.performanceHistory, timestamp);
+    newMetrics.intradayHour = intradayHour;
+    return {
+      ...agent,
+      performanceHistory: [...agent.performanceHistory, newMetrics],
+      rationale: errorRationale,
+      rationaleHistory: {
+        ...agent.rationaleHistory,
+        [day]: errorRationale
+      }
+    };
+  }
+};
+
+const handleAdvanceDayAgent = async (
+  agent: Agent,
+  options: {
+    nextDay: number;
+    marketData: MarketData;
+  }
+): Promise<Agent> => {
+  const { nextDay, marketData } = options;
+
+  try {
+    const { trades: decidedTrades, rationale } = await Promise.race([
+      getTradeDecisions(agent, marketData, nextDay, 30000),
+      new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string }>((_, reject) =>
+        setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
+      )
+    ]).catch(error => {
+      console.warn(`[${agent.name}] Trade decision timeout or error:`, error);
+      return { trades: [], rationale: `Trade decision unavailable - holding positions. ${error instanceof Error ? error.message : String(error)}` };
+    });
+
+    const newTradeHistory = [...agent.tradeHistory];
+    const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
+
+    decidedTrades.forEach(trade => {
+      const tradePrice = marketData[trade.ticker]?.price;
+      if (!tradePrice) {
+        console.warn(`[${agent.name}] Skipping trade for ${trade.ticker} - price not available`);
+        return;
+      }
+
+      if (trade.action === 'buy') {
+        const notional = trade.quantity * tradePrice;
+        const fees = calculateExecutionFee(notional);
+        const totalCost = notional + fees;
+
+        if (newPortfolio.cash >= totalCost) {
+          newPortfolio.cash -= totalCost;
+          const existingPosition = newPortfolio.positions[trade.ticker];
+          if (existingPosition) {
+            const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + notional;
+            existingPosition.quantity += trade.quantity;
+            existingPosition.averageCost = aggregateCost / existingPosition.quantity;
+            if (trade.fairValue !== undefined) {
+              existingPosition.lastFairValue = trade.fairValue;
+              existingPosition.lastTopOfBox = trade.topOfBox;
+              existingPosition.lastBottomOfBox = trade.bottomOfBox;
+            }
+          } else {
+            newPortfolio.positions[trade.ticker] = {
+              ticker: trade.ticker,
+              quantity: trade.quantity,
+              averageCost: tradePrice,
+              lastFairValue: trade.fairValue,
+              lastTopOfBox: trade.topOfBox,
+              lastBottomOfBox: trade.bottomOfBox,
+            };
+          }
+          newTradeHistory.push({
+            ...trade,
+            price: tradePrice,
+            timestamp: nextDay,
+            fairValue: trade.fairValue,
+            topOfBox: trade.topOfBox,
+            bottomOfBox: trade.bottomOfBox,
+            justification: trade.justification,
+            fees,
+          });
+          logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
+        } else {
+          const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
+          logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
+        }
+      } else if (trade.action === 'sell') {
+        const existingPosition = newPortfolio.positions[trade.ticker];
+        if (existingPosition && existingPosition.quantity > 0) {
+          const quantityToSell = Math.min(trade.quantity, existingPosition.quantity);
+          const notional = quantityToSell * tradePrice;
+          const fees = quantityToSell > 0 ? calculateExecutionFee(notional) : 0;
+          newPortfolio.cash += notional - fees;
+          existingPosition.quantity -= quantityToSell;
+          if (existingPosition.quantity === 0) {
+            delete newPortfolio.positions[trade.ticker];
+          }
+          newTradeHistory.push({
+            ...trade,
+            quantity: quantityToSell,
+            price: tradePrice,
+            timestamp: nextDay,
+            fairValue: trade.fairValue,
+            topOfBox: trade.topOfBox,
+            bottomOfBox: trade.bottomOfBox,
+            justification: trade.justification,
+            fees,
+          });
+          logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true, undefined, fees);
+        } else {
+          const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
+          logger.logTrade(agent.name, trade.ticker, 'sell', trade.quantity, tradePrice, false, errorMsg);
+        }
+      }
+    });
+
+    const dailyTrades = newTradeHistory.filter(t => Math.floor(t.timestamp) === nextDay);
+    const newMetrics = calculateAllMetrics(newPortfolio, marketData, agent.performanceHistory, nextDay, dailyTrades);
+    newMetrics.intradayHour = 0;
+
+    const updatedMemory = {
+      recentTrades: [...(agent.memory?.recentTrades || []), ...dailyTrades].slice(-10),
+      pastRationales: [...(agent.memory?.pastRationales || []), rationale].slice(-5),
+      pastPerformance: [...(agent.memory?.pastPerformance || []), newMetrics].slice(-10),
+    };
+
+    return {
+      ...agent,
+      portfolio: newPortfolio,
+      tradeHistory: newTradeHistory,
+      performanceHistory: [...agent.performanceHistory, newMetrics],
+      rationale,
+      rationaleHistory: {
+        ...agent.rationaleHistory,
+        [nextDay]: rationale
+      },
+      memory: updatedMemory,
+    };
+  } catch (error) {
+    console.error(`Failed to process agent ${agent.name}:`, error);
+    logger.logSimulationEvent(`Agent processing failed: ${agent.name}`, {
+      agent: agent.name,
+      day: nextDay,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    const errorRationale = `Error: Could not retrieve trade decision. Holding positions. ${error}`;
+    const newMetrics = calculateAllMetrics(agent.portfolio, marketData, agent.performanceHistory, nextDay);
+    return {
+      ...agent,
+      performanceHistory: [...agent.performanceHistory, newMetrics],
+      rationale: errorRationale,
+      rationaleHistory: {
+        ...agent.rationaleHistory,
+        [nextDay]: errorRationale
+      }
+    };
+  }
+};
+
 // Pure function: step the simulation forward with new prices
 export const step = async (
   currentSnapshot: {
@@ -231,168 +551,14 @@ export const tradeWindow = async (
     timestamp = currentTimestamp / 1000; // Convert to seconds
   }
 
-  const updatedAgents: Agent[] = await processAgentsWithPacing(agents, mode, async (agent) => {
-      try {
-        const tradeDecision = await Promise.race([
-          getTradeDecisions(agent, marketData, day, 30000),
-          new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[], rationale: string }>((_, reject) =>
-            setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
-          )
-        ]).catch(error => {
-          console.warn(`[${agent.name}] Trade decision timeout or error:`, error);
-          logger.logSimulationEvent(`Trade decision error for ${agent.name}`, { 
-            agent: agent.name, 
-            day, 
-            hour: intradayHour, 
-            error: error instanceof Error ? error.message : String(error) 
-          });
-          return { trades: [], rationale: `Trade decision unavailable - holding positions. ${error instanceof Error ? error.message : String(error)}` };
-        });
-
-        const { trades: decidedTrades, rationale } = tradeDecision;
-        const newTradeHistory = [...agent.tradeHistory];
-        const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
-        
-        decidedTrades.forEach(trade => {
-          const tradePrice = marketData[trade.ticker]?.price;
-          if (!tradePrice) {
-            console.warn(`[${agent.name}] Skipping trade for ${trade.ticker} - price not available`);
-            return;
-          }
-
-          if (trade.action === 'buy') {
-            const notional = trade.quantity * tradePrice;
-            const fees = calculateExecutionFee(notional);
-            const totalCost = notional + fees;
-
-            if (newPortfolio.cash >= totalCost) {
-              newPortfolio.cash -= totalCost;
-              const existingPosition = newPortfolio.positions[trade.ticker];
-              if (existingPosition) {
-                const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + notional;
-                existingPosition.quantity += trade.quantity;
-                existingPosition.averageCost = aggregateCost / existingPosition.quantity;
-                if (trade.fairValue !== undefined) {
-                  existingPosition.lastFairValue = trade.fairValue;
-                  existingPosition.lastTopOfBox = trade.topOfBox;
-                  existingPosition.lastBottomOfBox = trade.bottomOfBox;
-                }
-              } else {
-                newPortfolio.positions[trade.ticker] = { 
-                  ticker: trade.ticker, 
-                  quantity: trade.quantity, 
-                  averageCost: tradePrice,
-                  lastFairValue: trade.fairValue,
-                  lastTopOfBox: trade.topOfBox,
-                  lastBottomOfBox: trade.bottomOfBox,
-                };
-              }
-              newTradeHistory.push({
-                ...trade,
-                price: tradePrice,
-                timestamp: timestamp,
-                fairValue: trade.fairValue,
-                topOfBox: trade.topOfBox,
-                bottomOfBox: trade.bottomOfBox,
-                justification: trade.justification,
-                fees,
-              });
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
-            } else {
-              const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
-              console.warn(`[${agent.name}] Insufficient cash for ${trade.quantity} shares of ${trade.ticker}`);
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
-            }
-          } else if (trade.action === 'sell') {
-            const existingPosition = newPortfolio.positions[trade.ticker];
-            if (existingPosition && existingPosition.quantity > 0) {
-              const quantityToSell = Math.min(trade.quantity, existingPosition.quantity);
-              if (quantityToSell < trade.quantity) {
-                console.warn(`[${agent.name}] Attempted to sell ${trade.quantity} shares of ${trade.ticker} but only owns ${existingPosition.quantity}. Selling ${quantityToSell} instead.`);
-              }
-              const notional = quantityToSell * tradePrice;
-              const fees = quantityToSell > 0 ? calculateExecutionFee(notional) : 0;
-              newPortfolio.cash += notional - fees;
-              existingPosition.quantity -= quantityToSell;
-              if (existingPosition.quantity === 0) {
-                delete newPortfolio.positions[trade.ticker];
-              }
-              newTradeHistory.push({
-                ...trade,
-                quantity: quantityToSell,
-                price: tradePrice,
-                timestamp: timestamp,
-                fairValue: trade.fairValue,
-                topOfBox: trade.topOfBox,
-                bottomOfBox: trade.bottomOfBox,
-                justification: trade.justification,
-                fees,
-              });
-              logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true, undefined, fees);
-            } else {
-              const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
-              console.warn(`[${agent.name}] Cannot sell ${trade.quantity} shares of ${trade.ticker} - ${errorMsg}`);
-              logger.logTrade(agent.name, trade.ticker, 'sell', trade.quantity, tradePrice, false, errorMsg);
-            }
-          }
-        });
-
-        const intradayTrades = newTradeHistory.filter(t => {
-          if (mode === 'realtime' && currentTimestamp !== undefined) {
-            const tradeTimestamp = currentTimestamp / 1000;
-            return Math.abs(t.timestamp - tradeTimestamp) < 60; // Within 60 seconds for real-time
-          }
-          // For simulated/historical: check if trade is within current timestamp window
-          const timestampDiff = Math.abs(t.timestamp - timestamp);
-          return timestampDiff < 0.01; // Within 0.01 of current timestamp
-        });
-        const newMetrics = calculateAllMetrics(newPortfolio, marketData, agent.performanceHistory, timestamp, intradayTrades);
-        newMetrics.intradayHour = intradayHour;
-        
-        const updatedMemory = {
-          recentTrades: [...(agent.memory?.recentTrades || []), ...decidedTrades.map(t => {
-            const executedPrice = marketData[t.ticker]?.price || 0;
-            const estimatedNotional = t.quantity * executedPrice;
-            const fees = executedPrice > 0 ? calculateExecutionFee(estimatedNotional) : undefined;
-            return { ...t, price: executedPrice, timestamp: timestamp, fees } as Trade;
-          })].slice(-10),
-          pastRationales: [...(agent.memory?.pastRationales || []), rationale].slice(-5),
-          pastPerformance: [...(agent.memory?.pastPerformance || []), newMetrics].slice(-10),
-        };
-
-        return {
-          ...agent,
-          portfolio: newPortfolio,
-          tradeHistory: newTradeHistory,
-          performanceHistory: [...agent.performanceHistory, newMetrics],
-          rationale,
-          rationaleHistory: {
-            ...agent.rationaleHistory,
-            [day]: rationale
-          },
-          memory: updatedMemory,
-        };
-      } catch (error) {
-        console.error(`Failed to process agent ${agent.name}:`, error);
-        logger.logSimulationEvent(`Agent processing failed: ${agent.name}`, { 
-          agent: agent.name, 
-          day, 
-          hour: intradayHour, 
-          error: error instanceof Error ? error.message : String(error) 
-        });
-        const errorRationale = `Error: Could not retrieve trade decision. Holding positions. ${error}`;
-        const newMetrics = calculateAllMetrics(agent.portfolio, marketData, agent.performanceHistory, timestamp);
-        newMetrics.intradayHour = intradayHour;
-        return { 
-          ...agent, 
-          performanceHistory: [...agent.performanceHistory, newMetrics], 
-          rationale: errorRationale,
-          rationaleHistory: {
-            ...agent.rationaleHistory,
-            [day]: errorRationale
-          }
-        };
-      }
+  const updatedAgents: Agent[] = await processAgentsWithPacing(agents, mode, agent =>
+    handleTradeWindowAgent(agent, {
+      marketData,
+      day,
+      intradayHour,
+      mode,
+      timestamp,
+      currentTimestamp,
     })
   );
 
@@ -453,141 +619,10 @@ export const advanceDay = async (
   const nextDay = currentSnapshot.day + 1;
 
   // Process agents with trades at start of day
-  const updatedAgents: Agent[] = await processAgentsWithPacing(currentSnapshot.agents, currentSnapshot.mode, async (agent) => {
-      try {
-        const { trades: decidedTrades, rationale } = await Promise.race([
-          getTradeDecisions(agent, newMarketData, nextDay, 30000),
-          new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[], rationale: string }>((_, reject) =>
-            setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
-          )
-        ]).catch(error => {
-          console.warn(`[${agent.name}] Trade decision timeout or error:`, error);
-          return { trades: [], rationale: `Trade decision unavailable - holding positions. ${error instanceof Error ? error.message : String(error)}` };
-        });
-
-        const newTradeHistory = [...agent.tradeHistory];
-        const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
-        
-        decidedTrades.forEach(trade => {
-          const tradePrice = newMarketData[trade.ticker]?.price;
-          if (!tradePrice) {
-            console.warn(`[${agent.name}] Skipping trade for ${trade.ticker} - price not available`);
-            return;
-          }
-
-          if (trade.action === 'buy') {
-            const notional = trade.quantity * tradePrice;
-            const fees = calculateExecutionFee(notional);
-            const totalCost = notional + fees;
-
-            if (newPortfolio.cash >= totalCost) {
-              newPortfolio.cash -= totalCost;
-              const existingPosition = newPortfolio.positions[trade.ticker];
-              if (existingPosition) {
-                const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + notional;
-                existingPosition.quantity += trade.quantity;
-                existingPosition.averageCost = aggregateCost / existingPosition.quantity;
-                if (trade.fairValue !== undefined) {
-                  existingPosition.lastFairValue = trade.fairValue;
-                  existingPosition.lastTopOfBox = trade.topOfBox;
-                  existingPosition.lastBottomOfBox = trade.bottomOfBox;
-                }
-              } else {
-                newPortfolio.positions[trade.ticker] = { 
-                  ticker: trade.ticker, 
-                  quantity: trade.quantity, 
-                  averageCost: tradePrice,
-                  lastFairValue: trade.fairValue,
-                  lastTopOfBox: trade.topOfBox,
-                  lastBottomOfBox: trade.bottomOfBox,
-                };
-              }
-              newTradeHistory.push({
-                ...trade,
-                price: tradePrice,
-                timestamp: nextDay,
-                fairValue: trade.fairValue,
-                topOfBox: trade.topOfBox,
-                bottomOfBox: trade.bottomOfBox,
-                justification: trade.justification,
-                fees,
-              });
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
-            } else {
-              const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
-            }
-          } else if (trade.action === 'sell') {
-            const existingPosition = newPortfolio.positions[trade.ticker];
-            if (existingPosition && existingPosition.quantity > 0) {
-              const quantityToSell = Math.min(trade.quantity, existingPosition.quantity);
-              const notional = quantityToSell * tradePrice;
-              const fees = quantityToSell > 0 ? calculateExecutionFee(notional) : 0;
-              newPortfolio.cash += notional - fees;
-              existingPosition.quantity -= quantityToSell;
-              if (existingPosition.quantity === 0) {
-                delete newPortfolio.positions[trade.ticker];
-              }
-              newTradeHistory.push({
-                ...trade,
-                quantity: quantityToSell,
-                price: tradePrice,
-                timestamp: nextDay,
-                fairValue: trade.fairValue,
-                topOfBox: trade.topOfBox,
-                bottomOfBox: trade.bottomOfBox,
-                justification: trade.justification,
-                fees,
-              });
-              logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true, undefined, fees);
-            } else {
-              const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
-              logger.logTrade(agent.name, trade.ticker, 'sell', trade.quantity, tradePrice, false, errorMsg);
-            }
-          }
-        });
-
-        const dailyTrades = newTradeHistory.filter(t => Math.floor(t.timestamp) === nextDay);
-        const newMetrics = calculateAllMetrics(newPortfolio, newMarketData, agent.performanceHistory, nextDay, dailyTrades);
-        newMetrics.intradayHour = 0;
-        
-        const updatedMemory = {
-          recentTrades: [...(agent.memory?.recentTrades || []), ...dailyTrades].slice(-10),
-          pastRationales: [...(agent.memory?.pastRationales || []), rationale].slice(-5),
-          pastPerformance: [...(agent.memory?.pastPerformance || []), newMetrics].slice(-10),
-        };
-        
-        return {
-          ...agent,
-          portfolio: newPortfolio,
-          tradeHistory: newTradeHistory,
-          performanceHistory: [...agent.performanceHistory, newMetrics],
-          rationale,
-          rationaleHistory: {
-            ...agent.rationaleHistory,
-            [nextDay]: rationale
-          },
-          memory: updatedMemory,
-        };
-      } catch (error) {
-        console.error(`Failed to process agent ${agent.name}:`, error);
-        logger.logSimulationEvent(`Agent processing failed: ${agent.name}`, { 
-          agent: agent.name, 
-          day: nextDay, 
-          error: error instanceof Error ? error.message : String(error) 
-        });
-        const errorRationale = `Error: Could not retrieve trade decision. Holding positions. ${error}`;
-        const newMetrics = calculateAllMetrics(agent.portfolio, newMarketData, agent.performanceHistory, nextDay);
-        return { 
-          ...agent, 
-          performanceHistory: [...agent.performanceHistory, newMetrics], 
-          rationale: errorRationale,
-          rationaleHistory: {
-            ...agent.rationaleHistory,
-            [nextDay]: errorRationale
-          }
-        };
-      }
+  const updatedAgents: Agent[] = await processAgentsWithPacing(currentSnapshot.agents, currentSnapshot.mode, agent =>
+    handleAdvanceDayAgent(agent, {
+      nextDay,
+      marketData: newMarketData,
     })
   );
   
