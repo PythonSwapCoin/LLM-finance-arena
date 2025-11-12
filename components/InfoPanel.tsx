@@ -9,9 +9,21 @@ interface InfoPanelProps {
   intradayHour?: number;
   simulationMode?: 'simulated' | 'realtime' | 'historical';
   isHistoricalComplete?: boolean;
+  variant?: 'desktop' | 'mobile';
+  className?: string;
 }
 
-export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopped, day, intradayHour = 0, simulationMode = 'simulated', isHistoricalComplete }) => {
+export const InfoPanel: React.FC<InfoPanelProps> = ({
+  agents,
+  isLoading,
+  isStopped,
+  day,
+  intradayHour = 0,
+  simulationMode = 'simulated',
+  isHistoricalComplete,
+  variant = 'desktop',
+  className = '',
+}) => {
   const historicalComplete = simulationMode === 'historical' ? Boolean(isHistoricalComplete) : false;
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
 
@@ -31,12 +43,24 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopp
       }, agentsWithPerf[0])
     : null;
 
+  const containerClasses =
+    variant === 'mobile'
+      ? 'bg-arena-surface rounded-lg shadow-lg p-4 space-y-4 text-sm'
+      : 'bg-arena-surface rounded-lg shadow-lg h-full flex flex-col p-6 space-y-6 text-sm';
+
+  const headerPadding = variant === 'mobile' ? 'pb-3' : 'pb-4';
+  const headingSize = variant === 'mobile' ? 'text-2xl' : 'text-3xl';
+  const performerLayout =
+    variant === 'mobile'
+      ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4'
+      : 'grid grid-cols-2 gap-4';
+
   return (
-    <div className="bg-arena-surface rounded-lg shadow-lg h-full flex flex-col p-6 space-y-6 text-sm">
-        <div className="flex justify-between items-center border-b border-arena-border pb-4">
+    <div className={`${containerClasses} ${className}`}>
+        <div className={`flex justify-between items-center border-b border-arena-border ${headerPadding}`}>
             <div>
                 <span className="text-arena-text-secondary">Trading Day</span>
-                <p className="text-3xl font-bold text-arena-text-primary">{day}</p>
+                <p className={`${headingSize} font-bold text-arena-text-primary`}>{day}</p>
                 {intradayHour > 0 && (
                   <span className="text-xs text-arena-text-secondary block mt-1">
                     Intraday: {Math.floor(intradayHour)}:{(intradayHour % 1 * 60).toFixed(0).padStart(2, '0')}
@@ -55,7 +79,7 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopp
         </div>
 
         {highestPerformer && lowestPerformer && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className={performerLayout}>
               <div>
                   <div className="text-xs text-arena-text-secondary">HIGHEST</div>
                   <div className="flex items-center space-x-2 mt-1">

@@ -11,6 +11,7 @@ import { InfoPanel } from './components/InfoPanel';
 export default function App() {
   const { agents, benchmarks, simulationState, marketData, simulationMode, marketTelemetry, connectionStatus, checkConnection } = useApiState();
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [isMobileInfoOpen, setMobileInfoOpen] = useState(false);
   const isStopped = simulationState.isHistoricalSimulationComplete;
 
   const handleSelectAgent = (agent: Agent) => setSelectedAgent(agent);
@@ -55,10 +56,10 @@ export default function App() {
       
       <main className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-arena-surface rounded-lg shadow-lg p-4 h-[60vh] min-h-[400px] flex flex-col">
+          <div className="lg:col-span-2 bg-arena-surface rounded-lg shadow-lg p-3 sm:p-4 h-[68vh] sm:h-[72vh] lg:h-[60vh] min-h-[360px] flex flex-col">
             <h2 className="text-lg font-semibold text-arena-text-primary mb-4 px-2">Total Account Value</h2>
             <div className="flex-grow min-h-0">
-              <MainPerformanceChart 
+              <MainPerformanceChart
                 participants={allParticipants}
                 startDate={simulationState.startDate}
                 currentDate={simulationState.currentDate}
@@ -68,7 +69,7 @@ export default function App() {
               />
             </div>
           </div>
-          <div className="lg:col-span-1">
+          <div className="hidden lg:block lg:col-span-1">
             <InfoPanel
               agents={agents}
               isLoading={simulationState.isLoading}
@@ -77,8 +78,46 @@ export default function App() {
               intradayHour={simulationState.intradayHour}
               simulationMode={simulationMode}
               isHistoricalComplete={simulationState.isHistoricalSimulationComplete}
+              variant="desktop"
             />
           </div>
+        </div>
+
+        <div className="mt-6 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileInfoOpen(open => !open)}
+            aria-expanded={isMobileInfoOpen}
+            className="w-full flex items-center justify-between rounded-lg bg-arena-surface px-4 py-3 text-sm font-semibold text-arena-text-primary shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-arena-border"
+          >
+            <span>Competition insights</span>
+            <svg
+              className={`h-4 w-4 text-arena-text-secondary transition-transform ${isMobileInfoOpen ? 'rotate-180' : ''}`}
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fillRule="evenodd"
+                d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </button>
+          {isMobileInfoOpen && (
+            <div className="mt-3">
+              <InfoPanel
+                agents={agents}
+                isLoading={simulationState.isLoading}
+                isStopped={isStopped}
+                day={simulationState.day}
+                intradayHour={simulationState.intradayHour}
+                simulationMode={simulationMode}
+                isHistoricalComplete={simulationState.isHistoricalSimulationComplete}
+                variant="mobile"
+              />
+            </div>
+          )}
         </div>
 
         <div id="leaderboard" className="mt-8">
