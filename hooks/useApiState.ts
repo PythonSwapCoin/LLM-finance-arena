@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/apiClient';
-import type { Agent, Benchmark, MarketData, MarketDataTelemetry } from '../types';
+import type { Agent, Benchmark, MarketData, MarketDataTelemetry, ChatState } from '../types';
 
 const POLL_INTERVAL = 5000; // Poll every 5 seconds
 
@@ -16,6 +16,7 @@ export const useApiState = () => {
   const [marketData, setMarketData] = useState<MarketData>({});
   const [agents, setAgents] = useState<Agent[]>([]);
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [chat, setChat] = useState<ChatState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [simulationMode, setSimulationMode] = useState<'simulated' | 'realtime' | 'historical'>('simulated');
   const [marketTelemetry, setMarketTelemetry] = useState<MarketDataTelemetry | null>(null);
@@ -65,6 +66,7 @@ export const useApiState = () => {
       setMarketData(snapshot.marketData);
       setAgents(snapshot.agents as Agent[]);
       setBenchmarks(snapshot.benchmarks as Benchmark[]);
+      setChat(snapshot.chat ?? null);
       // Use backend mode directly (already in correct format)
       const mode = snapshot.mode || 'simulated';
       setSimulationMode(mode);
@@ -161,6 +163,12 @@ export const useApiState = () => {
     console.warn('Export simulation data not fully implemented in API mode');
   }, []);
 
+  const sendChatMessage = useCallback(async (payload: { username: string; agentId: string; content: string }) => {
+    const response = await apiClient.sendChatMessage(payload);
+    setChat(response.chat);
+    return response.message;
+  }, []);
+
   return {
     agents,
     benchmarks,
@@ -168,6 +176,7 @@ export const useApiState = () => {
     marketData,
     simulationMode,
     marketTelemetry,
+    chat,
     advanceDay,
     advanceIntraday,
     exportSimulationData,
@@ -176,6 +185,7 @@ export const useApiState = () => {
     error,
     connectionStatus,
     checkConnection,
+    sendChatMessage,
   };
 };
 
