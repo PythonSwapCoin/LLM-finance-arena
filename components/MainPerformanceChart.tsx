@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import type { Agent, Benchmark } from '../types';
 import { INITIAL_CASH } from '../constants';
@@ -15,10 +15,10 @@ interface MainPerformanceChartProps {
   intradayHour?: number;
 }
 
-const CustomTooltip = ({ 
-  active, 
-  payload, 
-  label, 
+const CustomTooltip = ({
+  active,
+  payload,
+  label,
   selectedParticipantId,
   startDate,
   currentDate,
@@ -304,6 +304,37 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [hoveredParticipantId, setHoveredParticipantId] = useState<string | null>(null);
   
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    const observer = new ResizeObserver(entries => {
+      if (entries[0]) {
+        setContainerWidth(entries[0].contentRect.width);
+      }
+    });
+
+    observer.observe(containerRef.current);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const fallbackWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const effectiveWidth = containerWidth || fallbackWidth;
+  const isCompactViewport = effectiveWidth !== 0 && effectiveWidth < 640;
+
+  const chartMargin = useMemo(
+    () =>
+      isCompactViewport
+        ? { top: 15, right: 56, left: 6, bottom: 12 }
+        : { top: 15, right: 170, left: 10, bottom: 5 },
+    [isCompactViewport]
+  );
+
   const { chartData, yAxisDomain, dayBoundaries } = useMemo(() => {
     if (!participants.length || participants[0].performanceHistory.length === 0) {
       return { chartData: [], yAxisDomain: ['auto', 'auto'], dayBoundaries: [] };
@@ -454,14 +485,14 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
   }
 
   return (
-    <div className="relative w-full h-full">
+    <div ref={containerRef} className="relative w-full h-full">
       {selectedParticipantId && (
         <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
           Showing: {participants.find(p => p.id === selectedParticipantId)?.name || 'Selected'}
           <span className="ml-2 text-arena-text-tertiary">(Click chart to show all)</span>
         </div>
       )}
-      {!selectedParticipantId && (
+      {!selectedParticipantId && !isCompactViewport && (
         <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
           Hover to highlight • Click to focus
         </div>
@@ -469,7 +500,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={0} aspect={undefined}>
       <LineChart
         data={chartData}
-        margin={{ top: 15, right: 170, left: 10, bottom: 5 }}
+        margin={chartMargin}
         onClick={(e) => {
           // If clicking on chart background (not a line), deselect
           if (selectedParticipantId && !e?.activePayload?.length) {
@@ -562,7 +593,16 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                     setSelectedParticipantId(p.id); // Click to select
                   }
                 }}
-                label={<EndOfLineLabel data={p.performanceHistory} color={p.color} name={p.name} isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')} />}
+                label={
+                  !isCompactViewport ? (
+                    <EndOfLineLabel
+                      data={p.performanceHistory}
+                      color={p.color}
+                      name={p.name}
+                      isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
+                    />
+                  ) : undefined
+                }
               />
             );
           })}
