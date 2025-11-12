@@ -4,159 +4,87 @@
 
 # LLM Finance Arena
 
-A web-based platform that benchmarks large-language models (LLMs) acting as autonomous equity portfolio managers. The system can use either simulated or real stock market data, allows each model to place trades under identical conditions, and displays a public leaderboard of performance metrics.
+## Overview
+LLM Finance Arena is a full-stack benchmarking platform that evaluates large-language models acting as autonomous equity portfolio managers. The React frontend renders leaderboards, telemetry, and agent drill-downs, while a Fastify-based backend runs the trading simulation loop, fetches market data, orchestrates LLM calls, and persists state for long-running seasons.
 
+## Highlights
+- **Multiple agent roster** – Compete LLMs such as Gemini, Claude, Grok, DeepSeek, and Qwen with identical prompts, color-coded performance histories, and leaderboard comparisons.
+- **Flexible data sources** – Toggle between simulated ticks, real-time quotes, or historical week replays via environment flags that the backend surfaces to the UI.
+- **Comprehensive metrics** – Track account value, Sharpe, volatility, drawdown, turnover, and benchmark series pulled from the backend snapshot payload.
+- **Operational tooling** – Built-in connection health checks, export hooks, structured logging, autosave snapshots, and rate-limit aware market data services keep seasons stable over multi-day runs.
+- **API-first design** – The frontend talks exclusively to REST endpoints under `/api`, making it straightforward to host the backend separately or swap in alternative clients.
 
-## Features
+## Repository Layout
+```
+├── App.tsx                   # Root React application
+├── components/               # Leaderboard, charts, info panels, detail views
+├── hooks/useApiState.ts      # Polling + backend orchestration
+├── services/                 # API client, market/LLM helpers
+├── shared/                   # Types shared between front and back ends
+├── backend/                  # Fastify simulation service (TypeScript)
+│   ├── src/api/              # REST handlers exposed to the UI
+│   ├── src/services/         # Market data, LLM, logging, persistence helpers
+│   └── src/simulation/       # Engine, scheduler, and state management
+└── docs/*.md                 # Setup, deployment, and review notes
+```
 
-- **Multiple LLM Agents**: Compete different AI models (Gemini, Claude, Grok, DeepSeek, Qwen) as portfolio managers
-- **Real or Simulated Market Data**: Switch between real-time market data and simulated data
-- **Performance Metrics**: Track total return, Sharpe ratio, volatility, max drawdown, and turnover
-- **Live Trading Simulation**: Watch agents make trading decisions in real-time
-- **OpenRouter Integration**: Use OpenRouter API to access multiple LLM providers through a single interface
+## Tech Stack
+- **Frontend:** React 19, Vite 6, Tailwind CSS, Recharts, TypeScript.
+- **Backend:** Fastify, TypeScript, Helmet, CORS, rate limiting, and a custom simulation engine.
 
-## Run Locally
-
-**Prerequisites:** Node.js (v18+)
-
-### Quick Start (3 Steps)
-
-1. **Install dependencies:**
+## Getting Started (Local Simulation)
+1. **Install frontend dependencies**
    ```bash
    npm install
    ```
-
-2. **Set up environment:**
+2. **Configure frontend environment**
    ```bash
-   # Windows (PowerShell)
-   Copy-Item .env.example .env.local
-   
-   # Windows (CMD) or Mac/Linux
    cp .env.example .env.local
    ```
-   
-   Then edit `.env.local` and add your OpenRouter API key:
-   ```env
-   VITE_OPENROUTER_API_KEY=your_key_here
-   ```
-
-3. **Run the app:**
+   Edit `.env.local` to add `VITE_OPENROUTER_API_KEY` and optional market data flags (`VITE_USE_REAL_DATA`, `VITE_USE_HISTORICAL_SIMULATION`, etc.).
+3. **Install backend dependencies**
    ```bash
-   npm run dev
-   ```
-   
-   Open `http://localhost:3000` in your browser.
-
-**For detailed setup instructions, see [QUICK_START.md](./QUICK_START.md)**
-
-### Full Setup (Real Market Data + OpenRouter)
-
-1. Install dependencies:
-   ```bash
+   cd backend
    npm install
    ```
-
-2. Copy the example environment file:
+4. **Create backend configuration**
+   - Duplicate the root `.env` file or create `backend/.env` with values for `OPENROUTER_API_KEY`, `MODE`, rate intervals, and persistence paths (see [Backend Setup](./BACKEND_SETUP.md)).
+5. **Run the backend** (new terminal)
    ```bash
-   cp .env.example .env.local
+   cd backend
+   npm run dev
    ```
-
-3. Get API keys:
-
-   **For LLM Access (OpenRouter - Recommended):**
-   - Sign up at [OpenRouter](https://openrouter.ai/)
-   - Get your API key from [OpenRouter Keys](https://openrouter.ai/keys)
-   - Set `VITE_OPENROUTER_API_KEY` in `.env.local`
-   - Set `VITE_USE_OPENROUTER=true`
-
-
-   **For Real Market Data:**
-   - **Alpha Vantage** (Free tier available):
-     - Sign up at [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
-     - Free tier: 5 API calls/minute, 500 calls/day
-     - Set `VITE_ALPHA_VANTAGE_API_KEY` in `.env.local`
-   
-   - **OR Polygon.io** (Alternative):
-     - Sign up at [Polygon.io](https://polygon.io/)
-     - Free tier: 5 API calls/minute
-     - Set `VITE_POLYGON_API_KEY` in `.env.local`
-
-4. Configure environment variables in `.env.local`:
-   
-   **See [ENV_SETUP.md](./ENV_SETUP.md) for detailed instructions.**
-   
-   **Quick setup:**
-   ```bash
-   # Copy example file
-   cp .env.example .env.local
-   
-   # Edit .env.local and add your OpenRouter API key
-   # Then choose ONE mode (see ENV_SETUP.md for details):
-   ```
-   
-   **Modes:**
-   - **Mode 1 (Default):** Simulated data - no API keys needed
-   - **Mode 2:** Real-time data - `VITE_USE_REAL_DATA=true`
-   - **Mode 3:** Historical simulation - `VITE_USE_HISTORICAL_SIMULATION=true`
-   
-   The console will show which mode is active when you start the app.
-
-5. Run the app:
+   The server listens on `http://localhost:8080` by default and exposes REST endpoints under `/api`.
+6. **Run the frontend** (from repo root)
    ```bash
    npm run dev
    ```
+   Vite serves the UI on `http://localhost:3000`. The frontend polls `VITE_API_BASE` (defaults to `http://localhost:8080/api`) every five seconds for fresh simulation data.
+7. **Start the season** via the "Start Live" control in the header. Leaderboards, charts, and agent detail panels update automatically from backend snapshots.
 
-## Configuration Modes
+> **Tip:** If your backend runs on a different host or port, set `VITE_API_BASE` in `.env.local` to point the frontend at the correct base URL.
 
-### Simulated Mode (Default)
-- No API keys required
-- Uses randomly generated market data
-- Perfect for testing and development
-- Set `VITE_USE_REAL_DATA=false` or omit the variable
+## Simulation Modes
+- **Simulated (default):** High-frequency random ticks—no external APIs required; great for quick demos and component development.
+- **Real-time:** Fetches live quotes through a Yahoo → Alpha Vantage → Polygon cascade. Enable by setting `MODE=realtime` on the backend and `VITE_USE_REAL_DATA=true` on the frontend.
+- **Historical week:** Replays a specific trading week end-to-end. Set `MODE=historical` plus `HISTORICAL_SIMULATION_START_DATE` server-side and `VITE_USE_HISTORICAL_SIMULATION=true` client-side.
 
-### Real Market Data Mode
-- Uses cascade system: Yahoo Finance (default, no API key) → Alpha Vantage → Polygon.io
-- Automatically falls back to next source if one fails
-- Fetches real-time stock prices
-- Set `VITE_USE_REAL_DATA=true`
-- **Note**: Free tier APIs have rate limits (5 calls/minute)
-- **Yahoo Finance**: Uses a TypeScript implementation of yfinance functionality (no API key needed, used by default)
+Each mode drives the same set of REST endpoints, so the UI updates automatically when the backend switches modes.
 
-### Historical Simulation Mode (New!)
-- Uses real market data for a specific week (Mon-Fri)
-- Default: First week of 2025 (Jan 6-10, 2025)
-- Simulates trading as if starting at the beginning of that week
-- Runs through the full week using actual historical prices
-- Automatically stops after completing all 5 days
-- Perfect for backtesting strategies with real data
-- Set `VITE_USE_HISTORICAL_SIMULATION=true`
-- Optional: Set `VITE_HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different week
-- **Note**: This mode fetches historical data from Yahoo Finance using yfinance-like service (no API key needed)
+## Backend API Surface
+Key endpoints exposed by `backend/src/api/routes.ts`:
+- `GET /status` – Health, mode, and market telemetry.
+- `GET /api/simulation/state` – Snapshot with agents, benchmarks, and prices.
+- `POST /api/simulation/start` / `stop` / `reset` – Control the scheduler.
+- `GET /api/logs` – Structured log output with level filtering.
 
-### LLM Provider: OpenRouter
+The frontend’s `services/apiClient.ts` wraps these endpoints; you can reuse the same client in external dashboards or automation scripts.
 
-This project uses **OpenRouter only** for LLM access:
-- Access to multiple LLM providers (Gemini, Claude, Grok, DeepSeek, Qwen, GPT-4, etc.)
-- Single API key for all models
-- Set `VITE_OPENROUTER_API_KEY=your_key` in `.env.local`
-
-## Model Mapping
-
-The following models are available through OpenRouter:
-- `gemini-2.5-pro` → `google/gemini-2.0-flash-exp:free`
-- `gemini-2.5-flash` → `google/gemini-2.0-flash-exp:free`
-- `claude-4.5-sonnet` → `anthropic/claude-3.5-sonnet`
-- `grok-4` → `x-ai/grok-beta`
-- `deepseek-v3.1` → `deepseek/deepseek-chat`
-- `qwen-3-max` → `qwen/qwen-2.5-72b-instruct`
-
-## Troubleshooting
-
-- **"No API key configured"**: Make sure you've set `VITE_OPENROUTER_API_KEY` in `.env.local`
-- **Rate limit errors**: Free tier APIs have rate limits. Consider upgrading or using simulated mode for testing
-- **Market data errors**: If real data fails, the app will automatically fall back to simulated data
-- **CORS errors**: Make sure you're running the app through the dev server (`npm run dev`), not opening the HTML file directly
+## Additional Documentation
+- [QUICK_START.md](./QUICK_START.md) – Screenshot-driven setup walkthrough.
+- [ENV_SETUP.md](./ENV_SETUP.md) – Exhaustive description of frontend `.env` flags and deployment settings.
+- [BACKEND_SETUP.md](./BACKEND_SETUP.md) – Detailed backend configuration, APIs, and deployment tips.
+- [DEPLOYMENT.md](./DEPLOYMENT.md) – Hosting recipes for Render, Railway, and Vercel.
 
 ## License
-
 All trades are simulated and not financial advice.
