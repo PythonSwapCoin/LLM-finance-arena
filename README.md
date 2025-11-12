@@ -68,7 +68,7 @@ LLM Finance Arena is a full-stack benchmarking platform that evaluates large-lan
 Each mode drives the same set of REST endpoints, so the UI updates automatically when the backend switches modes.
 
 ## Trading Universe, Fees, and Cadence
-- **What the bots can buy:** The backend exposes a curated list of tickers to every agent. Override it with `ARENA_TICKERS=AAPL,MSFT,...` or cap the breadth with `ARENA_TICKER_COUNT` (default uses the first 20 symbols from the built-in S&P heavyweights).
+- **What the bots can buy:** The backend exposes a curated list of tickers to every agent. Control the breadth with `ARENA_TICKER_COUNT` (default uses the first 20 symbols from the built-in S&P heavyweights, now expanded to cover the top 100). Provide a custom ordering by setting `S_P500_TICKERS=AAPL,MSFT,...` in the backend environment.
 - **Starting capital & sizing:** Agents begin with $10,000 (configurable via `INITIAL_CASH`) and cannot allocate more than `MAX_POSITION_SIZE_PERCENT` of portfolio value to any single name.
 - **Execution costs:** Set `TRADING_FEE_BPS` (basis points) and `MIN_TRADE_FEE` to model per-trade commissions; the defaults charge 5 bps with a $0.25 floor. These fees are applied whenever the engine executes a buy or sell.
 - **Cadence of decisions:** The scheduler asks each agent for trades on a rolling interval—`TRADE_INTERVAL_MS` (default 2 hours) in simulated/historical modes and `REALTIME_TRADE_INTERVAL_MS` (default 30 minutes) in real-time. Between those checkpoints, intraday price ticks continue to update portfolio marks.
