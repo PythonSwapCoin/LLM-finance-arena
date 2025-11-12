@@ -1,9 +1,11 @@
+// Shared types used by both web and backend
+// This file should be imported by both packages
+
 export interface TickerData {
   ticker: string;
   price: number;
   dailyChange: number;
   dailyChangePercent: number;
-  // Financial metrics from defaultKeyStatistics
   trailingPE?: number;
   forwardPE?: number;
   priceToBook?: number;
@@ -42,21 +44,21 @@ export interface Trade {
   action: TradeAction;
   quantity: number;
   price: number;
-  timestamp: number; // Day number
-  fairValue?: number; // Estimated fair value of the stock
-  topOfBox?: number; // 10% best case scenario price by next day
-  bottomOfBox?: number; // 10% worst case scenario price by next day
-  justification?: string; // One sentence justification for the trade
-  fees?: number; // Execution fees charged for the trade
+  timestamp: number;
+  fairValue?: number;
+  topOfBox?: number;
+  bottomOfBox?: number;
+  justification?: string;
+  fees?: number;
 }
 
 export interface Position {
   ticker: string;
   quantity: number;
   averageCost: number;
-  lastFairValue?: number; // Last estimated fair value
-  lastTopOfBox?: number; // Last estimated top of box
-  lastBottomOfBox?: number; // Last estimated bottom of box
+  lastFairValue?: number;
+  lastTopOfBox?: number;
+  lastBottomOfBox?: number;
 }
 
 export interface Portfolio {
@@ -72,8 +74,8 @@ export interface PerformanceMetrics {
   sharpeRatio: number;
   maxDrawdown: number;
   turnover: number;
-  timestamp: number; // Day number (for intraday: day + hour/10, e.g., 1.0, 1.2, 1.4, 1.6, 2.0)
-  intradayHour?: number; // 0, 2, 4, 6 for intraday updates
+  timestamp: number;
+  intradayHour?: number;
 }
 
 export interface Agent {
@@ -84,20 +86,20 @@ export interface Agent {
   portfolio: Portfolio;
   tradeHistory: Trade[];
   performanceHistory: PerformanceMetrics[];
-  rationale: string; // Current rationale
-  rationaleHistory: { [day: number]: string }; // Historical rationales by day
-  memory?: { // Agent memory/context for past decisions
-    recentTrades: Trade[]; // Last N trades for context
-    pastRationales: string[]; // Recent rationales
-    pastPerformance: PerformanceMetrics[]; // Recent performance snapshots
+  rationale: string;
+  rationaleHistory: { [day: number]: string };
+  memory?: {
+    recentTrades: Trade[];
+    pastRationales: string[];
+    pastPerformance: PerformanceMetrics[];
   };
 }
 
 export interface Benchmark {
-    id: string;
-    name: string;
-    color: string;
-    performanceHistory: PerformanceMetrics[];
+  id: string;
+  name: string;
+  color: string;
+  performanceHistory: PerformanceMetrics[];
 }
 
 export interface MarketDataSourceTelemetry {
@@ -128,3 +130,23 @@ export interface MarketDataTelemetry {
     yahoo: YahooRateLimitStatus;
   };
 }
+
+// Snapshot type for persistence
+export interface SimulationSnapshot {
+  day: number;
+  intradayHour: number;
+  marketData: MarketData;
+  agents: Agent[];
+  benchmarks: Benchmark[];
+  mode: 'simulated' | 'realtime' | 'historical';
+  historicalPeriod?: {
+    start: string;
+    end: string;
+  };
+  // Date tracking for display purposes
+  startDate?: string; // ISO date string when simulation started
+  currentDate?: string; // ISO date string for current point in simulation
+  currentTimestamp?: number; // Timestamp in milliseconds for realtime mode
+  lastUpdated: string;
+}
+

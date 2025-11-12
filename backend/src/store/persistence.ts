@@ -1,0 +1,89 @@
+import type { SimulationSnapshot } from '../types.js';
+import { promises as fs } from 'fs';
+import { dirname, isAbsolute, resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { logger, LogLevel, LogCategory } from '../services/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const DEFAULT_PERSIST_PATH = './data/snapshot.json';
+
+export const getPersistFilePath = (): string => {
+  const persistPath = process.env.PERSIST_PATH || DEFAULT_PERSIST_PATH;
+  return isAbsolute(persistPath) ? persistPath : resolve(process.cwd(), persistPath);
+};
+
+// JSON file adapter
+export const loadSnapshot = async (): Promise<SimulationSnapshot | null> => {
+  try {
+    const fullPath = getPersistFilePath();
+    
+    // Ensure directory exists
+    const dir = dirname(fullPath);
+    await fs.mkdir(dir, { recursive: true });
+    
+    const data = await fs.readFile(fullPath, 'utf-8');
+    const snapshot = JSON.parse(data) as SimulationSnapshot;
+    
+    logger.logSimulationEvent('Snapshot loaded from persistence', { 
+      path: fullPath, 
+      day: snapshot.day 
+    });
+    
+    return snapshot;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      logger.logSimulationEvent('No existing snapshot found, starting fresh', {});
+      return null;
+    }
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+      'Error loading snapshot', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    return null;
+  }
+};
+
+export const saveSnapshot = async (snapshot: SimulationSnapshot): Promise<void> => {
+  try {
+    const fullPath = getPersistFilePath();
+    
+    // Ensure directory exists
+    const dir = dirname(fullPath);
+    await fs.mkdir(dir, { recursive: true });
+    
+    await fs.writeFile(fullPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+    
+    logger.logSimulationEvent('Snapshot saved to persistence', { 
+      path: fullPath, 
+      day: snapshot.day 
+    });
+  } catch (error) {
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+      'Error saving snapshot', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    throw error;
+  }
+};
+
+// Postgres adapter interface (stub for Phase 2)
+export interface PostgresPersistenceAdapter {
+  loadSnapshot(): Promise<SimulationSnapshot | null>;
+  saveSnapshot(snapshot: SimulationSnapshot): Promise<void>;
+}
+
+// Example Postgres adapter stub (not implemented in Phase 1)
+export class PostgresAdapter implements PostgresPersistenceAdapter {
+  async loadSnapshot(): Promise<SimulationSnapshot | null> {
+    // TODO: Implement Postgres persistence in Phase 2
+    throw new Error('Postgres adapter not implemented in Phase 1');
+  }
+
+  async saveSnapshot(snapshot: SimulationSnapshot): Promise<void> {
+    // TODO: Implement Postgres persistence in Phase 2
+    throw new Error('Postgres adapter not implemented in Phase 1');
+  }
+}
+

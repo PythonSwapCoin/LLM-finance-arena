@@ -1,22 +1,22 @@
-import type { Agent, MarketData, Trade, TradeAction } from '../types';
-import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT } from '../constants';
-import { logger } from './logger';
+import type { Agent, MarketData, Trade, TradeAction } from '../types.js';
+import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
+import { logger, LogLevel, LogCategory } from './logger.js';
 
-const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 if (!OPENROUTER_API_KEY) {
-  console.warn('VITE_OPENROUTER_API_KEY is not set. LLM agents will not be able to make trading decisions.');
+  console.warn('OPENROUTER_API_KEY is not set. LLM agents will not be able to make trading decisions.');
 }
 
-// This function gets the system prompt for an agent
-// Uses unified prompt for all agents to ensure fair comparison
 const getAgentPrompt = (agent: Agent): string => {
-    // Use unified prompt for all agents (stored in agent configuration)
-    return (agent as any).systemPrompt || UNIFIED_SYSTEM_PROMPT;
+  return (agent as any).systemPrompt || UNIFIED_SYSTEM_PROMPT;
 };
 
+const estimateTradeFee = (notional: number): number => {
+  const variableFee = notional * TRADING_FEE_RATE;
+  return Math.max(variableFee, MIN_TRADE_FEE);
+};
 
-// Helper function to add timeout to promises
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   return Promise.race([
     promise,
@@ -26,25 +26,52 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   ]);
 };
 
+const exponentialBackoff = async <T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> => {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Don't retry on certain errors
+      if (lastError.message.includes('404') || lastError.message.includes('401')) {
+        throw lastError;
+      }
+      
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000; // Add jitter
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Max retries exceeded');
+};
+
 export const getTradeDecisions = async (
   agent: Agent,
   marketData: MarketData,
   day: number,
-  timeoutMs: number = 30000 // 30 second timeout
+  timeoutMs: number = 30000
 ): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[], rationale: string }> => {
-  if (!ai) {
-    console.warn("Gemini API key is not configured; skipping trade generation for", agent.id);
-    return {
-      trades: [],
-      rationale: 'No trades executed because the Gemini API key is not configured.',
-    };
+  if (!OPENROUTER_API_KEY) {
+    // Return empty trades gracefully instead of throwing
+    logger.log(LogLevel.WARNING, LogCategory.LLM, 
+      `OPENROUTER_API_KEY not set for ${agent.name}, returning empty trades`, { agent: agent.name });
+    return { trades: [], rationale: 'API key not configured - holding positions.' };
   }
 
-  const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => acc + pos.quantity * (marketData[pos.ticker]?.price || 0), agent.portfolio.cash);
-
+  const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => 
+    acc + pos.quantity * (marketData[pos.ticker]?.price || 0), agent.portfolio.cash);
+  
   const systemInstruction = getAgentPrompt(agent);
 
-  // Calculate available cash and current position values for better decision making
   const availableCash = agent.portfolio.cash;
   const currentPositions = Object.values(agent.portfolio.positions).map(p => {
     const currentPrice = marketData[p.ticker]?.price || 0;
@@ -65,13 +92,19 @@ export const getTradeDecisions = async (
     };
   });
 
-  // Get list of available tickers for validation
   const availableTickers = Object.keys(marketData);
   
   if (availableTickers.length === 0) {
     console.error(`[${agent.name}] No market data available! Cannot make trading decisions.`);
     return { trades: [], rationale: "No market data available - cannot make trading decisions." };
   }
+
+  const tradingFeeBpsDisplay = (TRADING_FEE_RATE * 10000).toFixed(2);
+  const tradingFeePercentDisplay = (TRADING_FEE_RATE * 100).toFixed(3);
+  const minFeeDisplay = MIN_TRADE_FEE.toFixed(2);
+  const tradingCostLine = TRADING_FEE_RATE > 0
+    ? `${tradingFeeBpsDisplay} bps (${tradingFeePercentDisplay}% of notional) with a $${minFeeDisplay} minimum`
+    : `$${minFeeDisplay} per trade`;
 
   const prompt = `
 You are a portfolio manager making trading decisions for Day ${day}.
@@ -108,28 +141,13 @@ ${currentPositions.length > 0
   : '  No positions held.'
 }
 
-=== DAILY BRIEFING ===
-At the beginning of Day ${day}, here is your portfolio status:
-- Cash Available: $${availableCash.toFixed(2)}
-- Current Holdings:
-${currentPositions.length > 0 
-  ? currentPositions.map(p => 
-      `  * ${p.ticker}: ${p.quantity} shares
-     - Purchase Price: $${p.avgCost.toFixed(2)}
-     - Current Price: $${p.currentPrice.toFixed(2)}
-     - Previous Fair Value Estimate: $${p.lastFairValue?.toFixed(2) ?? 'Not available'}
-     - Previous Top of Box Estimate: $${p.lastTopOfBox?.toFixed(2) ?? 'Not available'}
-     - Previous Bottom of Box Estimate: $${p.lastBottomOfBox?.toFixed(2) ?? 'Not available'}`
-    ).join('\n')
-  : '  * No positions held - you have $' + availableCash.toFixed(2) + ' in cash to invest.'
-}
-
 === TRADING RULES ===
 1. You can only BUY if you have enough cash: quantity × current_price ≤ available_cash
 2. You can only SELL if you own the stock: check your current positions
 3. Maximum position size: ${MAX_POSITION_SIZE_PERCENT * 100}% of total portfolio value
 4. No margin, no short selling
 5. Quantity must be a positive integer (whole shares only)
+6. Every trade pays transaction costs: ${tradingCostLine}. Keep enough cash to cover fees.
 
 === WHAT YOU NEED TO PROVIDE ===
 You must return a JSON object with:
@@ -139,15 +157,9 @@ You must return a JSON object with:
    - "action": Either "buy" or "sell" (do NOT use "hold")
    - "quantity": A positive integer (number of shares)
    - "fairValue": Your estimated fair value of the stock (in dollars)
-     * For BUY recommendations: fairValue should be ABOVE the current price (indicating undervaluation)
-     * For SELL recommendations: fairValue should be BELOW the current price (indicating overvaluation)
    - "topOfBox": The 10% best case scenario price by next day (in dollars)
    - "bottomOfBox": The 10% worst case scenario price by next day (in dollars)
    - "justification": A one sentence explanation for this specific trade
-     * IMPORTANT: When justifying trades, reference your own fair value estimates when relevant.
-     * For example: "Selling because current price ($150) exceeds my fair value estimate ($145), indicating overvaluation."
-     * Or: "Buying because current price ($140) is below my fair value ($155), representing a buying opportunity."
-     * Use fair value comparisons to explain your reasoning, especially for sell decisions when price exceeds fair value.
 
 Example response:
 {
@@ -161,15 +173,6 @@ Example response:
       "topOfBox": 192.00,
       "bottomOfBox": 178.00,
       "justification": "AAPL is undervalued with strong fundamentals and positive momentum."
-    },
-    {
-      "ticker": "MSFT",
-      "action": "sell",
-      "quantity": 5,
-      "fairValue": 420.00,
-      "topOfBox": 435.00,
-      "bottomOfBox": 405.00,
-      "justification": "MSFT is overvalued relative to its fair value, taking profits."
     }
   ]
 }
@@ -181,28 +184,16 @@ IMPORTANT:
 - If you have cash available, you should make buy trades to invest it
 - Holding 100% cash is not acceptable - you are a portfolio manager, not a cash holder
 - If you don't want to trade, return an empty trades array: {"rationale": "...", "trades": []}
-- **VALUATION-BASED DECISIONS**: When making trading decisions, consider your own fair value estimates:
-  * If a stock's current price exceeds your previous fair value estimate (and fundamentals haven't changed), consider selling as the upside may be limited
-  * If a stock's current price is below your fair value estimate, it may represent a buying opportunity
-  * Update your fair value estimates if market conditions or company fundamentals have changed
-  * Use fair value comparisons in your justifications to explain your reasoning
 `;
-    
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('VITE_OPENROUTER_API_KEY is not set. Please configure your OpenRouter API key in .env.local');
-  }
 
   const startTime = Date.now();
+  
   try {
-    // Use OpenRouter API - the model ID is stored in agent.model (should be OpenRouter model identifier)
-    const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-    
-    // Build memory context from agent's past decisions
     const memoryContext = agent.memory ? `
 === YOUR TRADING HISTORY (for context) ===
 Recent Trades (last 5):
 ${agent.memory.recentTrades.slice(-5).map(t => 
-  `- Day ${Math.floor(t.timestamp) + 1}: ${t.action.toUpperCase()} ${t.quantity} ${t.ticker} @ $${t.price.toFixed(2)}${t.justification ? ` - ${t.justification}` : ''}`
+  `- Day ${Math.floor(t.timestamp)}: ${t.action.toUpperCase()} ${t.quantity} ${t.ticker} @ $${t.price.toFixed(2)}${t.justification ? ` - ${t.justification}` : ''}`
 ).join('\n') || 'No recent trades'}
 
 Recent Performance:
@@ -214,36 +205,43 @@ Recent Rationales:
 ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'No past rationales'}
 ` : '';
     
-    const fetchPromise = fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin, // Optional: for analytics
-        'X-Title': 'LLM Finance Arena', // Optional: for analytics
-      },
-      body: JSON.stringify({
-        model: agent.model, // This should be the OpenRouter model identifier (e.g., 'google/gemini-2.0-flash-exp:free')
-        messages: [
-          {
-            role: 'system',
-            content: systemInstruction
-          },
-          {
-            role: 'user',
-            content: memoryContext + prompt
-          }
-        ],
-        response_format: {
-          type: 'json_object'
+    const fetchFn = async () => {
+      const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://llm-finance-arena.com',
+          'X-Title': 'LLM Finance Arena',
         },
-        temperature: 0.7,
-        max_tokens: 2000, // Increase token limit to prevent truncation
-      })
-    });
+        body: JSON.stringify({
+          model: agent.model,
+          messages: [
+            {
+              role: 'system',
+              content: systemInstruction
+            },
+            {
+              role: 'user',
+              content: memoryContext + prompt
+            }
+          ],
+          response_format: {
+            type: 'json_object'
+          },
+          temperature: 0.7,
+          max_tokens: 2000,
+        })
+      });
+      
+      return response;
+    };
     
-    // Apply timeout protection
-    const response = await withTimeout(fetchPromise, timeoutMs);
+    const response = await withTimeout(
+      exponentialBackoff(fetchFn, 3, 1000),
+      timeoutMs
+    );
 
     if (!response.ok) {
       const errorData = await response.text();
@@ -260,87 +258,69 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
       
       const responseTime = Date.now() - startTime;
       
-      // Handle rate limiting with helpful message
       if (response.status === 429) {
         const retryAfter = response.headers.get('retry-after');
         const error = new Error(`Rate limit exceeded. ${errorMessage}${retryAfter ? ` Retry after ${retryAfter} seconds.` : ''}`);
         logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
-        logger.logApiCall('OpenRouter', 'chat/completions', false, response.status, error, responseTime);
         throw error;
       }
       
-      // Handle model not found
       if (response.status === 404) {
-        const error = new Error(`Model not found: ${agent.model}. Please check the model identifier in constants.ts. Available models: https://openrouter.ai/models`);
+        const error = new Error(`Model not found: ${agent.model}. Please check the model identifier.`);
         logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
-        logger.logApiCall('OpenRouter', 'chat/completions', false, response.status, error, responseTime);
         throw error;
       }
       
       const error = new Error(`OpenRouter API error: ${response.status} - ${errorMessage}`);
       logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
-      logger.logApiCall('OpenRouter', 'chat/completions', false, response.status, error, responseTime);
       throw error;
     }
 
-    const data = await response.json();
-    const jsonText = data.choices[0]?.message?.content || '{}';
+    const data = await response.json() as any;
+    const jsonText = data.choices?.[0]?.message?.content || '{}';
     const responseTime = Date.now() - startTime;
     const tokensUsed = data.usage?.total_tokens;
     
     if (!jsonText) {
       const error = new Error('No response content from OpenRouter');
       logger.logLLMCall(agent.name, agent.model, false, tokensUsed, responseTime, error);
-      logger.logApiCall('OpenRouter', 'chat/completions', false, undefined, error, responseTime);
       throw error;
     }
     
-    // Log successful API call
     logger.logLLMCall(agent.name, agent.model, true, tokensUsed, responseTime);
-    logger.logApiCall('OpenRouter', 'chat/completions', true, 200, undefined, responseTime);
 
     // Parse and validate response
     let result: any;
     try {
       result = JSON.parse(jsonText);
     } catch (parseError) {
-      // Try multiple strategies to extract JSON
-      // Strategy 1: Extract from markdown code blocks
       const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
       if (jsonMatch) {
         try {
           result = JSON.parse(jsonMatch[1]);
         } catch (e) {
-          // If still fails, try to extract partial JSON
+          // Try to extract partial JSON
         }
       }
       
-      // Strategy 2: Try to find JSON object in the text (even if incomplete)
       if (!result) {
         const jsonStart = jsonText.indexOf('{');
         if (jsonStart !== -1) {
-          // Try to extract and fix incomplete JSON
           let jsonCandidate = jsonText.substring(jsonStart);
-          
-          // If JSON seems incomplete, try to close it
           const openBraces = (jsonCandidate.match(/\{/g) || []).length;
           const closeBraces = (jsonCandidate.match(/\}/g) || []).length;
           
           if (openBraces > closeBraces) {
-            // Try to find where trades array might be incomplete
             const tradesMatch = jsonCandidate.match(/"trades"\s*:\s*\[/);
             if (tradesMatch && !jsonCandidate.includes(']')) {
-              // Close the trades array and object
               jsonCandidate = jsonCandidate.replace(/"trades"\s*:\s*\[([^\]]*)$/, '"trades": [$1]');
             }
-            // Close remaining braces
             jsonCandidate += '}'.repeat(openBraces - closeBraces);
           }
           
           try {
             result = JSON.parse(jsonCandidate);
           } catch (e) {
-            // Strategy 3: Try to extract just the rationale if JSON is too broken
             const rationaleMatch = jsonCandidate.match(/"rationale"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
             if (rationaleMatch) {
               result = {
@@ -362,20 +342,16 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     // Validate and filter trades
     const validTrades = (result.trades || [])
       .filter((t: any) => {
-        // Must be buy or sell (not hold)
         if (t.action === 'hold' || !['buy', 'sell'].includes(t.action)) {
           return false;
         }
-        // Quantity must be positive integer
         if (!Number.isInteger(t.quantity) || t.quantity <= 0) {
           return false;
         }
-        // Ticker must exist in market data
         if (!marketData[t.ticker]) {
-          console.warn(`[${agent.name}] Ticker ${t.ticker} not found in market data. Available tickers: ${Object.keys(marketData).join(', ')}`);
+          console.warn(`[${agent.name}] Ticker ${t.ticker} not found in market data.`);
           return false;
         }
-        // For sell: must own the stock
         if (t.action === 'sell') {
           const position = agent.portfolio.positions[t.ticker];
           if (!position || position.quantity < t.quantity) {
@@ -383,24 +359,14 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
             return false;
           }
         }
-        // For buy: must have enough cash
         if (t.action === 'buy') {
-          const cost = t.quantity * marketData[t.ticker].price;
-          if (cost > agent.portfolio.cash) {
-            console.warn(`Cannot buy ${t.quantity} shares of ${t.ticker} - need $${cost.toFixed(2)} but only have $${agent.portfolio.cash.toFixed(2)}`);
+          const price = marketData[t.ticker].price;
+          const notional = t.quantity * price;
+          const fees = estimateTradeFee(notional);
+          const totalCost = notional + fees;
+          if (totalCost > agent.portfolio.cash) {
+            console.warn(`Cannot buy ${t.quantity} shares of ${t.ticker} - need $${totalCost.toFixed(2)} including fees but only have $${agent.portfolio.cash.toFixed(2)}`);
             return false;
-          }
-        }
-        // Validate fair value logic
-        const currentPrice = marketData[t.ticker].price;
-        if (t.fairValue !== undefined && typeof t.fairValue === 'number') {
-          if (t.action === 'buy' && t.fairValue <= currentPrice) {
-            console.warn(`For BUY trade, fairValue (${t.fairValue}) should be above current price (${currentPrice})`);
-            // Don't reject, just warn - the model might have different reasoning
-          }
-          if (t.action === 'sell' && t.fairValue >= currentPrice) {
-            console.warn(`For SELL trade, fairValue (${t.fairValue}) should be below current price (${currentPrice})`);
-            // Don't reject, just warn - the model might have different reasoning
           }
         }
         return true;
@@ -411,8 +377,12 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
           action: t.action as TradeAction,
           quantity: t.quantity,
         };
-        
-        // Add optional valuation fields if provided
+
+        const referencePrice = marketData[t.ticker]?.price ?? 0;
+        if (referencePrice > 0) {
+          trade.fees = estimateTradeFee(trade.quantity * referencePrice);
+        }
+
         if (t.fairValue !== undefined && typeof t.fairValue === 'number' && t.fairValue > 0) {
           trade.fairValue = t.fairValue;
         }
@@ -433,8 +403,11 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
 
   } catch (error) {
     const responseTime = Date.now() - startTime;
-    logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
+    const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
+    logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, errorMessage);
     console.error("Error fetching trade decisions:", error);
-    return { trades: [], rationale: `Error communicating with AI model: ${error instanceof Error ? error.message : "Unknown error"}` };
+    // Never throw past the service boundary - return empty trades instead
+    return { trades: [], rationale: `Error communicating with AI model: ${errorMessage}` };
   }
 };
+

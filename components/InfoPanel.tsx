@@ -1,17 +1,18 @@
 import React from 'react';
 import type { Agent } from '../types';
-import { ArrowPathIcon, PlayIcon } from './icons/Icons';
 
 interface InfoPanelProps {
   agents: Agent[];
-  onAdvanceDay: () => void;
   isLoading: boolean;
-  isLive: boolean;
+  isStopped: boolean;
   day: number;
+  intradayHour?: number;
+  simulationMode?: 'simulated' | 'realtime' | 'historical';
+  isHistoricalComplete?: boolean;
 }
 
-export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, isLoading, isLive, day }) => {
-    
+export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, isLoading, isStopped, day, intradayHour = 0, simulationMode = 'simulated', isHistoricalComplete }) => {
+  const historicalComplete = simulationMode === 'historical' ? Boolean(isHistoricalComplete) : false;
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
 
   const highestPerformer = agentsWithPerf.length > 0
@@ -36,19 +37,21 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({ agents, onAdvanceDay, isLo
             <div>
                 <span className="text-arena-text-secondary">Trading Day</span>
                 <p className="text-3xl font-bold text-arena-text-primary">{day}</p>
-            </div>
-             <button
-                onClick={onAdvanceDay}
-                disabled={isLoading || isLive}
-                className="flex items-center justify-center bg-arena-surface hover:bg-arena-border disabled:opacity-50 disabled:cursor-not-allowed border border-arena-border text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-              >
-                {isLoading ? (
-                  <ArrowPathIcon className="animate-spin h-5 w-5 mr-2" />
-                ) : (
-                  <PlayIcon className="h-5 w-5 mr-2" />
+                {intradayHour > 0 && (
+                  <span className="text-xs text-arena-text-secondary block mt-1">
+                    Intraday: {Math.floor(intradayHour)}:{(intradayHour % 1 * 60).toFixed(0).padStart(2, '0')}
+                  </span>
                 )}
-                {isLoading ? 'Simulating...' : 'Next Day'}
-            </button>
+                {isStopped && (
+                  <span className="text-xs text-arena-text-tertiary block mt-1">Simulation Stopped</span>
+                )}
+                {historicalComplete && simulationMode === 'historical' && (
+                  <span className="text-xs text-blue-400 block mt-1 font-semibold">✓ Historical Week Complete (5 days)</span>
+                )}
+                  {simulationMode === 'historical' && !historicalComplete && (
+                    <span className="text-xs text-blue-400 block mt-1">Historical Mode: Day {day}/4</span>
+                  )}
+            </div>
         </div>
 
         {highestPerformer && lowestPerformer && (
