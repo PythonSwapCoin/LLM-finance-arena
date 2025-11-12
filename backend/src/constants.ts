@@ -31,6 +31,21 @@ export const BENCHMARK_COLORS = {
   [AI_MANAGERS_INDEX_ID]: '#F5F5F5'
 };
 
+const parseNumberEnv = (value: string | undefined | null, fallback: number): number => {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const tradingFeeBps = Math.max(0, parseNumberEnv(process.env.TRADING_FEE_BPS, 5));
+const tradingFeeMinimum = Math.max(0, parseNumberEnv(process.env.MIN_TRADE_FEE, 0.25));
+
+export const TRADING_FEE_RATE = tradingFeeBps / 10000; // Convert basis points to decimal
+export const MIN_TRADE_FEE = tradingFeeMinimum; // Flat minimum fee in dollars per execution
+
 const initialPortfolio: Portfolio = {
   cash: INITIAL_CASH,
   positions: {},

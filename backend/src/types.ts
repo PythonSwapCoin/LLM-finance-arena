@@ -49,6 +49,7 @@ export interface Trade {
   topOfBox?: number;
   bottomOfBox?: number;
   justification?: string;
+  fees?: number;
 }
 
 export interface Position {

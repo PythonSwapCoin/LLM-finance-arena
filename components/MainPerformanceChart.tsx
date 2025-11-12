@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import type { Agent, Benchmark } from '../types';
 import { INITIAL_CASH } from '../constants';
+import { formatTimestampToDate } from '../utils/timeFormatting';
 
 type Participant = Agent | Benchmark;
 
@@ -290,97 +291,6 @@ const formatXAxisLabel = (
   
   // Otherwise show only the hour
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-};
-
-// Helper function to convert timestamp to actual date string (for tooltip)
-const formatTimestampToDate = (
-  timestamp: number,
-  startDate?: string,
-  currentDate?: string,
-  simulationMode?: 'simulated' | 'realtime' | 'historical',
-  day?: number,
-  intradayHour?: number
-): string => {
-  if (!startDate) {
-    // Fallback to Day X format if no date info
-    const dayNum = Math.floor(timestamp);
-    const hourDecimal = timestamp - dayNum;
-    const hours = Math.floor(hourDecimal * 10);
-    const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-    if (hours === 0 && minutes === 0) {
-      return `Day ${dayNum}`;
-    }
-    return `D${dayNum} ${hours}:${minutes.toString().padStart(2, '0')}`;
-  }
-
-  try {
-    const start = new Date(startDate);
-    
-    if (simulationMode === 'historical') {
-      // For historical: use actual historical dates
-      const daysToAdd = Math.floor(timestamp);
-      const date = new Date(start);
-      date.setDate(start.getDate() + daysToAdd);
-      
-      const hourDecimal = timestamp - daysToAdd;
-      const hours = Math.floor(hourDecimal * 10);
-      const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-      
-      if (hours === 0 && minutes === 0) {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
-      date.setHours(9 + hours, 30 + minutes, 0, 0); // Market hours start at 9:30
-      return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    } else if (simulationMode === 'realtime') {
-      // For real-time mode: timestamp is a Unix timestamp (seconds since epoch)
-      // Check if it's a Unix timestamp (large number, > 1000000000) or day-based (small number)
-      if (timestamp > 1000000000) {
-        // Unix timestamp (seconds) - convert directly to date
-        const date = new Date(timestamp * 1000); // Convert seconds to milliseconds
-        return date.toLocaleString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          hour: 'numeric', 
-          minute: '2-digit',
-          hour12: true 
-        });
-      }
-      // Fallback: use day-based format (for backward compatibility)
-      // For real-time: use actual current dates/times
-      if (currentDate) {
-        const current = new Date(currentDate);
-        const hourDecimal = intradayHour !== undefined ? intradayHour : (timestamp - Math.floor(timestamp)) * 10;
-        const hours = Math.floor(hourDecimal);
-        const minutes = Math.round((hourDecimal - hours) * 60);
-        current.setHours(9 + hours, 30 + minutes, 0, 0);
-        return current.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-      }
-      // Fallback
-      const daysToAdd = Math.floor(timestamp);
-      const date = new Date(start);
-      date.setDate(start.getDate() + daysToAdd);
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    } else {
-      // Simulated: generate dates from start date
-      const daysToAdd = Math.floor(timestamp);
-      const date = new Date(start);
-      date.setDate(start.getDate() + daysToAdd);
-      
-      const hourDecimal = timestamp - daysToAdd;
-      const hours = Math.floor(hourDecimal * 10);
-      const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-      
-      if (hours === 0 && minutes === 0) {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
-      date.setHours(9 + hours, 30 + minutes, 0, 0);
-      return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    }
-  } catch (error) {
-    // Fallback on error
-    const dayNum = Math.floor(timestamp);
-    return `Day ${dayNum}`;
-  }
 };
 
 export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({ 

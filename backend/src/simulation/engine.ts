@@ -1,8 +1,105 @@
 import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics } from '../types.js';
-import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH } from '../constants.js';
+import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getTradeDecisions } from '../services/llmService.js';
 import { logger } from '../services/logger.js';
+
+const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
+  if (value === undefined) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const manualSpacingMsRaw = parseIntWithDefault(process.env.LLM_REQUEST_SPACING_MS, -1);
+const manualSpacingMs = manualSpacingMsRaw >= 0 ? manualSpacingMsRaw : -1;
+const minSpacingMs = Math.max(0, parseIntWithDefault(process.env.LLM_MIN_REQUEST_SPACING_MS, 0));
+const autoSpacingEnabled = process.env.LLM_AUTO_SPACING === 'true';
+const maxConcurrentRequests = Math.max(0, parseIntWithDefault(process.env.LLM_MAX_CONCURRENT_REQUESTS, 0));
+const realtimeIntervalMs = Math.max(0, parseIntWithDefault(process.env.REALTIME_SIM_INTERVAL_MS, 600000));
+const simulatedIntervalMs = Math.max(0, parseIntWithDefault(process.env.SIM_INTERVAL_MS, 30000));
+
+const getRequestSpacingMs = (mode: 'simulated' | 'realtime' | 'historical' | undefined, agentCount: number): number => {
+  if (manualSpacingMs >= 0) {
+    return manualSpacingMs;
+  }
+  if (!autoSpacingEnabled) {
+    return 0;
+  }
+  const interval = mode === 'realtime' ? realtimeIntervalMs : simulatedIntervalMs;
+  if (interval <= 0) {
+    return minSpacingMs;
+  }
+  const spacing = Math.floor(interval / Math.max(agentCount, 1));
+  if (spacing <= 0) {
+    return minSpacingMs;
+  }
+  return Math.max(spacing, minSpacingMs);
+};
+
+const getMaxConcurrentRequests = (agentCount: number): number => {
+  if (maxConcurrentRequests <= 0) {
+    return agentCount;
+  }
+  return Math.max(1, Math.min(maxConcurrentRequests, agentCount));
+};
+
+const calculateExecutionFee = (notional: number): number => {
+  const variableFee = notional * TRADING_FEE_RATE;
+  return Math.max(variableFee, MIN_TRADE_FEE);
+};
+
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+const processAgentsWithPacing = async <T>(
+  agents: Agent[],
+  mode: 'simulated' | 'realtime' | 'historical' | undefined,
+  handler: (agent: Agent) => Promise<T>
+): Promise<T[]> => {
+  if (agents.length === 0) {
+    return [];
+  }
+
+  const spacingMs = getRequestSpacingMs(mode, agents.length);
+
+  if (spacingMs > 0) {
+    const results: T[] = [];
+    for (let index = 0; index < agents.length; index++) {
+      const start = Date.now();
+      results[index] = await handler(agents[index]);
+      if (index < agents.length - 1) {
+        const elapsed = Date.now() - start;
+        const waitMs = Math.max(0, spacingMs - elapsed);
+        if (waitMs > 0) {
+          await delay(waitMs);
+        }
+      }
+    }
+    return results;
+  }
+
+  const concurrency = getMaxConcurrentRequests(agents.length);
+  if (concurrency >= agents.length) {
+    return Promise.all(agents.map(handler));
+  }
+
+  const results: T[] = new Array(agents.length);
+  let nextIndex = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= agents.length) {
+        break;
+      }
+      results[currentIndex] = await handler(agents[currentIndex]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+  return results;
+};
 
 // Pure function: step the simulation forward with new prices
 export const step = async (
@@ -134,9 +231,7 @@ export const tradeWindow = async (
     timestamp = currentTimestamp / 1000; // Convert to seconds
   }
 
-  // Process agents in parallel
-  const updatedAgents: Agent[] = await Promise.all(
-    agents.map(async (agent) => {
+  const updatedAgents: Agent[] = await processAgentsWithPacing(agents, mode, async (agent) => {
       try {
         const tradeDecision = await Promise.race([
           getTradeDecisions(agent, marketData, day, 30000),
@@ -166,14 +261,17 @@ export const tradeWindow = async (
           }
 
           if (trade.action === 'buy') {
-            const cost = trade.quantity * tradePrice;
-            if (newPortfolio.cash >= cost) {
-              newPortfolio.cash -= cost;
+            const notional = trade.quantity * tradePrice;
+            const fees = calculateExecutionFee(notional);
+            const totalCost = notional + fees;
+
+            if (newPortfolio.cash >= totalCost) {
+              newPortfolio.cash -= totalCost;
               const existingPosition = newPortfolio.positions[trade.ticker];
               if (existingPosition) {
-                const totalCost = (existingPosition.averageCost * existingPosition.quantity) + cost;
+                const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + notional;
                 existingPosition.quantity += trade.quantity;
-                existingPosition.averageCost = totalCost / existingPosition.quantity;
+                existingPosition.averageCost = aggregateCost / existingPosition.quantity;
                 if (trade.fairValue !== undefined) {
                   existingPosition.lastFairValue = trade.fairValue;
                   existingPosition.lastTopOfBox = trade.topOfBox;
@@ -189,20 +287,21 @@ export const tradeWindow = async (
                   lastBottomOfBox: trade.bottomOfBox,
                 };
               }
-              newTradeHistory.push({ 
-                ...trade, 
-                price: tradePrice, 
+              newTradeHistory.push({
+                ...trade,
+                price: tradePrice,
                 timestamp: timestamp,
                 fairValue: trade.fairValue,
                 topOfBox: trade.topOfBox,
                 bottomOfBox: trade.bottomOfBox,
                 justification: trade.justification,
+                fees,
               });
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true);
+              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
             } else {
-              const errorMsg = `Insufficient cash: need $${cost.toFixed(2)}, have $${newPortfolio.cash.toFixed(2)}`;
+              const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
               console.warn(`[${agent.name}] Insufficient cash for ${trade.quantity} shares of ${trade.ticker}`);
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg);
+              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
             }
           } else if (trade.action === 'sell') {
             const existingPosition = newPortfolio.positions[trade.ticker];
@@ -211,22 +310,25 @@ export const tradeWindow = async (
               if (quantityToSell < trade.quantity) {
                 console.warn(`[${agent.name}] Attempted to sell ${trade.quantity} shares of ${trade.ticker} but only owns ${existingPosition.quantity}. Selling ${quantityToSell} instead.`);
               }
-              newPortfolio.cash += quantityToSell * tradePrice;
+              const notional = quantityToSell * tradePrice;
+              const fees = quantityToSell > 0 ? calculateExecutionFee(notional) : 0;
+              newPortfolio.cash += notional - fees;
               existingPosition.quantity -= quantityToSell;
               if (existingPosition.quantity === 0) {
                 delete newPortfolio.positions[trade.ticker];
               }
-              newTradeHistory.push({ 
-                ...trade, 
-                quantity: quantityToSell, 
-                price: tradePrice, 
+              newTradeHistory.push({
+                ...trade,
+                quantity: quantityToSell,
+                price: tradePrice,
                 timestamp: timestamp,
                 fairValue: trade.fairValue,
                 topOfBox: trade.topOfBox,
                 bottomOfBox: trade.bottomOfBox,
                 justification: trade.justification,
+                fees,
               });
-              logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true);
+              logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true, undefined, fees);
             } else {
               const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
               console.warn(`[${agent.name}] Cannot sell ${trade.quantity} shares of ${trade.ticker} - ${errorMsg}`);
@@ -248,11 +350,16 @@ export const tradeWindow = async (
         newMetrics.intradayHour = intradayHour;
         
         const updatedMemory = {
-          recentTrades: [...(agent.memory?.recentTrades || []), ...decidedTrades.map(t => ({ ...t, price: marketData[t.ticker]?.price || 0, timestamp: timestamp } as Trade))].slice(-10),
+          recentTrades: [...(agent.memory?.recentTrades || []), ...decidedTrades.map(t => {
+            const executedPrice = marketData[t.ticker]?.price || 0;
+            const estimatedNotional = t.quantity * executedPrice;
+            const fees = executedPrice > 0 ? calculateExecutionFee(estimatedNotional) : undefined;
+            return { ...t, price: executedPrice, timestamp: timestamp, fees } as Trade;
+          })].slice(-10),
           pastRationales: [...(agent.memory?.pastRationales || []), rationale].slice(-5),
           pastPerformance: [...(agent.memory?.pastPerformance || []), newMetrics].slice(-10),
         };
-        
+
         return {
           ...agent,
           portfolio: newPortfolio,
@@ -333,6 +440,7 @@ export const advanceDay = async (
     marketData: MarketData;
     agents: Agent[];
     benchmarks: Benchmark[];
+    mode?: 'simulated' | 'realtime' | 'historical';
   },
   newMarketData: MarketData
 ): Promise<{
@@ -345,8 +453,7 @@ export const advanceDay = async (
   const nextDay = currentSnapshot.day + 1;
 
   // Process agents with trades at start of day
-  const updatedAgents: Agent[] = await Promise.all(
-    currentSnapshot.agents.map(async (agent) => {
+  const updatedAgents: Agent[] = await processAgentsWithPacing(currentSnapshot.agents, currentSnapshot.mode, async (agent) => {
       try {
         const { trades: decidedTrades, rationale } = await Promise.race([
           getTradeDecisions(agent, newMarketData, nextDay, 30000),
@@ -369,14 +476,17 @@ export const advanceDay = async (
           }
 
           if (trade.action === 'buy') {
-            const cost = trade.quantity * tradePrice;
-            if (newPortfolio.cash >= cost) {
-              newPortfolio.cash -= cost;
+            const notional = trade.quantity * tradePrice;
+            const fees = calculateExecutionFee(notional);
+            const totalCost = notional + fees;
+
+            if (newPortfolio.cash >= totalCost) {
+              newPortfolio.cash -= totalCost;
               const existingPosition = newPortfolio.positions[trade.ticker];
               if (existingPosition) {
-                const totalCost = (existingPosition.averageCost * existingPosition.quantity) + cost;
+                const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + notional;
                 existingPosition.quantity += trade.quantity;
-                existingPosition.averageCost = totalCost / existingPosition.quantity;
+                existingPosition.averageCost = aggregateCost / existingPosition.quantity;
                 if (trade.fairValue !== undefined) {
                   existingPosition.lastFairValue = trade.fairValue;
                   existingPosition.lastTopOfBox = trade.topOfBox;
@@ -392,40 +502,44 @@ export const advanceDay = async (
                   lastBottomOfBox: trade.bottomOfBox,
                 };
               }
-              newTradeHistory.push({ 
-                ...trade, 
-                price: tradePrice, 
+              newTradeHistory.push({
+                ...trade,
+                price: tradePrice,
                 timestamp: nextDay,
                 fairValue: trade.fairValue,
                 topOfBox: trade.topOfBox,
                 bottomOfBox: trade.bottomOfBox,
                 justification: trade.justification,
+                fees,
               });
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true);
+              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
             } else {
-              const errorMsg = `Insufficient cash: need $${cost.toFixed(2)}, have $${newPortfolio.cash.toFixed(2)}`;
-              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg);
+              const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
+              logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
             }
           } else if (trade.action === 'sell') {
             const existingPosition = newPortfolio.positions[trade.ticker];
             if (existingPosition && existingPosition.quantity > 0) {
               const quantityToSell = Math.min(trade.quantity, existingPosition.quantity);
-              newPortfolio.cash += quantityToSell * tradePrice;
+              const notional = quantityToSell * tradePrice;
+              const fees = quantityToSell > 0 ? calculateExecutionFee(notional) : 0;
+              newPortfolio.cash += notional - fees;
               existingPosition.quantity -= quantityToSell;
               if (existingPosition.quantity === 0) {
                 delete newPortfolio.positions[trade.ticker];
               }
-              newTradeHistory.push({ 
-                ...trade, 
-                quantity: quantityToSell, 
-                price: tradePrice, 
+              newTradeHistory.push({
+                ...trade,
+                quantity: quantityToSell,
+                price: tradePrice,
                 timestamp: nextDay,
                 fairValue: trade.fairValue,
                 topOfBox: trade.topOfBox,
                 bottomOfBox: trade.bottomOfBox,
                 justification: trade.justification,
+                fees,
               });
-              logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true);
+              logger.logTrade(agent.name, trade.ticker, 'sell', quantityToSell, tradePrice, true, undefined, fees);
             } else {
               const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
               logger.logTrade(agent.name, trade.ticker, 'sell', trade.quantity, tradePrice, false, errorMsg);

@@ -58,6 +58,18 @@ TRADE_INTERVAL_MS=7200000  # Trade window interval (2 hours)
 REALTIME_SIM_INTERVAL_MS=600000  # Price tick interval (10 minutes)
 REALTIME_TRADE_INTERVAL_MS=1800000  # Trade window interval (30 minutes)
 
+# Trading costs (defaults: 5 bps of notional with a $0.25 minimum)
+TRADING_FEE_BPS=5
+MIN_TRADE_FEE=0.25
+
+# Optional LLM pacing controls
+# Set LLM_REQUEST_SPACING_MS to a positive value to stagger requests sequentially
+# or enable automatic spacing derived from REALTIME_SIM_INTERVAL_MS by setting LLM_AUTO_SPACING=true
+LLM_REQUEST_SPACING_MS=-1
+LLM_MIN_REQUEST_SPACING_MS=0
+LLM_AUTO_SPACING=false
+LLM_MAX_CONCURRENT_REQUESTS=0
+
 # Persistence
 # Point this to a persistent volume or mounted path so data survives restarts
 PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
@@ -170,10 +182,16 @@ Returns log entries. Query parameters:
 - `POLYGON_API_KEY`: Polygon.io API key (fallback data source)
 - `SIM_INTERVAL_MS`: Price tick interval in milliseconds (default: 30000 = 30 seconds)
 - `TRADE_INTERVAL_MS`: Trade window interval in milliseconds (default: 7200000 = 2 hours)
+- `TRADING_FEE_BPS`: Per-trade percentage fee in basis points (default: 5 bps / 0.05%)
+- `MIN_TRADE_FEE`: Minimum per-trade fee in dollars (default: 0.25)
 - `PERSIST_PATH`: Path to snapshot JSON file (default: `./data/snapshot.json` – override to point at persistent storage in prod)
 - `SNAPSHOT_AUTOSAVE_INTERVAL_MS`: Additional autosave interval in milliseconds (default: 900000 = 15 minutes). Set to `0` or negative to disable.
 - `RESET_SIMULATION`: Set to `true` to reset simulation on startup (deletes snapshot, starts from day 0). Default: `false` (continues from saved state)
 - `LOG_LEVEL`: Logging verbosity (default: INFO)
+- `LLM_REQUEST_SPACING_MS`: Force sequential LLM calls with a fixed delay between agents (milliseconds, default: disabled)
+- `LLM_MIN_REQUEST_SPACING_MS`: Floor applied when auto spacing is enabled (default: 0)
+- `LLM_AUTO_SPACING`: When `true`, derives a pacing delay from the active simulation interval (default: `false`)
+- `LLM_MAX_CONCURRENT_REQUESTS`: Caps simultaneous LLM calls when spacing is disabled (default: unlimited)
 
 ## Simulation Modes
 
@@ -191,6 +209,28 @@ Returns log entries. Query parameters:
 - Uses real historical data from a specified week (Mon-Fri)
 - Automatically stops after 5 trading days
 - Requires Yahoo Finance access (no API key needed)
+
+## Trading Costs
+
+The engine now charges transaction costs on every executed order to better approximate brokerage friction:
+
+- **Default**: 5 basis points (0.05%) of trade notional with a **$0.25 minimum** per execution
+- **Buys**: Cash must cover both the notional and the fee; orders that exceed available cash after fees are rejected
+- **Sells**: Proceeds are reduced by the fee before being added to cash
+- **Visibility**: Fees are logged, included in the trade history payload, and exported alongside trades
+
+Override the defaults with `TRADING_FEE_BPS` and `MIN_TRADE_FEE` in `.env` if your deployment uses different assumptions.
+
+## LLM Request Pacing
+
+Heavy real-time trading can burst API calls at the start of each tick. Use the pacing controls to smooth that demand:
+
+- Set `LLM_REQUEST_SPACING_MS` to stagger agent decisions sequentially with a fixed delay
+- Alternatively, flip `LLM_AUTO_SPACING=true` to derive a delay from the active simulation interval (e.g. `REALTIME_SIM_INTERVAL_MS / agent_count`)
+- `LLM_MIN_REQUEST_SPACING_MS` enforces a floor when auto spacing is enabled
+- `LLM_MAX_CONCURRENT_REQUESTS` caps in-flight decisions when spacing is disabled but you still want to throttle concurrency
+
+These options make it easier to stay within OpenRouter ticket limits or rate limits without pausing the simulation.
 
 ## Persistence
 

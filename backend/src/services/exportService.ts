@@ -43,6 +43,7 @@ export const exportSimulationData = async (snapshot: SimulationSnapshot): Promis
           quantity: trade.quantity,
           price: trade.price,
           value: trade.quantity * trade.price,
+          fees: trade.fees ?? 0,
           fairValue: trade.fairValue,
           topOfBox: trade.topOfBox,
           bottomOfBox: trade.bottomOfBox,

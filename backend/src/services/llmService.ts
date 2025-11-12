@@ -1,5 +1,5 @@
 import type { Agent, MarketData, Trade, TradeAction } from '../types.js';
-import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT } from '../constants.js';
+import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -10,6 +10,11 @@ if (!OPENROUTER_API_KEY) {
 
 const getAgentPrompt = (agent: Agent): string => {
   return (agent as any).systemPrompt || UNIFIED_SYSTEM_PROMPT;
+};
+
+const estimateTradeFee = (notional: number): number => {
+  const variableFee = notional * TRADING_FEE_RATE;
+  return Math.max(variableFee, MIN_TRADE_FEE);
 };
 
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -94,6 +99,13 @@ export const getTradeDecisions = async (
     return { trades: [], rationale: "No market data available - cannot make trading decisions." };
   }
 
+  const tradingFeeBpsDisplay = (TRADING_FEE_RATE * 10000).toFixed(2);
+  const tradingFeePercentDisplay = (TRADING_FEE_RATE * 100).toFixed(3);
+  const minFeeDisplay = MIN_TRADE_FEE.toFixed(2);
+  const tradingCostLine = TRADING_FEE_RATE > 0
+    ? `${tradingFeeBpsDisplay} bps (${tradingFeePercentDisplay}% of notional) with a $${minFeeDisplay} minimum`
+    : `$${minFeeDisplay} per trade`;
+
   const prompt = `
 You are a portfolio manager making trading decisions for Day ${day}.
 
@@ -135,6 +147,7 @@ ${currentPositions.length > 0
 3. Maximum position size: ${MAX_POSITION_SIZE_PERCENT * 100}% of total portfolio value
 4. No margin, no short selling
 5. Quantity must be a positive integer (whole shares only)
+6. Every trade pays transaction costs: ${tradingCostLine}. Keep enough cash to cover fees.
 
 === WHAT YOU NEED TO PROVIDE ===
 You must return a JSON object with:
@@ -347,9 +360,12 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
           }
         }
         if (t.action === 'buy') {
-          const cost = t.quantity * marketData[t.ticker].price;
-          if (cost > agent.portfolio.cash) {
-            console.warn(`Cannot buy ${t.quantity} shares of ${t.ticker} - need $${cost.toFixed(2)} but only have $${agent.portfolio.cash.toFixed(2)}`);
+          const price = marketData[t.ticker].price;
+          const notional = t.quantity * price;
+          const fees = estimateTradeFee(notional);
+          const totalCost = notional + fees;
+          if (totalCost > agent.portfolio.cash) {
+            console.warn(`Cannot buy ${t.quantity} shares of ${t.ticker} - need $${totalCost.toFixed(2)} including fees but only have $${agent.portfolio.cash.toFixed(2)}`);
             return false;
           }
         }
@@ -361,7 +377,12 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
           action: t.action as TradeAction,
           quantity: t.quantity,
         };
-        
+
+        const referencePrice = marketData[t.ticker]?.price ?? 0;
+        if (referencePrice > 0) {
+          trade.fees = estimateTradeFee(trade.quantity * referencePrice);
+        }
+
         if (t.fairValue !== undefined && typeof t.fairValue === 'number' && t.fairValue > 0) {
           trade.fairValue = t.fairValue;
         }
