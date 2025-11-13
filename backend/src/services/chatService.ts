@@ -8,7 +8,9 @@ import {
   containsSpamIndicators,
   sanitizeOutgoingMessage,
   cloneChatMessages,
+  calculateTargetRoundId,
 } from '../utils/chatUtils.js';
+import { getSimInterval } from '../simulation/scheduler.js';
 
 interface AddUserMessageInput {
   username: string;
@@ -49,7 +51,11 @@ export const addUserMessageToChat = (input: AddUserMessageInput): { chat: ChatSt
     throw new Error('Messages cannot include links or promotional content.');
   }
 
-  const roundId = createRoundId(snapshot.day, snapshot.intradayHour);
+  // Calculate the target round for this message, accounting for 1-minute safety buffer
+  // If we're too close to the next round, assign to the round after that
+  const simulationMode = snapshot.mode;
+  const simIntervalMs = getSimInterval();
+  const roundId = calculateTargetRoundId(snapshot.day, snapshot.intradayHour, simulationMode, simIntervalMs);
 
   const userMessagesThisRound = chat.messages.filter(message =>
     message.senderType === 'user'
