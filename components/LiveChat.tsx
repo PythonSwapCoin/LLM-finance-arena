@@ -1,15 +1,17 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import type { Agent, ChatState, ChatMessage } from '../types';
+import type { Agent, ChatState, ChatMessage, MessageStatus } from '../types';
 
 interface LiveChatProps {
   chat: ChatState | null;
   agents: Agent[];
   currentRoundId: string;
-  onSendMessage: (payload: { username: string; agentId: string; content: string }) => Promise<ChatMessage>;
+  onSendMessage: (payload: { username: string; agentId?: string; content: string }) => Promise<ChatMessage>;
   className?: string;
+  nextTradeWindowMs?: number; // Milliseconds until next trade window
 }
 
 const LINK_PATTERN = /(https?:\/\/\S+|www\.\S+|[a-z0-9-]+\.[a-z]{2,10}\b)/i;
+const GENERAL_CHAT_ID = '__general__';
 
 const formatTimestamp = (iso: string): string => {
   const date = new Date(iso);
@@ -19,22 +21,73 @@ const formatTimestamp = (iso: string): string => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId, onSendMessage, className }) => {
+const formatCountdown = (ms: number): string => {
+  if (ms <= 0) return 'Starting soon...';
+
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+};
+
+const getStatusBadge = (status?: MessageStatus): { text: string; color: string } => {
+  switch (status) {
+    case 'pending':
+      return { text: 'Waiting to send', color: 'bg-yellow-100 text-yellow-700' };
+    case 'sent':
+      return { text: 'Sent', color: 'bg-blue-100 text-blue-700' };
+    case 'responded':
+      return { text: 'Responded', color: 'bg-green-100 text-green-700' };
+    case 'ignored':
+      return { text: 'Ignored', color: 'bg-gray-100 text-gray-600' };
+    default:
+      return { text: '', color: '' };
+  }
+};
+
+export const LiveChat: React.FC<LiveChatProps> = ({
+  chat,
+  agents,
+  currentRoundId,
+  onSendMessage,
+  className,
+  nextTradeWindowMs
+}) => {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(() => agents[0]?.id ?? '');
   const [username, setUsername] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [countdown, setCountdown] = useState<number>(nextTradeWindowMs || 0);
+  const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
     if (agents.length === 0) {
       setSelectedAgentId('');
       return;
     }
-    if (!agents.some(agent => agent.id === selectedAgentId)) {
+    if (!agents.some(agent => agent.id === selectedAgentId) && selectedAgentId !== GENERAL_CHAT_ID) {
       setSelectedAgentId(agents[0].id);
     }
   }, [agents, selectedAgentId]);
+
+  // Update countdown timer
+  useEffect(() => {
+    if (nextTradeWindowMs !== undefined) {
+      setCountdown(nextTradeWindowMs);
+    }
+  }, [nextTradeWindowMs]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCountdown(prev => Math.max(0, prev - 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const sortedMessages = useMemo(() => {
     if (!chat) {
@@ -63,12 +116,13 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
   ).length;
   const remainingForUser = normalizedName ? Math.max(chat.config.maxMessagesPerUser - userMessagesThisRound, 0) : chat.config.maxMessagesPerUser;
 
-  const agentMessagesThisRound = chat.messages.filter(messageItem =>
+  const isGeneralMessage = selectedAgentId === GENERAL_CHAT_ID;
+  const agentMessagesThisRound = !isGeneralMessage ? chat.messages.filter(messageItem =>
     messageItem.senderType === 'user'
     && messageItem.roundId === currentRoundId
     && messageItem.agentId === selectedAgentId
-  ).length;
-  const remainingForAgent = Math.max(chat.config.maxMessagesPerAgent - agentMessagesThisRound, 0);
+  ).length : 0;
+  const remainingForAgent = !isGeneralMessage ? Math.max(chat.config.maxMessagesPerAgent - agentMessagesThisRound, 0) : Infinity;
 
   const chatDisabled = !chat.config.enabled;
   const noAgentsAvailable = agents.length === 0;
@@ -88,7 +142,7 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
     }
 
     if (!selectedAgentId) {
-      setError('Please choose an agent to message.');
+      setError('Please choose an agent or general chat.');
       return;
     }
 
@@ -112,7 +166,7 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
       return;
     }
 
-    if (remainingForAgent <= 0) {
+    if (!isGeneralMessage && remainingForAgent <= 0) {
       setError('This agent already has the maximum number of community messages for this round.');
       return;
     }
@@ -120,7 +174,11 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
     setIsSending(true);
     setError(null);
     try {
-      await onSendMessage({ username: trimmedName, agentId: selectedAgentId, content: trimmedMessage });
+      await onSendMessage({
+        username: trimmedName,
+        agentId: isGeneralMessage ? undefined : selectedAgentId,
+        content: trimmedMessage
+      });
       setMessage('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message. Please try again.');
@@ -133,41 +191,93 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
     <div className={`bg-arena-surface rounded-lg shadow-lg p-3 sm:p-4 flex flex-col ${className ?? ''}`}>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-arena-text-primary">Community Live Chat</h2>
-        <span className={`text-xs font-medium px-2 py-1 rounded-full ${chatDisabled ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-          {chatDisabled ? 'Offline' : 'Live'}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowInfo(!showInfo)}
+            className="text-xs text-arena-text-tertiary hover:text-arena-text-primary transition-colors"
+            title="How it works"
+          >
+            ℹ️
+          </button>
+          <span className={`text-xs font-medium px-2 py-1 rounded-full ${chatDisabled ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+            {chatDisabled ? 'Offline' : 'Live'}
+          </span>
+        </div>
       </div>
+
+      {showInfo && (
+        <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md text-sm">
+          <h3 className="font-semibold text-arena-text-primary mb-2">How Community Chat Works</h3>
+          <ul className="space-y-1 text-arena-text-secondary text-xs">
+            <li>• Messages to agents are delivered during the <strong>next trading round</strong></li>
+            <li>• Agents can choose to reply or ignore messages</li>
+            <li>• Once a trading round passes, the opportunity to reply is lost</li>
+            <li>• General messages are visible to everyone but don't go to agents</li>
+            <li>• Next trading round in: <strong>{formatCountdown(countdown)}</strong></li>
+          </ul>
+        </div>
+      )}
+
+      {!showInfo && countdown > 0 && (
+        <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-arena-text-secondary">Next trading round in:</span>
+            <span className="font-mono font-semibold text-arena-text-primary">{formatCountdown(countdown)}</span>
+          </div>
+          <p className="text-xs text-arena-text-tertiary mt-1">Messages will be delivered to agents then</p>
+        </div>
+      )}
 
       <div className="flex-1 min-h-[220px] max-h-80 overflow-y-auto space-y-3 pr-1">
         {sortedMessages.length === 0 ? (
           <p className="text-sm text-arena-text-secondary">No messages yet. Be the first to reach out to an agent!</p>
         ) : (
-          sortedMessages.map(messageItem => (
-            <div
-              key={messageItem.id}
-              className={`rounded-md border border-arena-border px-3 py-2 ${messageItem.senderType === 'agent' ? 'bg-arena-bg' : 'bg-arena-surface'}`}
-            >
-              <div className="flex items-center justify-between text-xs text-arena-text-tertiary mb-1">
-                <span>{formatTimestamp(messageItem.createdAt)}</span>
-                <span>{messageItem.roundId}</span>
+          sortedMessages.map(messageItem => {
+            const statusBadge = messageItem.senderType === 'user' && messageItem.agentId
+              ? getStatusBadge(messageItem.status)
+              : null;
+
+            return (
+              <div
+                key={messageItem.id}
+                className={`rounded-md border border-arena-border px-3 py-2 ${messageItem.senderType === 'agent' ? 'bg-arena-bg' : 'bg-arena-surface'}`}
+              >
+                <div className="flex items-center justify-between text-xs text-arena-text-tertiary mb-1">
+                  <span>{formatTimestamp(messageItem.createdAt)}</span>
+                  <div className="flex items-center gap-2">
+                    {statusBadge && (
+                      <span className={`px-2 py-0.5 rounded-full font-medium ${statusBadge.color}`}>
+                        {statusBadge.text}
+                      </span>
+                    )}
+                    <span>{messageItem.roundId}</span>
+                  </div>
+                </div>
+                <div className="text-sm font-semibold text-arena-text-primary">
+                  {messageItem.senderType === 'user' ? (
+                    <>
+                      {messageItem.sender}
+                      {messageItem.agentName && (
+                        <>
+                          <span className="text-arena-text-tertiary"> → </span>
+                          <span>{messageItem.agentName}</span>
+                        </>
+                      )}
+                      {!messageItem.agentName && (
+                        <span className="ml-2 text-xs uppercase tracking-wide text-arena-text-tertiary">general</span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {messageItem.sender}
+                      <span className="ml-1 text-xs uppercase tracking-wide text-arena-text-tertiary">reply</span>
+                    </>
+                  )}
+                </div>
+                <p className="text-sm text-arena-text-secondary mt-1 whitespace-pre-wrap break-words">{messageItem.content}</p>
               </div>
-              <div className="text-sm font-semibold text-arena-text-primary">
-                {messageItem.senderType === 'user' ? (
-                  <>
-                    {messageItem.sender}
-                    <span className="text-arena-text-tertiary"> → </span>
-                    <span>{messageItem.agentName}</span>
-                  </>
-                ) : (
-                  <>
-                    {messageItem.sender}
-                    <span className="ml-1 text-xs uppercase tracking-wide text-arena-text-tertiary">reply</span>
-                  </>
-                )}
-              </div>
-              <p className="text-sm text-arena-text-secondary mt-1 whitespace-pre-wrap break-words">{messageItem.content}</p>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -186,16 +296,19 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
             />
           </label>
           <label className="flex flex-col text-sm text-arena-text-secondary">
-            <span className="font-medium text-arena-text-primary">Target agent</span>
+            <span className="font-medium text-arena-text-primary">Send to</span>
             <select
               value={selectedAgentId}
               onChange={event => setSelectedAgentId(event.target.value)}
               className="mt-1 rounded-md border border-arena-border bg-arena-bg px-3 py-2 text-arena-text-primary focus:outline-none focus:ring-2 focus:ring-arena-border"
               disabled={chatDisabled || noAgentsAvailable}
             >
-              {agents.map(agent => (
-                <option key={agent.id} value={agent.id}>{agent.name}</option>
-              ))}
+              <option value={GENERAL_CHAT_ID}>General Chat (everyone)</option>
+              <optgroup label="Agents">
+                {agents.map(agent => (
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>
+                ))}
+              </optgroup>
             </select>
           </label>
         </div>
@@ -205,7 +318,7 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
           <textarea
             value={message}
             onChange={event => setMessage(event.target.value.slice(0, maxLength))}
-            placeholder="Keep it respectful and under 140 characters"
+            placeholder={isGeneralMessage ? "Share your thoughts with everyone" : "Keep it respectful and under 140 characters"}
             className="mt-1 h-24 rounded-md border border-arena-border bg-arena-bg px-3 py-2 text-arena-text-primary focus:outline-none focus:ring-2 focus:ring-arena-border resize-none"
             maxLength={maxLength}
             disabled={chatDisabled || noAgentsAvailable}
@@ -215,7 +328,9 @@ export const LiveChat: React.FC<LiveChatProps> = ({ chat, agents, currentRoundId
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-arena-text-tertiary">
           <span>Messages remaining for you this round: {remainingForUser}</span>
-          <span>Messages remaining for {selectedAgentId ? agents.find(agent => agent.id === selectedAgentId)?.name ?? 'agent' : 'agent'}: {remainingForAgent}</span>
+          {!isGeneralMessage && selectedAgentId && (
+            <span>Messages remaining for {agents.find(agent => agent.id === selectedAgentId)?.name ?? 'agent'}: {remainingForAgent}</span>
+          )}
         </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}

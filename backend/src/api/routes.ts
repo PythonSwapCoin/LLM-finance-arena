@@ -190,14 +190,15 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
     }
   });
 
-  fastify.post<{ Body: { username: string; agentId: string; content: string } }>('/api/chat/messages', async (request, reply): Promise<ChatMessageResponse | { error: string }> => {
+  fastify.post<{ Body: { username: string; agentId?: string; content: string } }>('/api/chat/messages', async (request, reply): Promise<ChatMessageResponse | { error: string }> => {
     try {
       const { username, agentId, content } = request.body;
+      const messageType = agentId ? 'agent message' : 'general message';
       logger.log(LogLevel.INFO, LogCategory.SYSTEM,
-        '[CHAT] Received message', { username, agentId, contentLength: content.length });
+        '[CHAT] Received message', { username, agentId, contentLength: content.length, messageType });
       const result = addUserMessageToChat({ username, agentId, content });
       logger.log(LogLevel.INFO, LogCategory.SYSTEM,
-        '[CHAT] Message added', { messageId: result.message.id, roundId: result.message.roundId, totalMessages: result.chat.messages.length });
+        '[CHAT] Message added', { messageId: result.message.id, roundId: result.message.roundId, messageType, totalMessages: result.chat.messages.length });
       return result;
     } catch (error) {
       reply.code(400);

@@ -121,9 +121,11 @@ export const getTradeDecisions = async (
     ? `
 === COMMUNITY LIVE CHAT ===
 ${communityMessages.length > 0
-  ? communityMessages.map((message, index) => `${index + 1}. ${message.sender}: ${message.content}`).join('\n')
-  : 'No new community messages this round. Share a quick update in your reply field.'}
-Your reply must be one sentence, at most ${chatContext.maxReplyLength} characters, and must not contain links or promotional content.
+  ? `You received ${communityMessages.length} message(s) from the community this round:
+${communityMessages.map((message, index) => `${index + 1}. ${message.sender}: ${message.content}`).join('\n')}
+
+You may reply if you wish. Your reply must be one sentence, at most ${chatContext.maxReplyLength} characters, and must not contain links or promotional content. If you choose to reply, it will be shown in the community chat.`
+  : `You did not receive any messages from the community this round. DO NOT provide a reply - leave the "reply" field empty or undefined.`}
 `
     : '';
 

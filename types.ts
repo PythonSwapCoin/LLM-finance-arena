@@ -66,15 +66,20 @@ export interface Portfolio {
 
 export type ChatSenderType = 'user' | 'agent';
 
+export type MessageStatus = 'pending' | 'sent' | 'responded' | 'ignored';
+
 export interface ChatMessage {
   id: string;
-  agentId: string;
-  agentName: string;
+  agentId?: string; // undefined for general chat messages
+  agentName?: string; // undefined for general chat messages
   sender: string;
   senderType: ChatSenderType;
   content: string;
-  roundId: string;
+  roundId: string; // round when message was created
   createdAt: string;
+  status?: MessageStatus; // lifecycle status for user messages to agents
+  deliveredRoundId?: string; // round when message was delivered to agent
+  respondedAt?: string; // when agent responded or message was ignored
 }
 
 export interface ChatConfig {

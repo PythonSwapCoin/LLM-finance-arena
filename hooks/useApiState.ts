@@ -163,7 +163,7 @@ export const useApiState = () => {
     console.warn('Export simulation data not fully implemented in API mode');
   }, []);
 
-  const sendChatMessage = useCallback(async (payload: { username: string; agentId: string; content: string }) => {
+  const sendChatMessage = useCallback(async (payload: { username: string; agentId?: string; content: string }) => {
     const response = await apiClient.sendChatMessage(payload);
     setChat(response.chat);
     return response.message;

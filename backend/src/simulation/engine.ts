@@ -3,7 +3,7 @@ import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH, TRADING_FEE_RA
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getTradeDecisions } from '../services/llmService.js';
 import { logger } from '../services/logger.js';
-import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatService.js';
+import { applyAgentRepliesToChat, deliverPendingMessages, type AgentReplyInput } from '../services/chatService.js';
 import { createRoundId } from '../utils/chatUtils.js';
 
 const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
@@ -590,15 +590,35 @@ export const tradeWindow = async (
   }
 
   const roundId = createRoundId(day, intradayHour);
+
+  // Deliver pending messages to agents (pending → sent)
+  const chatWithDeliveredMessages = chat.config.enabled
+    ? deliverPendingMessages(chat, roundId)
+    : chat;
+
+  if (chat.config.enabled && chatWithDeliveredMessages.messages.length !== chat.messages.length) {
+    const deliveredCount = chatWithDeliveredMessages.messages.filter(m =>
+      m.status === 'sent' && m.deliveredRoundId === roundId
+    ).length;
+    if (deliveredCount > 0) {
+      logger.logSimulationEvent('[CHAT] Messages delivered to agents', {
+        count: deliveredCount,
+        roundId,
+      });
+    }
+  }
+
   const agentResults = await processAgentsWithPacing(agents, mode, agent => {
-    const messages = chat.config.enabled
-      ? chat.messages
+    // Get messages that were delivered to this agent in this round
+    const messages = chatWithDeliveredMessages.config.enabled
+      ? chatWithDeliveredMessages.messages
         .filter(message =>
-          message.roundId === roundId
+          message.deliveredRoundId === roundId
             && message.agentId === agent.id
             && message.senderType === 'user'
+            && message.status === 'sent'
         )
-        .slice(0, chat.config.maxMessagesPerAgent)
+        .slice(0, chatWithDeliveredMessages.config.maxMessagesPerAgent)
         .map(message => ({ sender: message.sender, content: message.content }))
       : [];
 
@@ -610,41 +630,50 @@ export const tradeWindow = async (
       timestamp,
       currentTimestamp,
       chatContext: {
-        enabled: chat.config.enabled,
+        enabled: chatWithDeliveredMessages.config.enabled,
         messages,
-        maxReplyLength: chat.config.maxMessageLength,
+        maxReplyLength: chatWithDeliveredMessages.config.maxMessageLength,
       },
     });
   });
 
   const updatedAgents: Agent[] = agentResults.map(result => result.agent);
 
-  const agentReplies: AgentReplyInput[] = agentResults
-    .filter(result => Boolean(result.reply && result.reply.trim()))
-    .map(result => ({
-      agent: result.agent,
-      roundId,
-      reply: result.reply,
-    }));
+  // Collect agent replies (including empty replies to track who didn't reply)
+  const agentReplies: AgentReplyInput[] = agentResults.map(result => ({
+    agent: result.agent,
+    roundId,
+    reply: result.reply,
+  }));
 
-  if (agentReplies.length > 0) {
+  if (agentReplies.filter(r => r.reply && r.reply.trim()).length > 0) {
     logger.logSimulationEvent('[CHAT] Agent replies generated', {
-      count: agentReplies.length,
-      agents: agentReplies.map(r => r.agent.name),
+      count: agentReplies.filter(r => r.reply && r.reply.trim()).length,
+      agents: agentReplies.filter(r => r.reply && r.reply.trim()).map(r => r.agent.name),
       roundId,
     });
   }
 
-  const updatedChat = chat.config.enabled
-    ? applyAgentRepliesToChat(chat, agentReplies)
-    : chat;
+  const updatedChat = chatWithDeliveredMessages.config.enabled
+    ? applyAgentRepliesToChat(chatWithDeliveredMessages, agentReplies)
+    : chatWithDeliveredMessages;
 
-  if (chat.config.enabled && agentReplies.length > 0) {
-    logger.logSimulationEvent('[CHAT] Agent replies applied to chat', {
-      messageCountBefore: chat.messages.length,
-      messageCountAfter: updatedChat.messages.length,
-      roundId,
-    });
+  if (chatWithDeliveredMessages.config.enabled) {
+    const respondedCount = updatedChat.messages.filter(m =>
+      m.status === 'responded' && m.deliveredRoundId === roundId
+    ).length;
+    const ignoredCount = updatedChat.messages.filter(m =>
+      m.status === 'ignored' && m.deliveredRoundId === roundId
+    ).length;
+    if (respondedCount > 0 || ignoredCount > 0) {
+      logger.logSimulationEvent('[CHAT] Agent replies processed', {
+        responded: respondedCount,
+        ignored: ignoredCount,
+        messageCountBefore: chatWithDeliveredMessages.messages.length,
+        messageCountAfter: updatedChat.messages.length,
+        roundId,
+      });
+    }
   }
 
   // Update benchmarks after trades

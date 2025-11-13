@@ -173,7 +173,7 @@ class ApiClient {
     return this.request<LogsResponse>(`/logs${query ? `?${query}` : ''}`);
   }
 
-  async sendChatMessage(payload: { username: string; agentId: string; content: string }): Promise<ChatMessageResponse> {
+  async sendChatMessage(payload: { username: string; agentId?: string; content: string }): Promise<ChatMessageResponse> {
     return this.request<ChatMessageResponse>('/chat/messages', {
       method: 'POST',
       body: JSON.stringify(payload),
