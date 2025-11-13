@@ -108,8 +108,29 @@ export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInpu
       return;
     }
 
-    const sanitizedReply = sanitizeOutgoingMessage(reply, chat.config.maxMessageLength) || 'Thanks for the update!';
+    const userMessages = updatedMessages.filter(message =>
+      message.senderType === 'user'
+      && message.agentId === agent.id
+      && message.roundId === roundId
+    );
+
+    if (userMessages.length === 0) {
+      return;
+    }
+
+    const sanitizedReply = sanitizeOutgoingMessage(reply, chat.config.maxMessageLength);
     if (!sanitizedReply) {
+      return;
+    }
+
+    const uniqueSenders = Array.from(new Set(userMessages.map(message => message.sender)));
+    const mentionPrefix = uniqueSenders.length > 0 ? uniqueSenders.map(sender => `@${sender}`).join(' ') : '';
+    const prefixWithSpace = mentionPrefix ? `${mentionPrefix} ` : '';
+    const availableLength = Math.max(chat.config.maxMessageLength - prefixWithSpace.length, 0);
+    const trimmedReply = sanitizedReply.slice(0, availableLength).trim();
+    const finalContent = `${prefixWithSpace}${trimmedReply}`.trim();
+
+    if (!finalContent) {
       return;
     }
 
@@ -125,7 +146,7 @@ export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInpu
       agentName: agent.name,
       sender: agent.name,
       senderType: 'agent',
-      content: sanitizedReply,
+      content: finalContent,
       roundId,
       createdAt: new Date().toISOString(),
     };
