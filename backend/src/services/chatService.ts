@@ -102,7 +102,8 @@ export const applyAgentRepliesToChat = (
   chat: ChatState,
   replies: AgentReplyInput[],
   roundId?: string,
-  allProcessedAgents?: Agent[]
+  allProcessedAgents?: Agent[],
+  mode?: 'simulated' | 'realtime' | 'historical'
 ): ChatState => {
   if (!chat.config.enabled) {
     return chat;
@@ -129,8 +130,9 @@ export const applyAgentRepliesToChat = (
       && message.roundId === roundId
     );
 
-    // If no user messages were received this round, agent cannot reply
-    if (userMessages.length === 0) {
+    // In historical mode, agents generate chat as part of simulation - no user messages required
+    // In other modes, agents can only reply if they received user messages this round
+    if (mode !== 'historical' && userMessages.length === 0) {
       return;
     }
 

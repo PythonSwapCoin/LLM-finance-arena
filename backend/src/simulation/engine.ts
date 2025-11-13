@@ -661,7 +661,7 @@ export const tradeWindow = async (
   }
 
   const updatedChat = chatWithDeliveredMessages.config.enabled
-    ? applyAgentRepliesToChat(chatWithDeliveredMessages, agentReplies, roundId, allProcessedAgents)
+    ? applyAgentRepliesToChat(chatWithDeliveredMessages, agentReplies, roundId, allProcessedAgents, currentSnapshot.mode)
     : chatWithDeliveredMessages;
 
   if (chat.config.enabled && agentReplies.length > 0) {
