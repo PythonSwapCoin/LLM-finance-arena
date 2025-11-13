@@ -23,8 +23,10 @@ const formatTimestamp = (iso: string): string => {
 };
 
 // Calculate seconds until next trading round
-// For realtime mode: rounds happen on a fixed schedule (e.g., every 10 minutes)
+// For realtime mode: rounds happen on a fixed schedule (e.g., every hour)
 // For historical/simulated mode: use the backend's simulation interval
+// IMPORTANT: If less than 60 seconds remain until next round, show countdown to the round AFTER that
+// This ensures messages have sufficient time to be processed
 const calculateSecondsUntilNextRound = (
   simulationMode: string | undefined,
   intradayHour: number | undefined,
@@ -34,18 +36,33 @@ const calculateSecondsUntilNextRound = (
     return null;
   }
 
+  const SAFETY_BUFFER_SECONDS = 60; // 1 minute safety buffer
+
   if (simulationMode === 'realtime') {
     // For realtime: trading rounds happen every hour
     // intradayHour is 0-6.5 representing hours since market open
     const currentHourFraction = intradayHour % 1; // Get fractional part
     const secondsIntoCurrentHour = currentHourFraction * 3600;
     const secondsUntilNextHour = 3600 - secondsIntoCurrentHour;
+
+    // If less than 60 seconds until next round, skip to the round after that
+    if (secondsUntilNextHour <= SAFETY_BUFFER_SECONDS) {
+      return Math.floor(secondsUntilNextHour + 3600);
+    }
+
     return Math.max(0, Math.floor(secondsUntilNextHour));
   }
 
   // For historical/simulated mode: use the backend's simulation interval
   // The backend advances the simulation every simIntervalMs milliseconds
-  return Math.max(1, Math.floor(simIntervalMs / 1000));
+  const intervalSeconds = Math.floor(simIntervalMs / 1000);
+
+  // If the interval is less than or equal to the safety buffer, show countdown to next-next round
+  if (intervalSeconds <= SAFETY_BUFFER_SECONDS) {
+    return Math.max(1, intervalSeconds * 2);
+  }
+
+  return Math.max(1, intervalSeconds);
 };
 
 // Format seconds into MM:SS
@@ -271,14 +288,14 @@ export const LiveChat: React.FC<LiveChatProps> = ({
         <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
           <div className="flex items-center justify-between">
             <p className="text-sm text-blue-800">
-              <span className="font-semibold">Next update in:</span>
+              <span className="font-semibold">Next delivery in:</span>
             </p>
             <span className="text-lg font-bold text-blue-900 tabular-nums">
               {formatCountdown(countdown)}
             </span>
           </div>
           <p className="text-xs text-blue-600 mt-1">
-            Your message will be delivered to the agent during the next trading round.
+            Your message will be delivered to the agent during the next available trading round.
           </p>
         </div>
       )}
