@@ -6,7 +6,7 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
 
 - **Frontend**: React/Vite app (deploy to Vercel, Netlify, or similar)
 - **Backend**: Node.js/Express server (deploy to Render, Railway, Fly.io, or similar)
-- **State**: Persisted to JSON files (or Postgres in Phase 2)
+- **State**: Persisted to JSON files or Postgres
 
 ## Prerequisites
 
@@ -30,19 +30,23 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
    - **Plan**: Free (or paid for better performance)
 
 4. **Add Environment Variables** in Render dashboard:
-   ```
-   BACKEND_PORT=8080
-   ALLOWED_ORIGINS=https://your-frontend.vercel.app
-   MODE=simulated
-   OPENROUTER_API_KEY=sk-or-v1-your-key-here
-   SIM_INTERVAL_MS=30000
-   TRADE_INTERVAL_MS=7200000
-   PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
-   SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
-   LOG_LEVEL=INFO
-   ```
+ ```
+  BACKEND_PORT=8080
+  ALLOWED_ORIGINS=https://your-frontend.vercel.app
+  MODE=simulated
+  OPENROUTER_API_KEY=sk-or-v1-your-key-here
+  SIM_INTERVAL_MS=30000
+  TRADE_INTERVAL_MS=7200000
+  PERSISTENCE_DRIVER=file
+  PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
+  SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
+  LOG_LEVEL=INFO
+  # DATABASE_URL=postgres://user:password@host:5432/dbname  (set if using Postgres)
+  ```
 
-5. **Important**: Render free tier spins down after 15 minutes of inactivity. Consider:
+5. (Optional) **Attach Render Postgres**: Create a Render Postgres instance, copy the `DATABASE_URL`, set `PERSISTENCE_DRIVER=postgres`, and redeploy. See [Postgres Setup](./POSTGRES_SETUP.md) for the step-by-step workflow.
+
+6. **Important**: Render free tier spins down after 15 minutes of inactivity. Consider:
    - Using a paid tier for 24/7 operation
    - Or use a cron job to ping the service every 10 minutes
    - Or use Railway/Fly.io which have better free tiers
@@ -127,10 +131,10 @@ ALLOWED_ORIGINS=https://llm-finance-arena.vercel.app
 
 ### Backend Persistence
 
-- **Render/Railway**: Use their persistent disk/volume for the snapshot file defined by `PERSIST_PATH`
-- Configure `SNAPSHOT_AUTOSAVE_INTERVAL_MS` (default 15 minutes) to control how frequently the backend flushes state to disk in addition to the existing per-event saves
-- **Fly.io**: Volumes persist automatically
-- **JSON files**: Work fine for Phase 1, but consider Postgres for production
+- **Render/Railway**: Either mount their persistent disk (`PERSISTENCE_DRIVER=file`) or attach a managed Postgres instance and set `PERSISTENCE_DRIVER=postgres`.
+- Configure `SNAPSHOT_AUTOSAVE_INTERVAL_MS` (default 15 minutes) to control how frequently the backend flushes state in addition to the per-event saves.
+- **Fly.io**: Volumes persist automatically; you can also bring your own Postgres.
+- **Postgres**: Recommended for long-running or real-time seasons so simulation state survives restarts and multi-day history is captured.
 
 ### Free Tier Limitations
 
@@ -163,9 +167,14 @@ MIN_TRADE_FEE=0.25
 LLM_AUTO_SPACING=false
 LLM_REQUEST_SPACING_MS=-1
 LLM_MAX_CONCURRENT_REQUESTS=0
+PERSISTENCE_DRIVER=file
 PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
 SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
 LOG_LEVEL=INFO
+# DATABASE_URL=postgres://user:password@host:5432/dbname
+# POSTGRES_SSL=true
+# POSTGRES_NAMESPACE=default
+# POSTGRES_SNAPSHOT_ID=current
 ```
 
 ### Frontend (in Vercel/Netlify dashboard)
@@ -191,7 +200,6 @@ VITE_API_BASE=https://your-backend.onrender.com/api
 
 ## Next Steps (Phase 2)
 
-- Add Postgres persistence
 - Add WebSocket support for real-time updates
 - Add authentication/authorization
 - Add leaderboards and analytics

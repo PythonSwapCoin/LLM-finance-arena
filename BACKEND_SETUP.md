@@ -6,7 +6,7 @@ This guide explains how to set up and run the LLM Finance Arena backend.
 
 The backend is a single Node.js process that:
 - Runs the simulation loop 24/7 using `setInterval`
-- Persists state to JSON files (with Postgres adapter interface for Phase 2)
+- Persists state to JSON files or Postgres (configurable)
 - Exposes a REST API for the frontend to poll
 - Handles all LLM calls and market data fetching server-side
 
@@ -71,9 +71,17 @@ LLM_AUTO_SPACING=false
 LLM_MAX_CONCURRENT_REQUESTS=0
 
 # Persistence
+# Choose between file-based JSON snapshots or Postgres
+PERSISTENCE_DRIVER=file
 # Point this to a persistent volume or mounted path so data survives restarts
 PERSIST_PATH=/var/lib/llm-finance-arena/snapshot.json
 SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
+
+# Postgres persistence (optional)
+# DATABASE_URL=postgres://user:password@hostname:5432/database
+# POSTGRES_SSL=true
+# POSTGRES_NAMESPACE=default
+# POSTGRES_SNAPSHOT_ID=current
 
 # Simulation Control
 RESET_SIMULATION=false  # Set to 'true' to reset simulation on startup (deletes snapshot and starts from day 0)
@@ -234,18 +242,25 @@ These options make it easier to stay within OpenRouter ticket limits or rate lim
 
 ## Persistence
 
-The backend automatically persists the simulation state to a JSON file after each:
-- Price tick
-- Trade window execution
-- Day advancement
-- Autosave interval flush (configurable via `SNAPSHOT_AUTOSAVE_INTERVAL_MS`, default 900000 ms / 15 minutes)
+The backend supports two persistence drivers controlled by `PERSISTENCE_DRIVER`:
 
-On startup, the backend:
-- **By default**: Loads the last saved snapshot and continues from where it left off
-- **If `RESET_SIMULATION=true`**: Deletes the snapshot and starts fresh from day 0
-- **If no snapshot exists**: Initializes fresh simulation
+- `file` (default): Persists snapshots to a JSON document on disk. Point `PERSIST_PATH` at a mounted volume in production.
+- `postgres`: Stores the latest snapshot and a history of every intraday save to Render Postgres (or any compatible Postgres instance).
 
-You can also reset the simulation via API: `POST /api/simulation/reset`
+Regardless of driver, the engine flushes state to storage after every price tick, trade window, day advancement, and the autosave interval (`SNAPSHOT_AUTOSAVE_INTERVAL_MS`, default 15 minutes).
+
+When Postgres is enabled, two tables are created automatically:
+
+- `simulation_snapshots` – Keeps the most recent snapshot per namespace, allowing instant recovery after restarts.
+- `simulation_snapshot_history` – Appends/updates one row per `(namespace, day, intraday_hour, mode)` so you can reconstruct multi-day seasons or run analytics later.
+
+Startup behavior:
+
+- **Normal boot**: Load the last saved snapshot and continue from where the engine left off.
+- **`RESET_SIMULATION=true`**: Clear the configured persistence target (file removal or Postgres truncate) and start from day 0.
+- **No snapshot available**: Create a fresh simulation and immediately persist it.
+
+You can also reset the simulation via API: `POST /api/simulation/reset`. The endpoint now clears the active persistence target and restarts the scheduler automatically.
 
 ## Deployment
 
@@ -254,7 +269,7 @@ You can also reset the simulation via API: `POST /api/simulation/reset`
 1. Set environment variables in your deployment platform
 2. Set build command: `cd backend && npm install && npm run build`
 3. Set start command: `cd backend && npm start`
-4. Ensure `PERSIST_PATH` points to a persistent volume (or use Postgres adapter in Phase 2) and tune `SNAPSHOT_AUTOSAVE_INTERVAL_MS` for how often to force disk writes between simulation events
+4. Configure persistence: either mount a volume and leave `PERSISTENCE_DRIVER=file`, or set `PERSISTENCE_DRIVER=postgres` with the Render Postgres connection URL (see [Postgres Setup](./POSTGRES_SETUP.md))
 
 ### Docker (Example)
 
@@ -282,12 +297,13 @@ Add your frontend origin to `ALLOWED_ORIGINS` in `.env`.
 Ensure `OPENROUTER_API_KEY` is set correctly. Check logs for specific error messages.
 
 ### Persistence Issues
-Check that the directory specified in `PERSIST_PATH` is writable. The backend will create it if it doesn't exist.
+- **File driver**: Check that the directory specified in `PERSIST_PATH` is writable. The backend will create it if it doesn't exist.
+- **Postgres driver**: Verify `DATABASE_URL`/`POSTGRES_URL` and SSL settings. The backend logs any connection or migration errors during startup.
 
 ## Architecture Notes
 
 - **Single Process**: All simulation logic runs in one Node.js process
-- **No Redis/BullMQ**: Uses in-memory state with JSON file persistence
+- **No Redis/BullMQ**: Uses in-memory state with pluggable persistence (JSON file or Postgres)
 - **Pure Engine**: `engine.ts` contains pure functions (no I/O)
 - **Scheduler**: `scheduler.ts` owns the `setInterval` timers
 - **State Management**: `state.ts` manages the in-memory snapshot
@@ -296,7 +312,6 @@ Check that the directory specified in `PERSIST_PATH` is writable. The backend wi
 ## Phase 2 Extensions
 
 The codebase is structured to support:
-- Postgres persistence (adapter interface already defined)
 - Redis/BullMQ for distributed processing
 - WebSocket support for real-time updates
 - Leaderboards and analytics

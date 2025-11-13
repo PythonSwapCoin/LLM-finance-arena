@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { promises as fs } from 'fs';
 import { simulationState } from '../simulation/state.js';
 import { startScheduler, stopScheduler, isSchedulerRunning } from '../simulation/scheduler.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
@@ -12,7 +11,12 @@ import {
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { S_P500_TICKERS } from '../constants.js';
-import { getPersistFilePath, saveSnapshot } from '../store/persistence.js';
+import {
+  getPersistenceDriver,
+  getPersistenceTargetDescription,
+  clearSnapshot,
+  saveSnapshot,
+} from '../store/persistence.js';
 import type {
   SimulationStateResponse,
   AgentsResponse,
@@ -203,18 +207,16 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
   fastify.post('/api/simulation/reset', async (request, reply) => {
     try {
       stopScheduler();
-      
-      // Delete snapshot file
-      const persistFilePath = getPersistFilePath();
 
-      await fs.unlink(persistFilePath).catch(() => {
-        // File doesn't exist, that's fine
-      });
+      const persistenceDriver = getPersistenceDriver();
+      const persistenceTarget = getPersistenceTargetDescription();
+
+      await clearSnapshot();
 
       // Reinitialize simulation
       const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
       await simulationState.initialize(initialMarketData);
-      
+
       // Save initial state
       await saveSnapshot(simulationState.getSnapshot()).catch(err => {
         logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
@@ -224,16 +226,19 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
       // Restart scheduler
       await startScheduler();
 
-      logger.logSimulationEvent('Simulation reset successfully', { path: persistFilePath });
+      logger.logSimulationEvent('Simulation reset successfully', {
+        driver: persistenceDriver,
+        target: persistenceTarget,
+      });
 
       return {
         ok: true,
-        message: 'Simulation reset successfully - starting from day 0'
+        message: `Simulation reset successfully - starting from day 0 (${persistenceDriver} persistence)`
       };
     } catch (error) {
       reply.code(500);
-      return { 
-        ok: false, 
+      return {
+        ok: false,
         error: error instanceof Error ? error.message : String(error) 
       };
     }
