@@ -11,6 +11,7 @@ interface AgentDetailViewProps {
   startDate?: string;
   currentDate?: string;
   simulationMode?: 'simulated' | 'realtime' | 'historical';
+  showModelName?: boolean;
 }
 
 const StatCard: React.FC<{ label: string; value: string; className?: string }> = ({ label, value, className = '' }) => (
@@ -19,7 +20,7 @@ const StatCard: React.FC<{ label: string; value: string; className?: string }> =
         <p className={`text-xl font-bold ${className}`}>{value}</p>
     </div>
 );
-export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose, marketData = {}, startDate, currentDate, simulationMode }) => {
+export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose, marketData = {}, startDate, currentDate, simulationMode, showModelName = true }) => {
     const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
     const positions = Object.values(agent.portfolio.positions).filter((p: Position) => p.quantity > 0);
     
@@ -54,7 +55,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                     <div className="w-4 h-4 rounded-full" style={{backgroundColor: agent.color}}></div>
                     <div>
                         <h2 className="text-xl font-bold text-arena-text-primary">{agent.name}</h2>
-                        <p className="text-sm text-arena-text-secondary">{agent.model}</p>
+                        {showModelName && <p className="text-sm text-arena-text-secondary">{agent.model}</p>}
                     </div>
                 </div>
                 <button onClick={onClose} className="text-arena-text-secondary hover:text-arena-text-primary">

@@ -6,60 +6,18 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { registerRoutes } from './api/routes.js';
-import { simulationState } from './simulation/state.js';
-import {
-  getPersistenceDriver,
-  getPersistFilePath,
-  getPersistenceTargetDescription,
-  loadSnapshot,
-  saveSnapshot,
-  clearSnapshot,
-  closePersistence,
-} from './store/persistence.js';
-import { createInitialMarketData, synchronizeSimulationFromSnapshot } from './services/marketDataService.js';
+import { registerMultiSimRoutes } from './api/multiSimRoutes.js';
+import { simulationManager } from './simulation/SimulationManager.js';
+import { createInitialMarketData } from './services/marketDataService.js';
 import { S_P500_TICKERS } from './constants.js';
 import { logger, LogLevel, LogCategory } from './services/logger.js';
-import { startScheduler, stopScheduler } from './simulation/scheduler.js';
+import { startMultiSimScheduler, stopMultiSimScheduler } from './simulation/multiSimScheduler.js';
 
 const PORT = parseInt(process.env.BACKEND_PORT || '8080', 10);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
 const SNAPSHOT_AUTOSAVE_INTERVAL_MS = parseInt(process.env.SNAPSHOT_AUTOSAVE_INTERVAL_MS || '900000', 10);
 
-let snapshotAutosaveInterval: NodeJS.Timeout | null = null;
 let isShuttingDown = false;
-
-const startSnapshotAutosave = (): void => {
-  if (SNAPSHOT_AUTOSAVE_INTERVAL_MS <= 0) {
-    logger.log(LogLevel.INFO, LogCategory.SYSTEM,
-      'Snapshot autosave disabled', { intervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS });
-    return;
-  }
-
-  if (snapshotAutosaveInterval) {
-    clearInterval(snapshotAutosaveInterval);
-  }
-
-  snapshotAutosaveInterval = setInterval(async () => {
-    try {
-      await saveSnapshot(simulationState.getSnapshot());
-    } catch (error) {
-      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
-        'Failed to persist snapshot during autosave', { error });
-    }
-  }, SNAPSHOT_AUTOSAVE_INTERVAL_MS);
-
-  logger.logSimulationEvent('Snapshot autosave enabled', {
-    intervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS,
-  });
-};
-
-const stopSnapshotAutosave = (): void => {
-  if (snapshotAutosaveInterval) {
-    clearInterval(snapshotAutosaveInterval);
-    snapshotAutosaveInterval = null;
-    logger.logSimulationEvent('Snapshot autosave stopped', {});
-  }
-};
 
 const shutdown = async ({ reason, exitCode, error }: { reason: string; exitCode: number; error?: unknown }): Promise<void> => {
   if (isShuttingDown) {
@@ -74,22 +32,11 @@ const shutdown = async ({ reason, exitCode, error }: { reason: string; exitCode:
     logger.logSimulationEvent(`${reason} - initiating shutdown`, {});
   }
 
-  stopSnapshotAutosave();
-  stopScheduler();
-
-  await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
-      'Failed to save snapshot during shutdown', { error: err });
-  });
+  await stopMultiSimScheduler();
 
   await fastify.close().catch(err => {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
       'Failed to close Fastify instance during shutdown', { error: err });
-  });
-
-  await closePersistence().catch(err => {
-    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-      'Failed to close persistence adapter during shutdown', { error: err });
   });
 
   process.exit(exitCode);
@@ -148,131 +95,50 @@ await fastify.register(rateLimit, {
 
 // Register routes
 await fastify.register(registerRoutes);
+await fastify.register(registerMultiSimRoutes);
 
-// Initialize simulation state
-const initializeSimulation = async (): Promise<void> => {
-  logger.logSimulationEvent('Initializing simulation', { tickers: S_P500_TICKERS.length });
-
-  const RESET_SIMULATION = process.env.RESET_SIMULATION === 'true';
-  const persistenceDriver = getPersistenceDriver();
-  const persistenceTarget = getPersistenceTargetDescription();
-
-  logger.logSimulationEvent('Simulation persistence configured', {
-    driver: persistenceDriver,
-    target: persistenceTarget,
-    resetOnStartup: RESET_SIMULATION,
-    autosaveIntervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS,
+// Initialize all simulations
+const initializeAllSimulations = async (): Promise<void> => {
+  logger.logSimulationEvent('Initializing multi-simulation framework', {
+    tickers: S_P500_TICKERS.length,
   });
 
-  if (persistenceDriver === 'file') {
-    const persistFilePath = getPersistFilePath();
+  // Create initial market data (shared across all simulations)
+  const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
 
-    if (!process.env.PERSIST_PATH) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        'PERSIST_PATH not set; using default relative path. Mount a persistent volume or override PERSIST_PATH to retain data across restarts.',
-        { defaultPath: persistFilePath });
-    }
+  // Initialize all simulation types with the same market data
+  await simulationManager.initializeAll(initialMarketData);
 
-    if (RESET_SIMULATION) {
-      logger.logSimulationEvent('RESET_SIMULATION=true, clearing persisted snapshot', { driver: 'file' });
-      await clearSnapshot().catch(error => {
-        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-          'Failed to clear snapshot for reset', {
-            driver: 'file',
-            error: error instanceof Error ? error.message : String(error),
-          });
-      });
-    }
-  } else if (RESET_SIMULATION) {
-    logger.logSimulationEvent('RESET_SIMULATION=true, clearing persisted snapshot', { driver: 'postgres' });
-    await clearSnapshot().catch(error => {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        'Failed to clear snapshot for reset', {
-          driver: 'postgres',
-          error: error instanceof Error ? error.message : String(error),
-        });
-    });
-  }
-  
-  // Try to load persisted snapshot
-  const savedSnapshot = await loadSnapshot();
-  const configuredMode = simulationState.getMode();
-  let snapshotLoaded = false;
+  logger.logSimulationEvent('All simulations initialized', {
+    count: simulationManager.getAllSimulations().size,
+  });
 
-  if (savedSnapshot && !RESET_SIMULATION) {
-    if (savedSnapshot.mode !== configuredMode) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        'Persisted snapshot mode does not match configured MODE - starting fresh', {
-          snapshotMode: savedSnapshot.mode,
-          configuredMode,
-        });
-    } else {
-      logger.logSimulationEvent('Loaded snapshot from persistence', {
-        day: savedSnapshot.day,
-        mode: savedSnapshot.mode
-      });
-      simulationState.loadFromSnapshot(savedSnapshot);
-      try {
-        await synchronizeSimulationFromSnapshot(simulationState.getSnapshot());
-      } catch (error) {
-        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-          'Failed to synchronize market data context from snapshot', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-      }
-      snapshotLoaded = true;
-    }
-  }
-
-  if (!snapshotLoaded) {
-    // Initialize fresh
-    logger.logSimulationEvent('Creating fresh simulation', {});
-    const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
-    await simulationState.initialize(initialMarketData);
-
-    try {
-      await synchronizeSimulationFromSnapshot(simulationState.getSnapshot());
-    } catch (error) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        'Failed to synchronize market data context after initialization', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-    }
-
-    // Save initial state
-    await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
-        'Failed to save initial snapshot', { error: err });
-    });
-  }
-
-  // Auto-start scheduler
-  await startScheduler();
-  logger.logSimulationEvent('Simulation scheduler started', {});
+  // Auto-start multi-simulation scheduler
+  await startMultiSimScheduler();
+  logger.logSimulationEvent('Multi-simulation scheduler started', {});
 };
 
 // Start server
 const start = async (): Promise<void> => {
   try {
-    await initializeSimulation();
-    startSnapshotAutosave();
+    await initializeAllSimulations();
 
     await fastify.listen({
       port: PORT,
       host: '0.0.0.0'
     });
-    
-    logger.logSimulationEvent('Backend server started', { 
-      port: PORT, 
-      origins: ALLOWED_ORIGINS 
+
+    logger.logSimulationEvent('Backend server started', {
+      port: PORT,
+      origins: ALLOWED_ORIGINS
     });
     console.log(`🚀 Backend server running on http://localhost:${PORT}`);
-    console.log(`📊 Simulation mode: ${simulationState.getMode()}`);
+    console.log(`📊 Multi-simulation framework initialized`);
     console.log(`🔒 CORS allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   } catch (err) {
-    logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-      'Error starting server', { 
-        error: err instanceof Error ? err.message : String(err) 
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+      'Error starting server', {
+        error: err instanceof Error ? err.message : String(err)
       });
     console.error('Error starting server:', err);
     process.exit(1);
