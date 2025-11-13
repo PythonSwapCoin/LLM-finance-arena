@@ -145,7 +145,20 @@ const handleTradeWindowAgent = async (
       };
     });
 
-    const { trades: decidedTrades, rationale, reply } = tradeDecision;
+    const { trades: decidedTrades, rationale, reply: rawReply } = tradeDecision;
+    const trimmedReply = rawReply?.trim();
+    const hasUserMessagesThisRound = Boolean(chatContext?.messages && chatContext.messages.length > 0);
+    const shouldProvideFallbackReply = !trimmedReply && chatContext?.enabled && hasUserMessagesThisRound;
+    const fallbackReply = 'Appreciate the update—keeping our strategy on track.';
+    const reply = shouldProvideFallbackReply ? fallbackReply : trimmedReply;
+
+    if (shouldProvideFallbackReply) {
+      logger.logSimulationEvent('Generated fallback chat reply for agent', {
+        agent: agent.name,
+        day,
+        intradayHour,
+      });
+    }
     const newTradeHistory = [...agent.tradeHistory];
     const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
 

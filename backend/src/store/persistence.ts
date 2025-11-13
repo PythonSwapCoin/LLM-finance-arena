@@ -143,6 +143,15 @@ class PostgresAdapter {
   private snapshotId: string;
   private hasLoggedInitialization = false;
 
+  private static toIntradayKey(intradayHour: number): number {
+    if (!Number.isFinite(intradayHour)) {
+      return 0;
+    }
+    // Store intraday progress with millisecond-like precision (thousandths of an hour)
+    // so fractional ticks (e.g., 0.5 = 30 minutes) can be persisted in integer columns.
+    return Math.round(intradayHour * 1000);
+  }
+
   constructor() {
     const connectionString = getPostgresConnectionString();
     const useSSL = shouldUsePostgresSSL();
@@ -263,6 +272,7 @@ class PostgresAdapter {
   async saveSnapshot(snapshot: SimulationSnapshot): Promise<void> {
     await this.ensureInitialized();
     try {
+      const intradayKey = PostgresAdapter.toIntradayKey(snapshot.intradayHour);
       await this.pool.query(
         `INSERT INTO simulation_snapshots(namespace, snapshot_id, day, intraday_hour, mode, snapshot, last_updated)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -276,7 +286,7 @@ class PostgresAdapter {
           this.namespace,
           this.snapshotId,
           snapshot.day,
-          snapshot.intradayHour,
+          intradayKey,
           snapshot.mode,
           snapshot,
         ]
@@ -286,12 +296,12 @@ class PostgresAdapter {
         `INSERT INTO simulation_snapshot_history(namespace, day, intraday_hour, mode, snapshot, recorded_at)
          VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT (namespace, day, intraday_hour, mode)
-         DO UPDATE SET snapshot = EXCLUDED.snapshot,
+          DO UPDATE SET snapshot = EXCLUDED.snapshot,
            recorded_at = NOW()`
         , [
           this.namespace,
           snapshot.day,
-          snapshot.intradayHour,
+          intradayKey,
           snapshot.mode,
           snapshot,
         ]
