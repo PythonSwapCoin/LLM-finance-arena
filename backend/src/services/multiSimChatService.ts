@@ -1,7 +1,16 @@
 import { simulationManager } from '../simulation/SimulationManager.js';
 import type { ChatMessage, ChatState } from '../types.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { logger, LogLevel, LogCategory } from './logger.js';
+import {
+  sanitizeUsername,
+  sanitizeIncomingContent,
+  containsSpamIndicators,
+  sanitizeOutgoingMessage,
+  cloneChatMessages,
+  calculateTargetRoundId,
+} from '../utils/chatUtils.js';
+import { getSimInterval } from '../simulation/multiSimScheduler.js';
 
 interface UserMessageInput {
   username: string;
@@ -33,81 +42,78 @@ export const addUserMessageToSimulation = (
 
   const snapshot = instance.getSnapshot();
   const { chat } = snapshot;
-  const { username, agentId, content } = input;
 
   // Validate chat is enabled
   if (!chat.config.enabled) {
     throw new Error('Chat is disabled');
   }
 
-  // Validate message length
-  if (content.length > chat.config.maxMessageLength) {
-    throw new Error(`Message too long (max ${chat.config.maxMessageLength} characters)`);
-  }
-
-  if (content.trim().length === 0) {
-    throw new Error('Message cannot be empty');
-  }
-
   // Validate agent exists
-  const agent = snapshot.agents.find(a => a.id === agentId);
+  const agent = snapshot.agents.find(a => a.id === input.agentId);
   if (!agent) {
-    throw new Error(`Agent '${agentId}' not found`);
+    throw new Error(`Agent '${input.agentId}' not found`);
   }
 
-  // Check for URLs or spam patterns
-  const urlPattern = /(https?:\/\/|www\.)/i;
-  if (urlPattern.test(content)) {
-    throw new Error('Messages cannot contain URLs');
+  // Sanitize and validate username
+  const username = sanitizeUsername(input.username);
+  if (!username) {
+    throw new Error('A display name is required to send messages.');
   }
 
-  // Calculate the roundId where this message will be delivered
-  // Messages are delivered at the next trade window
-  const currentRoundId = `${snapshot.day}-${snapshot.intradayHour.toFixed(3)}`;
+  // Sanitize and validate content
+  const sanitizedContent = sanitizeIncomingContent(input.content, chat.config.maxMessageLength);
+  if (!sanitizedContent) {
+    throw new Error('Message cannot be empty.');
+  }
 
-  // Add 1 minute safety buffer to ensure message is delivered in next round
-  const safetyBufferMinutes = 1;
-  const nextIntradayHour = snapshot.intradayHour + (safetyBufferMinutes / 60);
+  // Check for spam
+  if (containsSpamIndicators(sanitizedContent)) {
+    throw new Error('Messages cannot include links or promotional content.');
+  }
 
-  // Determine the next trade round
-  // For simplicity, we'll use the next intraday hour as the delivery round
-  const deliveryRoundId = `${snapshot.day}-${nextIntradayHour.toFixed(3)}`;
+  // Calculate the target round for this message
+  const simulationMode = snapshot.mode;
+  const simIntervalMs = getSimInterval();
+  const roundId = calculateTargetRoundId(snapshot.day, snapshot.intradayHour, simulationMode, simIntervalMs);
 
   // Rate limiting: check messages from this user in this round
-  const userMessagesInRound = chat.messages.filter(
-    m => m.username === username && m.roundId === deliveryRoundId && m.type === 'user'
-  );
-  if (userMessagesInRound.length >= chat.config.maxMessagesPerUser) {
-    throw new Error(
-      `Rate limit exceeded: max ${chat.config.maxMessagesPerUser} messages per user per round`
-    );
+  const userMessagesThisRound = chat.messages.filter(message =>
+    message.senderType === 'user'
+    && message.roundId === roundId
+    && message.sender.toLowerCase() === username.toLowerCase()
+  ).length;
+
+  if (userMessagesThisRound >= chat.config.maxMessagesPerUser) {
+    throw new Error('You have reached the message limit for this round.');
   }
 
   // Check messages for this agent in this round
-  const agentMessagesInRound = chat.messages.filter(
-    m => m.agentId === agentId && m.roundId === deliveryRoundId && m.type === 'user'
-  );
-  if (agentMessagesInRound.length >= chat.config.maxMessagesPerAgent) {
-    throw new Error(
-      `Rate limit exceeded: max ${chat.config.maxMessagesPerAgent} messages per agent per round`
-    );
+  const agentMessagesThisRound = chat.messages.filter(message =>
+    message.senderType === 'user'
+    && message.roundId === roundId
+    && message.agentId === agent.id
+  ).length;
+
+  if (agentMessagesThisRound >= chat.config.maxMessagesPerAgent) {
+    throw new Error('This agent already received the maximum community messages for this round.');
   }
 
-  // Create new message
+  // Create new message using correct ChatMessage interface
   const newMessage: ChatMessage = {
-    id: uuidv4(),
-    type: 'user',
-    username,
-    agentId,
-    content: content.trim(),
-    timestamp: new Date().toISOString(),
-    roundId: deliveryRoundId,
+    id: randomUUID(),
+    agentId: agent.id,
+    agentName: agent.name,
+    sender: username,
+    senderType: 'user',
+    content: sanitizedContent,
+    roundId,
+    createdAt: new Date().toISOString(),
     status: 'pending',
   };
 
   const updatedMessages = [...chat.messages, newMessage];
   const updatedChat: ChatState = {
-    ...chat,
+    config: chat.config,
     messages: updatedMessages,
   };
 
@@ -118,9 +124,8 @@ export const addUserMessageToSimulation = (
     simulationType: simulationTypeId,
     messageId: newMessage.id,
     username,
-    agentId,
-    roundId: deliveryRoundId,
-    currentRoundId,
+    agentId: agent.id,
+    roundId,
   });
 
   return {
@@ -157,7 +162,7 @@ export const updateChatMessagesStatusForSimulation = (
 
   if (updated) {
     const updatedChat: ChatState = {
-      ...chat,
+      config: chat.config,
       messages: updatedMessages,
     };
     instance.updateSnapshot({ chat: updatedChat });
@@ -176,9 +181,9 @@ export const updateChatMessagesStatusForSimulation = (
 export const addAgentReplyToSimulation = (
   simulationTypeId: string,
   agentId: string,
+  agentName: string,
   content: string,
-  roundId: string,
-  replyToMessageId?: string
+  roundId: string
 ): void => {
   const instance = simulationManager.getSimulation(simulationTypeId);
   if (!instance) {
@@ -188,20 +193,26 @@ export const addAgentReplyToSimulation = (
   const snapshot = instance.getSnapshot();
   const { chat } = snapshot;
 
+  const sanitizedReply = sanitizeOutgoingMessage(content, chat.config.maxMessageLength);
+  if (!sanitizedReply) {
+    return;
+  }
+
   const agentReply: ChatMessage = {
-    id: uuidv4(),
-    type: 'agent',
+    id: randomUUID(),
     agentId,
-    content: content.trim(),
-    timestamp: new Date().toISOString(),
+    agentName,
+    sender: agentName,
+    senderType: 'agent',
+    content: sanitizedReply.trim(),
     roundId,
+    createdAt: new Date().toISOString(),
     status: 'delivered',
-    replyToMessageId,
   };
 
   const updatedMessages = [...chat.messages, agentReply];
   const updatedChat: ChatState = {
-    ...chat,
+    config: chat.config,
     messages: updatedMessages,
   };
 
@@ -212,6 +223,5 @@ export const addAgentReplyToSimulation = (
     messageId: agentReply.id,
     agentId,
     roundId,
-    replyToMessageId,
   });
 };

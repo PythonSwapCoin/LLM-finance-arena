@@ -1,11 +1,9 @@
 import { simulationManager } from './SimulationManager.js';
-import { generateNextIntradayMarketData, generateNextDayMarketData, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult } from '../services/marketDataService.js';
+import { step, tradeWindow, advanceDay } from './engine.js';
+import { generateNextIntradayMarketData, generateNextDayMarketData, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult } from '../services/marketDataService.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
-import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
-import type { MarketData, Agent } from '../types.js';
-import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
-import { getTradeDecisions } from '../services/llmService.js';
-import { executeTrades } from './engine.js';
+import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
+import type { MarketData } from '../types.js';
 import { updateChatMessagesStatusForSimulation } from '../services/multiSimChatService.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -55,67 +53,37 @@ let firstTradeExecuted = false;
 /**
  * Update portfolio valuations for a simulation instance
  */
-const stepSimulation = async (simulationTypeId: string, marketData: MarketData): Promise<void> => {
+const stepSimulation = async (simulationTypeId: string, newMarketData: MarketData): Promise<void> => {
   const instance = simulationManager.getSimulation(simulationTypeId);
   if (!instance) return;
 
   const snapshot = instance.getSnapshot();
-  const updatedAgents = snapshot.agents.map(agent => {
-    const updatedMetrics = calculateAllMetrics(agent.portfolio, marketData, agent.tradeHistory, snapshot.day);
-    const updatedHistory = [...agent.performanceHistory, updatedMetrics];
-    return {
-      ...agent,
-      performanceHistory: updatedHistory,
-      memory: {
-        ...agent.memory,
-        pastPerformance: updatedHistory,
+
+  try {
+    const result = await step(
+      {
+        day: snapshot.day,
+        intradayHour: snapshot.intradayHour,
+        marketData: snapshot.marketData,
+        agents: snapshot.agents,
+        benchmarks: snapshot.benchmarks,
+        chat: snapshot.chat,
+        mode: snapshot.mode,
+        currentTimestamp: snapshot.currentTimestamp,
       },
-    };
-  });
+      newMarketData
+    );
 
-  const updatedBenchmarks = snapshot.benchmarks.map(benchmark => {
-    let benchmarkMetrics;
-    if (benchmark.id === 'sp500') {
-      const spyPrice = marketData['SPY']?.price;
-      const previousMetrics = benchmark.performanceHistory[benchmark.performanceHistory.length - 1];
-      if (spyPrice !== undefined && previousMetrics) {
-        const totalReturn = ((spyPrice - (previousMetrics.price || spyPrice)) / (previousMetrics.price || spyPrice)) * 100;
-        benchmarkMetrics = {
-          totalValue: spyPrice * 1000,
-          totalReturn,
-          cash: 0,
-          stockValue: spyPrice * 1000,
-          sharpeRatio: previousMetrics.sharpeRatio,
-          maxDrawdown: previousMetrics.maxDrawdown,
-          winRate: previousMetrics.winRate,
-          price: spyPrice,
-        };
-      } else {
-        benchmarkMetrics = benchmark.performanceHistory[benchmark.performanceHistory.length - 1];
-      }
-    } else {
-      const avgPortfolioValue = updatedAgents.reduce((sum, a) => sum + a.portfolio.totalValue, 0) / updatedAgents.length;
-      benchmarkMetrics = {
-        totalValue: avgPortfolioValue,
-        totalReturn: ((avgPortfolioValue - 100000) / 100000) * 100,
-        cash: 0,
-        stockValue: avgPortfolioValue,
-        sharpeRatio: 0,
-        maxDrawdown: 0,
-        winRate: 0,
-      };
-    }
-    return {
-      ...benchmark,
-      performanceHistory: [...benchmark.performanceHistory, benchmarkMetrics],
-    };
-  });
-
-  instance.updateSnapshot({
-    agents: updatedAgents,
-    benchmarks: updatedBenchmarks,
-    marketData,
-  });
+    instance.updateSnapshot({
+      agents: result.agents,
+      benchmarks: result.benchmarks,
+      marketData: result.marketData,
+      chat: result.chat,
+    });
+  } catch (error) {
+    logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+      `Failed to step simulation ${simulationTypeId}`, { error });
+  }
 };
 
 /**
@@ -139,55 +107,77 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
     intradayHour: snapshot.intradayHour,
   });
 
-  const updatedAgents: Agent[] = [];
+  try {
+    const result = await tradeWindow({
+      day: snapshot.day,
+      intradayHour: snapshot.intradayHour,
+      marketData: snapshot.marketData,
+      agents: snapshot.agents,
+      benchmarks: snapshot.benchmarks,
+      chat: snapshot.chat,
+      mode: snapshot.mode,
+      currentTimestamp: snapshot.currentTimestamp,
+    });
 
-  for (const agent of snapshot.agents) {
-    try {
-      const decision = await getTradeDecisions(agent, snapshot.marketData, snapshot.day, snapshot.chat);
+    instance.updateSnapshot({
+      agents: result.agents,
+      benchmarks: result.benchmarks,
+      chat: result.chat,
+      marketData: result.marketData,
+    });
 
-      if (decision.rationale) {
-        agent.rationale = decision.rationale;
-        agent.rationaleHistory[snapshot.day] = decision.rationale;
-      }
-
-      const updatedAgent = executeTrades(agent, decision.trades, snapshot.marketData, snapshot.day);
-      updatedAgents.push(updatedAgent);
-    } catch (error) {
-      logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
-        `Failed to get trade decisions for agent ${agent.id} in simulation ${simulationTypeId}`, { error });
-      updatedAgents.push(agent);
-    }
+    logger.logSimulationEvent(`Trade window completed for ${simType.name}`, {
+      simulationType: simulationTypeId,
+      day: snapshot.day,
+      intradayHour: snapshot.intradayHour,
+    });
+  } catch (error) {
+    logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+      `Failed to execute trade window for simulation ${simulationTypeId}`, { error });
   }
-
-  instance.updateSnapshot({ agents: updatedAgents });
-
-  logger.logSimulationEvent(`Trade window completed for ${simType.name}`, {
-    simulationType: simulationTypeId,
-    day: snapshot.day,
-    intradayHour: snapshot.intradayHour,
-  });
 };
 
 /**
  * Advance to next day for a simulation instance
  */
-const advanceDaySimulation = async (simulationTypeId: string, marketData: MarketData): Promise<void> => {
+const advanceDaySimulation = async (simulationTypeId: string, newMarketData: MarketData): Promise<void> => {
   const instance = simulationManager.getSimulation(simulationTypeId);
   if (!instance) return;
 
   const snapshot = instance.getSnapshot();
   const newDay = snapshot.day + 1;
 
-  instance.updateSnapshot({
-    day: newDay,
-    intradayHour: 0,
-    marketData,
-  });
+  try {
+    const result = await advanceDay(
+      {
+        day: snapshot.day,
+        intradayHour: snapshot.intradayHour,
+        marketData: snapshot.marketData,
+        agents: snapshot.agents,
+        benchmarks: snapshot.benchmarks,
+        chat: snapshot.chat,
+        mode: snapshot.mode,
+      },
+      newMarketData
+    );
 
-  logger.logSimulationEvent(`Advanced to day ${newDay} for simulation ${simulationTypeId}`, {
-    simulationType: simulationTypeId,
-    newDay,
-  });
+    instance.updateSnapshot({
+      day: newDay,
+      intradayHour: 0,
+      agents: result.agents,
+      benchmarks: result.benchmarks,
+      marketData: result.marketData,
+      chat: result.chat,
+    });
+
+    logger.logSimulationEvent(`Advanced to day ${newDay} for simulation ${simulationTypeId}`, {
+      simulationType: simulationTypeId,
+      newDay,
+    });
+  } catch (error) {
+    logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+      `Failed to advance day for simulation ${simulationTypeId}`, { error });
+  }
 };
 
 /**
@@ -246,51 +236,57 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         return;
       }
 
-      // Generate new market data
-      let newMarketData: MarketData;
-      let shouldAdvanceDay = false;
-
-      if (mode === 'realtime') {
-        if (prefetchedRealtimeData?.marketData) {
-          newMarketData = prefetchedRealtimeData.marketData;
-        } else {
-          const result = await generateNextIntradayMarketData(currentMarketData, snapshot.intradayHour, snapshot.day);
-          newMarketData = result.marketData;
-        }
-      } else {
-        const result = await generateNextIntradayMarketData(currentMarketData, snapshot.intradayHour, snapshot.day);
-        newMarketData = result.marketData;
-        shouldAdvanceDay = result.shouldAdvanceDay;
-
-        // Update intraday hour for simulated mode
+      // Update intraday hour for simulated/historical mode
+      if (mode !== 'realtime') {
         const minutesPerTick = getSimulatedMinutesPerTick();
         const newIntradayHour = snapshot.intradayHour + (minutesPerTick / 60);
 
-        // Update all simulations with new intraday hour
-        for (const [_, instance] of simulations) {
-          const instanceSnapshot = instance.getSnapshot();
-          instance.updateSnapshot({ intradayHour: newIntradayHour });
+        // Check if we should advance to next day (after market close at 4pm ET = 16:00)
+        const MARKET_CLOSE_HOUR = 16;
+        const shouldAdvanceDay = newIntradayHour >= MARKET_CLOSE_HOUR;
+
+        if (shouldAdvanceDay) {
+          // Advance to next day
+          const nextDayData = await generateNextDayMarketData(currentMarketData);
+          simulationManager.updateSharedMarketData(nextDayData);
+
+          const advancePromises = Array.from(simulations.keys()).map(typeId =>
+            advanceDaySimulation(typeId, nextDayData)
+          );
+          await Promise.all(advancePromises);
+        } else {
+          // Regular price tick
+          const newMarketData = await generateNextIntradayMarketData(currentMarketData, snapshot.day, snapshot.intradayHour);
+          simulationManager.updateSharedMarketData(newMarketData);
+
+          // Update all simulations with new intraday hour
+          for (const [_, instance] of simulations) {
+            instance.updateSnapshot({ intradayHour: newIntradayHour });
+          }
+
+          // Step all simulations
+          const stepPromises = Array.from(simulations.keys()).map(typeId =>
+            stepSimulation(typeId, newMarketData)
+          );
+          await Promise.all(stepPromises);
         }
-      }
+      } else {
+        // Real-time mode
+        let newMarketData: MarketData;
+        if (prefetchedRealtimeData?.marketData) {
+          newMarketData = prefetchedRealtimeData.marketData;
+        } else {
+          newMarketData = await generateNextIntradayMarketData(currentMarketData, snapshot.day, snapshot.intradayHour);
+        }
 
-      // Update shared market data
-      simulationManager.updateSharedMarketData(newMarketData);
+        // Update shared market data
+        simulationManager.updateSharedMarketData(newMarketData);
 
-      // Step all simulations
-      const stepPromises = Array.from(simulations.keys()).map(typeId =>
-        stepSimulation(typeId, newMarketData)
-      );
-      await Promise.all(stepPromises);
-
-      // Advance day if needed
-      if (shouldAdvanceDay) {
-        const nextDayData = await generateNextDayMarketData(newMarketData, snapshot.day);
-        simulationManager.updateSharedMarketData(nextDayData);
-
-        const advancePromises = Array.from(simulations.keys()).map(typeId =>
-          advanceDaySimulation(typeId, nextDayData)
+        // Step all simulations
+        const stepPromises = Array.from(simulations.keys()).map(typeId =>
+          stepSimulation(typeId, newMarketData)
         );
-        await Promise.all(advancePromises);
+        await Promise.all(stepPromises);
       }
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 'Price tick handler error', { error });
@@ -334,10 +330,10 @@ export const startMultiSimScheduler = async (): Promise<void> => {
 
     realtimePriceLoopPromise = (async () => {
       while (!abortController.stop) {
-        const marketOpenInfo = isMarketOpen();
-        if (!marketOpenInfo.isOpen) {
+        const now = getETTime();
+        const isOpen = checkMarketOpen(now);
+        if (!isOpen) {
           const nextOpen = getNextMarketOpen();
-          const now = getETTime();
           const msUntilOpen = nextOpen.getTime() - now.getTime();
           logger.logSimulationEvent('Market closed, waiting for next open', {
             nextOpen: nextOpen.toISOString(),
@@ -347,8 +343,22 @@ export const startMultiSimScheduler = async (): Promise<void> => {
           continue;
         }
 
-        const prefetchResult = await prefetchRealtimeMarketData();
-        await priceTickHandler(prefetchResult);
+        const currentMarketData = simulationManager.getSharedMarketData();
+        if (currentMarketData) {
+          const tickers = Object.keys(currentMarketData);
+          const guardMs = Math.max(0, parseInt(process.env.PREFETCH_GUARD_MS || '1000', 10));
+          const batchSize = Math.max(1, parseInt(process.env.PREFETCH_BATCH_SIZE || '25', 10));
+
+          const prefetchResult = await prefetchRealtimeMarketData(tickers, {
+            intervalMs: simInterval,
+            guardMs,
+            batchSize,
+          });
+          await priceTickHandler(prefetchResult);
+        } else {
+          await priceTickHandler();
+        }
+
         await sleep(simInterval);
       }
     })();
