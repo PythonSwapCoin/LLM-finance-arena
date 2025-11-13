@@ -193,10 +193,20 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
   fastify.post<{ Body: { username: string; agentId: string; content: string } }>('/api/chat/messages', async (request, reply): Promise<ChatMessageResponse | { error: string }> => {
     try {
       const { username, agentId, content } = request.body;
+      logger.log(LogLevel.INFO, LogCategory.SYSTEM,
+        '[CHAT] Received message', { username, agentId, contentLength: content.length });
       const result = addUserMessageToChat({ username, agentId, content });
+      logger.log(LogLevel.INFO, LogCategory.SYSTEM,
+        '[CHAT] Message added', { messageId: result.message.id, roundId: result.message.roundId, totalMessages: result.chat.messages.length });
       return result;
     } catch (error) {
       reply.code(400);
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        '[CHAT] Message rejected', {
+          username: request.body.username,
+          agentId: request.body.agentId,
+          error: error instanceof Error ? error.message : String(error)
+        });
       return {
         error: error instanceof Error ? error.message : 'Failed to send chat message',
       };

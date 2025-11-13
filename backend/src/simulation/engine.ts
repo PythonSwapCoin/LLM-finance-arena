@@ -462,6 +462,7 @@ export const step = async (
     marketData: MarketData;
     agents: Agent[];
     benchmarks: Benchmark[];
+    chat: ChatState;
     mode?: 'simulated' | 'realtime' | 'historical';
     currentTimestamp?: number;
   },
@@ -472,6 +473,7 @@ export const step = async (
   marketData: MarketData;
   agents: Agent[];
   benchmarks: Benchmark[];
+  chat: ChatState;
 }> => {
   const { day, intradayHour, agents, benchmarks, mode, currentTimestamp } = currentSnapshot;
 
@@ -551,6 +553,7 @@ export const step = async (
     marketData: newMarketData,
     agents: updatedAgents,
     benchmarks: updatedBenchmarks,
+    chat: currentSnapshot.chat,
   };
 };
 
@@ -624,9 +627,25 @@ export const tradeWindow = async (
       reply: result.reply,
     }));
 
+  if (agentReplies.length > 0) {
+    logger.logSimulationEvent('[CHAT] Agent replies generated', {
+      count: agentReplies.length,
+      agents: agentReplies.map(r => r.agent.name),
+      roundId,
+    });
+  }
+
   const updatedChat = chat.config.enabled
     ? applyAgentRepliesToChat(chat, agentReplies)
     : chat;
+
+  if (chat.config.enabled && agentReplies.length > 0) {
+    logger.logSimulationEvent('[CHAT] Agent replies applied to chat', {
+      messageCountBefore: chat.messages.length,
+      messageCountAfter: updatedChat.messages.length,
+      roundId,
+    });
+  }
 
   // Update benchmarks after trades
   const updatedBenchmarks = benchmarks.map(b => {
@@ -673,6 +692,7 @@ export const advanceDay = async (
     marketData: MarketData;
     agents: Agent[];
     benchmarks: Benchmark[];
+    chat: ChatState;
     mode?: 'simulated' | 'realtime' | 'historical';
   },
   newMarketData: MarketData
@@ -682,6 +702,7 @@ export const advanceDay = async (
   marketData: MarketData;
   agents: Agent[];
   benchmarks: Benchmark[];
+  chat: ChatState;
 }> => {
   const nextDay = currentSnapshot.day + 1;
 
@@ -717,6 +738,7 @@ export const advanceDay = async (
     marketData: newMarketData,
     agents: updatedAgents,
     benchmarks: updatedBenchmarks,
+    chat: currentSnapshot.chat,
   };
 };
 
