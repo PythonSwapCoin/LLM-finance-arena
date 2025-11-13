@@ -590,15 +590,36 @@ export const tradeWindow = async (
   }
 
   const roundId = createRoundId(day, intradayHour);
+
+  // Mark messages as 'delivered' when they are sent to agents
+  let chatWithDeliveredMessages = chat;
+  if (chat.config.enabled) {
+    const updatedMessages = chat.messages.map(message => {
+      // Mark user messages for this round as 'delivered'
+      if (
+        message.senderType === 'user' &&
+        message.roundId === roundId &&
+        message.status === 'pending'
+      ) {
+        return { ...message, status: 'delivered' as const };
+      }
+      return message;
+    });
+    chatWithDeliveredMessages = {
+      ...chat,
+      messages: updatedMessages,
+    };
+  }
+
   const agentResults = await processAgentsWithPacing(agents, mode, agent => {
-    const messages = chat.config.enabled
-      ? chat.messages
+    const messages = chatWithDeliveredMessages.config.enabled
+      ? chatWithDeliveredMessages.messages
         .filter(message =>
           message.roundId === roundId
             && message.agentId === agent.id
             && message.senderType === 'user'
         )
-        .slice(0, chat.config.maxMessagesPerAgent)
+        .slice(0, chatWithDeliveredMessages.config.maxMessagesPerAgent)
         .map(message => ({ sender: message.sender, content: message.content }))
       : [];
 
@@ -610,14 +631,17 @@ export const tradeWindow = async (
       timestamp,
       currentTimestamp,
       chatContext: {
-        enabled: chat.config.enabled,
+        enabled: chatWithDeliveredMessages.config.enabled,
         messages,
-        maxReplyLength: chat.config.maxMessageLength,
+        maxReplyLength: chatWithDeliveredMessages.config.maxMessageLength,
       },
     });
   });
 
   const updatedAgents: Agent[] = agentResults.map(result => result.agent);
+
+  // Collect all agents that processed this round (with or without replies)
+  const allProcessedAgents = agentResults.map(result => result.agent);
 
   const agentReplies: AgentReplyInput[] = agentResults
     .filter(result => Boolean(result.reply && result.reply.trim()))
@@ -635,9 +659,9 @@ export const tradeWindow = async (
     });
   }
 
-  const updatedChat = chat.config.enabled
-    ? applyAgentRepliesToChat(chat, agentReplies)
-    : chat;
+  const updatedChat = chatWithDeliveredMessages.config.enabled
+    ? applyAgentRepliesToChat(chatWithDeliveredMessages, agentReplies, roundId, allProcessedAgents)
+    : chatWithDeliveredMessages;
 
   if (chat.config.enabled && agentReplies.length > 0) {
     logger.logSimulationEvent('[CHAT] Agent replies applied to chat', {

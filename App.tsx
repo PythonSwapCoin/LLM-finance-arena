@@ -91,6 +91,8 @@ export default function App() {
               agents={agents}
               currentRoundId={currentRoundId}
               onSendMessage={sendChatMessage}
+              intradayHour={simulationState.intradayHour}
+              simulationMode={simulationMode}
               className="flex-1"
             />
           </div>
@@ -139,6 +141,8 @@ export default function App() {
             agents={agents}
             currentRoundId={currentRoundId}
             onSendMessage={sendChatMessage}
+            intradayHour={simulationState.intradayHour}
+            simulationMode={simulationMode}
           />
         </div>
 

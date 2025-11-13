@@ -65,6 +65,7 @@ export interface Portfolio {
 }
 
 export type ChatSenderType = 'user' | 'agent';
+export type ChatMessageStatus = 'pending' | 'delivered' | 'responded' | 'ignored';
 
 export interface ChatMessage {
   id: string;
@@ -75,6 +76,7 @@ export interface ChatMessage {
   content: string;
   roundId: string;
   createdAt: string;
+  status?: ChatMessageStatus; // Only for user messages: pending -> delivered -> responded/ignored
 }
 
 export interface ChatConfig {
