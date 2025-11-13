@@ -108,21 +108,23 @@ export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInpu
       return;
     }
 
-    const userMessages = updatedMessages.filter(message =>
-      message.senderType === 'user'
-      && message.agentId === agent.id
-      && message.roundId === roundId
-    );
-
-    if (userMessages.length === 0) {
-      return;
-    }
-
     const sanitizedReply = sanitizeOutgoingMessage(reply, chat.config.maxMessageLength);
     if (!sanitizedReply) {
       return;
     }
 
+    // Extract day from roundId (format: "day-hour")
+    const replyDay = roundId.split('-')[0];
+
+    // Find user messages for this agent from the same day (not just same round)
+    // Agent replies can be posted even without user messages (general updates)
+    const userMessages = updatedMessages.filter(message =>
+      message.senderType === 'user'
+      && message.agentId === agent.id
+      && message.roundId.startsWith(`${replyDay}-`)
+    );
+
+    // Add @mentions only if there are user messages to respond to
     const uniqueSenders = Array.from(new Set(userMessages.map(message => message.sender)));
     const mentionPrefix = uniqueSenders.length > 0 ? uniqueSenders.map(sender => `@${sender}`).join(' ') : '';
     const prefixWithSpace = mentionPrefix ? `${mentionPrefix} ` : '';
