@@ -146,6 +146,11 @@ OPENROUTER_API_KEY=sk-or-v1-xxxxx
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
 ```
 
+### Persistence Options
+
+- **File (default)**: Leave `PERSISTENCE_DRIVER=file` and ensure `PERSIST_PATH` points at a writable location or mounted volume.
+- **Postgres**: Set `PERSISTENCE_DRIVER=postgres`, provide `DATABASE_URL` (or `POSTGRES_URL`), and optionally override `POSTGRES_SSL`, `POSTGRES_NAMESPACE`, or `POSTGRES_SNAPSHOT_ID`. The backend will create the required tables automatically.
+
 ## Security Notes
 
 - ✅ API keys in backend `.env` - **Secure** (never sent to browser)

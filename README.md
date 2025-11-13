@@ -8,6 +8,7 @@ LLM Finance Arena is a full-stack benchmarking platform that evaluates large-lan
 - **Flexible data sources** – Toggle between simulated ticks, real-time quotes, or historical week replays via environment flags that the backend surfaces to the UI.
 - **Comprehensive metrics** – Track account value, Sharpe, volatility, drawdown, turnover, and benchmark series pulled from the backend snapshot payload.
 - **Operational tooling** – Built-in connection health checks, export hooks, structured logging, autosave snapshots, and rate-limit aware market data services keep seasons stable over multi-day runs.
+- **Durable persistence** – Toggle between local JSON snapshots or managed Postgres to survive restarts and retain multi-day history for analytics.
 - **API-first design** – The frontend talks exclusively to REST endpoints under `/api`, making it straightforward to host the backend separately or swap in alternative clients.
 
 ## Repository Layout
@@ -88,6 +89,7 @@ The frontend’s `services/apiClient.ts` wraps these endpoints; you can reuse th
 - [ENV_SETUP.md](./ENV_SETUP.md) – Exhaustive description of frontend `.env` flags and deployment settings.
 - [BACKEND_SETUP.md](./BACKEND_SETUP.md) – Detailed backend configuration, APIs, and deployment tips.
 - [DEPLOYMENT.md](./DEPLOYMENT.md) – Hosting recipes for Render, Railway, and Vercel.
+- [POSTGRES_SETUP.md](./POSTGRES_SETUP.md) – How to provision Render Postgres and wire it into the backend.
 
 ## License
 All trades are simulated and not financial advice.

@@ -7,7 +7,15 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { registerRoutes } from './api/routes.js';
 import { simulationState } from './simulation/state.js';
-import { getPersistFilePath, loadSnapshot, saveSnapshot } from './store/persistence.js';
+import {
+  getPersistenceDriver,
+  getPersistFilePath,
+  getPersistenceTargetDescription,
+  loadSnapshot,
+  saveSnapshot,
+  clearSnapshot,
+  closePersistence,
+} from './store/persistence.js';
 import { createInitialMarketData } from './services/marketDataService.js';
 import { S_P500_TICKERS } from './constants.js';
 import { logger, LogLevel, LogCategory } from './services/logger.js';
@@ -79,6 +87,11 @@ const shutdown = async ({ reason, exitCode, error }: { reason: string; exitCode:
       'Failed to close Fastify instance during shutdown', { error: err });
   });
 
+  await closePersistence().catch(err => {
+    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+      'Failed to close persistence adapter during shutdown', { error: err });
+  });
+
   process.exit(exitCode);
 };
 
@@ -141,33 +154,44 @@ const initializeSimulation = async (): Promise<void> => {
   logger.logSimulationEvent('Initializing simulation', { tickers: S_P500_TICKERS.length });
 
   const RESET_SIMULATION = process.env.RESET_SIMULATION === 'true';
-  const persistFilePath = getPersistFilePath();
+  const persistenceDriver = getPersistenceDriver();
+  const persistenceTarget = getPersistenceTargetDescription();
 
   logger.logSimulationEvent('Simulation persistence configured', {
-    path: persistFilePath,
+    driver: persistenceDriver,
+    target: persistenceTarget,
     resetOnStartup: RESET_SIMULATION,
     autosaveIntervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS,
   });
 
-  if (!process.env.PERSIST_PATH) {
-    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-      'PERSIST_PATH not set; using default relative path. Mount a persistent volume or override PERSIST_PATH to retain data across restarts.',
-      { defaultPath: persistFilePath });
-  }
+  if (persistenceDriver === 'file') {
+    const persistFilePath = getPersistFilePath();
 
-  // If RESET_SIMULATION is true, delete the snapshot and start fresh
-  if (RESET_SIMULATION) {
-    logger.logSimulationEvent('RESET_SIMULATION=true, starting fresh simulation', {});
-    try {
-      const { promises: fs } = await import('fs');
-      await fs.unlink(persistFilePath).catch(() => {
-        // File doesn't exist, that's fine
-      });
-      logger.logSimulationEvent('Deleted existing snapshot', { path: persistFilePath });
-    } catch (error) {
+    if (!process.env.PERSIST_PATH) {
       logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        'Failed to delete snapshot for reset', { error });
+        'PERSIST_PATH not set; using default relative path. Mount a persistent volume or override PERSIST_PATH to retain data across restarts.',
+        { defaultPath: persistFilePath });
     }
+
+    if (RESET_SIMULATION) {
+      logger.logSimulationEvent('RESET_SIMULATION=true, clearing persisted snapshot', { driver: 'file' });
+      await clearSnapshot().catch(error => {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          'Failed to clear snapshot for reset', {
+            driver: 'file',
+            error: error instanceof Error ? error.message : String(error),
+          });
+      });
+    }
+  } else if (RESET_SIMULATION) {
+    logger.logSimulationEvent('RESET_SIMULATION=true, clearing persisted snapshot', { driver: 'postgres' });
+    await clearSnapshot().catch(error => {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        'Failed to clear snapshot for reset', {
+          driver: 'postgres',
+          error: error instanceof Error ? error.message : String(error),
+        });
+    });
   }
   
   // Try to load persisted snapshot
