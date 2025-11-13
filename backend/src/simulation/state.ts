@@ -89,7 +89,7 @@ class SimulationState {
 
     if (mode === 'historical') {
       // Use historical period start date
-      const { getHistoricalSimulationStartDate } = await import('../services/marketDataService');
+      const { getHistoricalSimulationStartDate } = await import('../services/marketDataService.js');
       const histStart = getHistoricalSimulationStartDate();
       startDate = histStart.toISOString();
       currentDate = startDate;
