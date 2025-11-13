@@ -595,13 +595,13 @@ export const tradeWindow = async (
   let chatWithDeliveredMessages = chat;
   if (chat.config.enabled) {
     const updatedMessages = chat.messages.map(message => {
-      // Mark user messages for this round as 'delivered'
+      // Mark pending user messages as 'delivered' when processing them
+      // Don't filter by roundId - process ALL pending messages
       if (
         message.senderType === 'user' &&
-        message.roundId === roundId &&
         message.status === 'pending'
       ) {
-        return { ...message, status: 'delivered' as const };
+        return { ...message, status: 'delivered' as const, roundId };
       }
       return message;
     });
@@ -615,7 +615,8 @@ export const tradeWindow = async (
     const messages = chatWithDeliveredMessages.config.enabled
       ? chatWithDeliveredMessages.messages
         .filter(message =>
-          message.roundId === roundId
+          message.status === 'delivered'
+            && message.roundId === roundId
             && message.agentId === agent.id
             && message.senderType === 'user'
         )

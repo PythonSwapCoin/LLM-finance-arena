@@ -93,6 +93,7 @@ export default function App() {
               onSendMessage={sendChatMessage}
               intradayHour={simulationState.intradayHour}
               simulationMode={simulationMode}
+              simIntervalMs={connectionStatus?.backendInfo?.simulation?.simIntervalMs}
               className="flex-1"
             />
           </div>
@@ -143,6 +144,7 @@ export default function App() {
             onSendMessage={sendChatMessage}
             intradayHour={simulationState.intradayHour}
             simulationMode={simulationMode}
+            simIntervalMs={connectionStatus?.backendInfo?.simulation?.simIntervalMs}
           />
         </div>
 

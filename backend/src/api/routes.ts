@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { simulationState } from '../simulation/state.js';
-import { startScheduler, stopScheduler, isSchedulerRunning } from '../simulation/scheduler.js';
+import { startScheduler, stopScheduler, isSchedulerRunning, getSimInterval, getTradeInterval } from '../simulation/scheduler.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import {
   getSimulationMode,
@@ -50,6 +50,8 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
         agentsCount: snapshot.agents.length,
         tickersCount: Object.keys(snapshot.marketData).length,
         lastUpdated: snapshot.lastUpdated,
+        simIntervalMs: getSimInterval(),
+        tradeIntervalMs: getTradeInterval(),
       },
       marketData: {
         tickersCount: Object.keys(snapshot.marketData).length,

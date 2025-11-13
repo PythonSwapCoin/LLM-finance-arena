@@ -9,6 +9,7 @@ interface LiveChatProps {
   className?: string;
   intradayHour?: number;
   simulationMode?: 'simulated' | 'realtime' | 'historical';
+  simIntervalMs?: number;
 }
 
 const LINK_PATTERN = /(https?:\/\/\S+|www\.\S+|[a-z0-9-]+\.[a-z]{2,10}\b)/i;
@@ -22,23 +23,29 @@ const formatTimestamp = (iso: string): string => {
 };
 
 // Calculate seconds until next trading round
-// Market hours: 9:30 AM - 4:00 PM ET (6.5 hours)
-// In simulated mode, we don't know the timing, so return null
+// For realtime mode: rounds happen on a fixed schedule (e.g., every 10 minutes)
+// For historical/simulated mode: use the backend's simulation interval
 const calculateSecondsUntilNextRound = (
   simulationMode: string | undefined,
-  intradayHour: number | undefined
+  intradayHour: number | undefined,
+  simIntervalMs: number | undefined
 ): number | null => {
-  if (simulationMode !== 'realtime' || intradayHour === undefined) {
+  if (intradayHour === undefined || simIntervalMs === undefined) {
     return null;
   }
 
-  // Assuming trading rounds happen every hour in realtime mode
-  // intradayHour is 0-6.5 representing hours since market open
-  const currentHourFraction = intradayHour % 1; // Get fractional part
-  const secondsIntoCurrentHour = currentHourFraction * 3600;
-  const secondsUntilNextHour = 3600 - secondsIntoCurrentHour;
+  if (simulationMode === 'realtime') {
+    // For realtime: trading rounds happen every hour
+    // intradayHour is 0-6.5 representing hours since market open
+    const currentHourFraction = intradayHour % 1; // Get fractional part
+    const secondsIntoCurrentHour = currentHourFraction * 3600;
+    const secondsUntilNextHour = 3600 - secondsIntoCurrentHour;
+    return Math.max(0, Math.floor(secondsUntilNextHour));
+  }
 
-  return Math.max(0, Math.floor(secondsUntilNextHour));
+  // For historical/simulated mode: use the backend's simulation interval
+  // The backend advances the simulation every simIntervalMs milliseconds
+  return Math.max(1, Math.floor(simIntervalMs / 1000));
 };
 
 // Format seconds into MM:SS
@@ -73,7 +80,8 @@ export const LiveChat: React.FC<LiveChatProps> = ({
   onSendMessage,
   className,
   intradayHour,
-  simulationMode
+  simulationMode,
+  simIntervalMs
 }) => {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(() => agents[0]?.id ?? '');
   const [username, setUsername] = useState('');
@@ -94,7 +102,7 @@ export const LiveChat: React.FC<LiveChatProps> = ({
 
   // Countdown timer effect
   useEffect(() => {
-    const initialSeconds = calculateSecondsUntilNextRound(simulationMode, intradayHour);
+    const initialSeconds = calculateSecondsUntilNextRound(simulationMode, intradayHour, simIntervalMs);
     setCountdown(initialSeconds);
 
     if (initialSeconds === null) {
@@ -105,14 +113,14 @@ export const LiveChat: React.FC<LiveChatProps> = ({
       setCountdown(prev => {
         if (prev === null || prev <= 0) {
           // Recalculate when countdown reaches zero
-          return calculateSecondsUntilNextRound(simulationMode, intradayHour);
+          return calculateSecondsUntilNextRound(simulationMode, intradayHour, simIntervalMs);
         }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [simulationMode, intradayHour]);
+  }, [simulationMode, intradayHour, simIntervalMs]);
 
   const sortedMessages = useMemo(() => {
     if (!chat) {
@@ -259,11 +267,11 @@ export const LiveChat: React.FC<LiveChatProps> = ({
         )}
       </div>
 
-      {countdown !== null && simulationMode === 'realtime' && (
+      {countdown !== null && (
         <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
           <div className="flex items-center justify-between">
             <p className="text-sm text-blue-800">
-              <span className="font-semibold">Next trading round in:</span>
+              <span className="font-semibold">Next update in:</span>
             </p>
             <span className="text-lg font-bold text-blue-900 tabular-nums">
               {formatCountdown(countdown)}
