@@ -72,7 +72,8 @@ export const getTradeDecisions = async (
     // Return empty trades gracefully instead of throwing
     logger.log(LogLevel.WARNING, LogCategory.LLM,
       `OPENROUTER_API_KEY not set for ${agent.name}, returning empty trades`, { agent: agent.name });
-    const fallbackReply = chatContext?.enabled ? 'Unable to respond right now.' : undefined;
+    const communityMessages = chatContext?.messages ?? [];
+    const fallbackReply = (chatContext?.enabled && communityMessages.length > 0) ? 'Unable to respond right now.' : undefined;
     return { trades: [], rationale: 'API key not configured - holding positions.', reply: fallbackReply };
   }
 
@@ -105,7 +106,8 @@ export const getTradeDecisions = async (
   
   if (availableTickers.length === 0) {
     console.error(`[${agent.name}] No market data available! Cannot make trading decisions.`);
-    const fallbackReply = chatContext?.enabled ? 'Unable to respond right now.' : undefined;
+    const communityMessages = chatContext?.messages ?? [];
+    const fallbackReply = (chatContext?.enabled && communityMessages.length > 0) ? 'Unable to respond right now.' : undefined;
     return { trades: [], rationale: "No market data available - cannot make trading decisions.", reply: fallbackReply };
   }
 
@@ -117,13 +119,14 @@ export const getTradeDecisions = async (
     : `$${minFeeDisplay} per trade`;
 
   const communityMessages = chatContext?.messages ?? [];
-  const chatSection = chatContext?.enabled
+  // Only include chat section if there are actual messages to reply to
+  const chatSection = chatContext?.enabled && communityMessages.length > 0
     ? `
 === COMMUNITY LIVE CHAT ===
-${communityMessages.length > 0
-  ? communityMessages.map((message, index) => `${index + 1}. ${message.sender}: ${message.content}`).join('\n')
-  : 'No new community messages this round. Share a quick update in your reply field.'}
-Your reply must be one sentence, at most ${chatContext.maxReplyLength} characters, and must not contain links or promotional content.
+You have received the following messages from community members this round:
+${communityMessages.map((message, index) => `${index + 1}. ${message.sender}: ${message.content}`).join('\n')}
+
+You may provide a reply (optional). If you choose to reply, it must be one sentence, at most ${chatContext.maxReplyLength} characters, and must not contain links or promotional content.
 `
     : '';
 
@@ -182,8 +185,8 @@ You must return a JSON object with:
    - "fairValue": Your estimated fair value of the stock (in dollars)
    - "topOfBox": The 10% best case scenario price by next day (in dollars)
    - "bottomOfBox": The 10% worst case scenario price by next day (in dollars)
-   - "justification": A one sentence explanation for this specific trade
-3. "reply": A short (single sentence) public message for the community (${chatContext?.maxReplyLength ?? 140} characters max, no links)
+   - "justification": A one sentence explanation for this specific trade${communityMessages.length > 0 ? `
+3. "reply": A short (single sentence) public message responding to the community members who messaged you (${chatContext?.maxReplyLength ?? 140} characters max, no links)` : ''}
 
 Example response:
 {
@@ -198,8 +201,8 @@ Example response:
       "bottomOfBox": 178.00,
       "justification": "AAPL is undervalued with strong fundamentals and positive momentum."
     }
-  ],
-  "reply": "Thanks for the support—staying nimble today."
+  ]${communityMessages.length > 0 ? `,
+  "reply": "Thanks for the support—staying nimble today."` : ''}
 }
 
 IMPORTANT:
@@ -208,8 +211,8 @@ IMPORTANT:
 - For SELL: Make sure you own at least that many shares
 - If you have cash available, you should make buy trades to invest it
 - Holding 100% cash is not acceptable - you are a portfolio manager, not a cash holder
-- If you don't want to trade, return an empty trades array: {"rationale": "...", "trades": []}
-- Your reply must be respectful, one sentence, and contain no URLs or promotional content
+- If you don't want to trade, return an empty trades array: {"rationale": "...", "trades": []}${communityMessages.length > 0 ? `
+- Your reply must be respectful, one sentence, and contain no URLs or promotional content` : ''}
 `;
 
   const startTime = Date.now();
@@ -425,10 +428,13 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
         return trade;
       });
 
+    // Only process reply if the agent received messages to reply to
     let reply: string | undefined;
-    if (chatContext?.enabled) {
-      const sanitized = sanitizeOutgoingMessage(result.reply ?? '', chatContext.maxReplyLength);
-      reply = sanitized || 'Thanks for the update!';
+    if (chatContext?.enabled && communityMessages.length > 0) {
+      if (result.reply && result.reply.trim()) {
+        const sanitized = sanitizeOutgoingMessage(result.reply, chatContext.maxReplyLength);
+        reply = sanitized || undefined;
+      }
     }
 
     return { trades: validTrades, rationale: result.rationale || "No rationale provided.", reply };
@@ -439,7 +445,8 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, errorMessage);
     console.error("Error fetching trade decisions:", error);
     // Never throw past the service boundary - return empty trades instead
-    const fallbackReply = chatContext?.enabled ? 'Unable to respond right now.' : undefined;
+    const communityMessages = chatContext?.messages ?? [];
+    const fallbackReply = (chatContext?.enabled && communityMessages.length > 0) ? 'Unable to respond right now.' : undefined;
     return { trades: [], rationale: `Error communicating with AI model: ${errorMessage}`, reply: fallbackReply };
   }
 };

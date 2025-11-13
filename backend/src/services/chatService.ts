@@ -80,6 +80,7 @@ export const addUserMessageToChat = (input: AddUserMessageInput): { chat: ChatSt
     content: sanitizedContent,
     roundId,
     createdAt: new Date().toISOString(),
+    status: 'pending', // Message is pending until delivered to agent
   };
 
   const updatedChat: ChatState = {
@@ -91,12 +92,13 @@ export const addUserMessageToChat = (input: AddUserMessageInput): { chat: ChatSt
   return { chat: simulationState.getChat(), message };
 };
 
-export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInput[]): ChatState => {
+export const applyAgentRepliesToChat = (
+  chat: ChatState,
+  replies: AgentReplyInput[],
+  roundId?: string,
+  allProcessedAgents?: Agent[]
+): ChatState => {
   if (!chat.config.enabled) {
-    return chat;
-  }
-
-  if (replies.length === 0) {
     return chat;
   }
 
@@ -113,16 +115,18 @@ export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInpu
       return;
     }
 
-    // Extract day from roundId (format: "day-hour")
-    const replyDay = roundId.split('-')[0];
-
-    // Find user messages for this agent from the same day (not just same round)
-    // Agent replies can be posted even without user messages (general updates)
+    // IMPORTANT: Agent can only reply if they received user messages THIS round
+    // Find user messages for this agent from THIS specific round
     const userMessages = updatedMessages.filter(message =>
       message.senderType === 'user'
       && message.agentId === agent.id
-      && message.roundId.startsWith(`${replyDay}-`)
+      && message.roundId === roundId
     );
+
+    // If no user messages were received this round, agent cannot reply
+    if (userMessages.length === 0) {
+      return;
+    }
 
     // Add @mentions only if there are user messages to respond to
     const uniqueSenders = Array.from(new Set(userMessages.map(message => message.sender)));
@@ -151,6 +155,7 @@ export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInpu
       content: finalContent,
       roundId,
       createdAt: new Date().toISOString(),
+      // Agent messages don't need status tracking
     };
 
     if (existingIndex >= 0) {
@@ -158,10 +163,46 @@ export const applyAgentRepliesToChat = (chat: ChatState, replies: AgentReplyInpu
     } else {
       updatedMessages.push(message);
     }
+
+    // Mark the user messages as 'responded'
+    userMessages.forEach(userMsg => {
+      const msgIndex = updatedMessages.findIndex(m => m.id === userMsg.id);
+      if (msgIndex >= 0 && updatedMessages[msgIndex].status === 'delivered') {
+        updatedMessages[msgIndex] = {
+          ...updatedMessages[msgIndex],
+          status: 'responded' as const,
+        };
+      }
+    });
+
     didAppend = true;
   });
 
-  if (!didAppend) {
+  // Mark any delivered messages that weren't responded to as 'ignored'
+  // This happens when agents received messages but chose not to reply
+  let didMarkIgnored = false;
+  if (roundId && allProcessedAgents) {
+    const repliedAgentIds = new Set(replies.filter(r => r.reply && r.reply.trim()).map(r => r.agent.id));
+    const allProcessedAgentIds = new Set(allProcessedAgents.map(a => a.id));
+
+    updatedMessages.forEach((message, index) => {
+      if (
+        message.senderType === 'user' &&
+        message.status === 'delivered' &&
+        message.roundId === roundId &&
+        allProcessedAgentIds.has(message.agentId) &&
+        !repliedAgentIds.has(message.agentId)
+      ) {
+        updatedMessages[index] = {
+          ...message,
+          status: 'ignored' as const,
+        };
+        didMarkIgnored = true;
+      }
+    });
+  }
+
+  if (!didAppend && !didMarkIgnored) {
     return chat;
   }
 
