@@ -26,6 +26,16 @@ const getTradeInterval = (): number => {
   return parseInt(process.env.TRADE_INTERVAL_MS || '7200000', 10); // 2 hours default for simulated/historical
 };
 
+// Determine how much simulated market time should elapse per scheduler tick.
+// Default is 30 minutes so long simulations can cover multiple days quickly.
+const getSimulatedMinutesPerTick = (): number => {
+  const raw = parseInt(process.env.SIM_MARKET_MINUTES_PER_TICK || '30', 10);
+  if (Number.isFinite(raw) && raw > 0) {
+    return raw;
+  }
+  return 30;
+};
+
 // Get the first trade hour based on trade interval
 const getFirstTradeHour = (): number => {
   const mode = getSimulationMode();
@@ -328,7 +338,8 @@ export const startScheduler = async (): Promise<void> => {
       
       // Simulated/Historical mode: use existing logic
       const currentHour = snapshot.intradayHour;
-      const nextHour = currentHour + (simInterval / (60 * 60 * 1000)) * 0.5; // Advance by half the interval in hours
+      const minutesPerTick = getSimulatedMinutesPerTick();
+      const nextHour = currentHour + (minutesPerTick / 60);
       const shouldAdvanceDay = nextHour >= 6.5;
       
       if (shouldAdvanceDay) {
