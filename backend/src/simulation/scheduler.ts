@@ -10,7 +10,7 @@ import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 // Intervals - different for real-time vs simulated/historical
-const getSimInterval = (): number => {
+export const getSimInterval = (): number => {
   const mode = getSimulationMode();
   if (mode === 'realtime') {
     return parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10); // 10 minutes default for real-time
@@ -18,7 +18,7 @@ const getSimInterval = (): number => {
   return parseInt(process.env.SIM_INTERVAL_MS || '30000', 10); // 30 seconds default for simulated/historical
 };
 
-const getTradeInterval = (): number => {
+export const getTradeInterval = (): number => {
   const mode = getSimulationMode();
   if (mode === 'realtime') {
     return parseInt(process.env.REALTIME_TRADE_INTERVAL_MS || '1800000', 10); // 30 minutes default for real-time
