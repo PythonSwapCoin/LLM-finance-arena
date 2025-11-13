@@ -61,9 +61,12 @@ export const startScheduler = async (): Promise<void> => {
   const simInterval = getSimInterval();
   const tradeInterval = getTradeInterval();
   const mode = getSimulationMode();
-  logger.logSimulationEvent('Starting simulation scheduler', { 
+  const currentSnapshot = simulationState.getSnapshot();
+  const firstTradeHour = getFirstTradeHour();
+  firstTradeExecuted = currentSnapshot.intradayHour >= firstTradeHour;
+  logger.logSimulationEvent('Starting simulation scheduler', {
     mode,
-    simInterval, 
+    simInterval,
     tradeInterval,
     exportInterval: EXPORT_INTERVAL_MS
   });

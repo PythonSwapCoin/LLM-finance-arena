@@ -1,4 +1,4 @@
-import type { MarketData, TickerData, MarketDataTelemetry } from '../types.js';
+import type { MarketData, TickerData, MarketDataTelemetry, SimulationSnapshot } from '../types.js';
 import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 import { S_P500_TICKERS } from '../constants.js';
@@ -1184,5 +1184,60 @@ export const isTradingAllowed = (): boolean => {
 
 export const getCurrentIntradayHour = (): number => {
   return currentIntradayHour;
+};
+
+const ensureHistoricalCacheForSnapshot = async (
+  snapshot: SimulationSnapshot
+): Promise<void> => {
+  const tickers = Object.keys(snapshot.marketData || {});
+  const requiredDay = Math.max(0, snapshot.day ?? 0);
+
+  const hasCacheForAllTickers = tickers.every(ticker => {
+    const entries = historicalDataCache[ticker];
+    return entries && entries.length > requiredDay;
+  });
+
+  if (!hasCacheForAllTickers || Object.keys(historicalDataCache).length === 0) {
+    const tickersToFetch = tickers.length > 0 ? tickers : S_P500_TICKERS;
+    logger.logSimulationEvent('Refreshing historical data cache from persisted snapshot', {
+      tickers: tickersToFetch.length,
+      requestedDay: snapshot.day,
+    });
+    historicalDataCache = await fetchHistoricalWeekData(tickersToFetch);
+  }
+
+  currentHistoricalDay = Math.min(requiredDay, 4);
+
+  if (snapshot.startDate) {
+    const start = new Date(snapshot.startDate);
+    if (!isNaN(start.getTime())) {
+      const normalizedStart = setToMarketOpen(start);
+      historicalWeekStart = normalizedStart;
+      const end = new Date(normalizedStart);
+      end.setDate(normalizedStart.getDate() + 4);
+      end.setHours(23, 59, 59, 999);
+      historicalWeekEnd = end;
+    }
+  } else if (!historicalWeekStart || !historicalWeekEnd) {
+    const defaultStart = getHistoricalSimulationStartDate();
+    historicalWeekStart = defaultStart;
+    const end = new Date(defaultStart);
+    end.setDate(defaultStart.getDate() + 4);
+    end.setHours(23, 59, 59, 999);
+    historicalWeekEnd = end;
+  }
+};
+
+export const synchronizeSimulationFromSnapshot = async (
+  snapshot: SimulationSnapshot
+): Promise<void> => {
+  currentIntradayHour = snapshot.intradayHour ?? 0;
+  lastTradingHour = Math.floor(currentIntradayHour);
+
+  if (snapshot.mode === 'historical') {
+    await ensureHistoricalCacheForSnapshot(snapshot);
+  } else {
+    currentHistoricalDay = Math.max(0, snapshot.day ?? 0);
+  }
 };
 
