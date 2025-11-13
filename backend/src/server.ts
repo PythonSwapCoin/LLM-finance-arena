@@ -16,7 +16,7 @@ import {
   clearSnapshot,
   closePersistence,
 } from './store/persistence.js';
-import { createInitialMarketData } from './services/marketDataService.js';
+import { createInitialMarketData, synchronizeSimulationFromSnapshot } from './services/marketDataService.js';
 import { S_P500_TICKERS } from './constants.js';
 import { logger, LogLevel, LogCategory } from './services/logger.js';
 import { startScheduler, stopScheduler } from './simulation/scheduler.js';
@@ -196,18 +196,48 @@ const initializeSimulation = async (): Promise<void> => {
   
   // Try to load persisted snapshot
   const savedSnapshot = await loadSnapshot();
-  
+  const configuredMode = simulationState.getMode();
+  let snapshotLoaded = false;
+
   if (savedSnapshot && !RESET_SIMULATION) {
-    logger.logSimulationEvent('Loaded snapshot from persistence', { 
-      day: savedSnapshot.day, 
-      mode: savedSnapshot.mode 
-    });
-    simulationState.loadFromSnapshot(savedSnapshot);
-  } else {
+    if (savedSnapshot.mode !== configuredMode) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        'Persisted snapshot mode does not match configured MODE - starting fresh', {
+          snapshotMode: savedSnapshot.mode,
+          configuredMode,
+        });
+    } else {
+      logger.logSimulationEvent('Loaded snapshot from persistence', {
+        day: savedSnapshot.day,
+        mode: savedSnapshot.mode
+      });
+      simulationState.loadFromSnapshot(savedSnapshot);
+      try {
+        await synchronizeSimulationFromSnapshot(simulationState.getSnapshot());
+      } catch (error) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          'Failed to synchronize market data context from snapshot', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+      }
+      snapshotLoaded = true;
+    }
+  }
+
+  if (!snapshotLoaded) {
     // Initialize fresh
     logger.logSimulationEvent('Creating fresh simulation', {});
     const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
     await simulationState.initialize(initialMarketData);
+
+    try {
+      await synchronizeSimulationFromSnapshot(simulationState.getSnapshot());
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        'Failed to synchronize market data context after initialization', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+    }
 
     // Save initial state
     await saveSnapshot(simulationState.getSnapshot()).catch(err => {
