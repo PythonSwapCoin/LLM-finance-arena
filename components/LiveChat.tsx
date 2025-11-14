@@ -7,9 +7,6 @@ interface LiveChatProps {
   currentRoundId: string;
   onSendMessage: (payload: { username: string; agentId: string; content: string }) => Promise<ChatMessage>;
   className?: string;
-  intradayHour?: number;
-  simulationMode?: 'simulated' | 'realtime' | 'historical';
-  simIntervalMs?: number;
 }
 
 const LINK_PATTERN = /(https?:\/\/\S+|www\.\S+|[a-z0-9-]+\.[a-z]{2,10}\b)/i;
@@ -20,56 +17,6 @@ const formatTimestamp = (iso: string): string => {
     return '';
   }
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-// Calculate seconds until next trading round
-// For realtime mode: rounds happen on a fixed schedule (e.g., every hour)
-// For historical/simulated mode: use the backend's simulation interval
-// IMPORTANT: If less than 60 seconds remain until next round, show countdown to the round AFTER that
-// This ensures messages have sufficient time to be processed
-const calculateSecondsUntilNextRound = (
-  simulationMode: string | undefined,
-  intradayHour: number | undefined,
-  simIntervalMs: number | undefined
-): number | null => {
-  if (intradayHour === undefined || simIntervalMs === undefined) {
-    return null;
-  }
-
-  const SAFETY_BUFFER_SECONDS = 60; // 1 minute safety buffer
-
-  if (simulationMode === 'realtime') {
-    // For realtime: trading rounds happen every hour
-    // intradayHour is 0-6.5 representing hours since market open
-    const currentHourFraction = intradayHour % 1; // Get fractional part
-    const secondsIntoCurrentHour = currentHourFraction * 3600;
-    const secondsUntilNextHour = 3600 - secondsIntoCurrentHour;
-
-    // If less than 60 seconds until next round, skip to the round after that
-    if (secondsUntilNextHour <= SAFETY_BUFFER_SECONDS) {
-      return Math.floor(secondsUntilNextHour + 3600);
-    }
-
-    return Math.max(0, Math.floor(secondsUntilNextHour));
-  }
-
-  // For historical/simulated mode: use the backend's simulation interval
-  // The backend advances the simulation every simIntervalMs milliseconds
-  const intervalSeconds = Math.floor(simIntervalMs / 1000);
-
-  // If the interval is less than or equal to the safety buffer, show countdown to next-next round
-  if (intervalSeconds <= SAFETY_BUFFER_SECONDS) {
-    return Math.max(1, intervalSeconds * 2);
-  }
-
-  return Math.max(1, intervalSeconds);
-};
-
-// Format seconds into MM:SS
-const formatCountdown = (seconds: number): string => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
 // Get status badge color and text
@@ -95,17 +42,13 @@ export const LiveChat: React.FC<LiveChatProps> = ({
   agents,
   currentRoundId,
   onSendMessage,
-  className,
-  intradayHour,
-  simulationMode,
-  simIntervalMs
+  className
 }) => {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(() => agents[0]?.id ?? '');
   const [username, setUsername] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
     if (agents.length === 0) {
@@ -117,33 +60,19 @@ export const LiveChat: React.FC<LiveChatProps> = ({
     }
   }, [agents, selectedAgentId]);
 
-  // Countdown timer effect
-  useEffect(() => {
-    const initialSeconds = calculateSecondsUntilNextRound(simulationMode, intradayHour, simIntervalMs);
-    setCountdown(initialSeconds);
-
-    if (initialSeconds === null) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev === null || prev <= 0) {
-          // Recalculate when countdown reaches zero
-          return calculateSecondsUntilNextRound(simulationMode, intradayHour, simIntervalMs);
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [simulationMode, intradayHour, simIntervalMs]);
-
   const sortedMessages = useMemo(() => {
     if (!chat) {
       return [];
     }
-    return [...chat.messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    // Sort by createdAt, then by id for stability (ensures messages don't disappear/reorder)
+    return [...chat.messages].sort((a, b) => {
+      const timeDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+      // If timestamps are equal, sort by id to ensure stable ordering
+      return a.id.localeCompare(b.id);
+    });
   }, [chat]);
 
   if (!chat) {
@@ -283,22 +212,6 @@ export const LiveChat: React.FC<LiveChatProps> = ({
           ))
         )}
       </div>
-
-      {countdown !== null && (
-        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-blue-800">
-              <span className="font-semibold">Next delivery in:</span>
-            </p>
-            <span className="text-lg font-bold text-blue-900 tabular-nums">
-              {formatCountdown(countdown)}
-            </span>
-          </div>
-          <p className="text-xs text-blue-600 mt-1">
-            Your message will be delivered to the agent during the next available trading round.
-          </p>
-        </div>
-      )}
 
       <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

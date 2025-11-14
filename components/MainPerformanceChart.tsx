@@ -51,6 +51,49 @@ const CustomTooltip = ({
   return null;
 };
 
+// Custom dot component that shows logo at the last point
+const CustomDot = (props: any) => {
+  // Extract key and other props separately to avoid React key warning
+  // Note: 'key' is a special React prop and shouldn't be destructured
+  const { cx, cy, payload, dataKey, index, data, image } = props;
+  
+  // Only render logo at the last data point
+  if (index !== data.length - 1) return null;
+  if (!image) return null;
+
+  // Make logos twice as big: 40x40 instead of 20x20, radius 24 instead of 12
+  const logoSize = 40;
+  const radius = 24;
+
+  return (
+    <g>
+      <defs>
+        <clipPath id={`dot-logo-clip-${dataKey}-${index}`}>
+          <circle cx={cx} cy={cy} r={radius} />
+        </clipPath>
+      </defs>
+      {/* White circle background for better visibility */}
+      <circle cx={cx} cy={cy} r={radius} fill="white" opacity="0.9" />
+      {/* Logo image - twice as big */}
+      <image
+        href={image}
+        x={cx - logoSize / 2}
+        y={cy - logoSize / 2}
+        width={logoSize}
+        height={logoSize}
+        clipPath={`url(#dot-logo-clip-${dataKey}-${index})`}
+        style={{ filter: `drop-shadow(0 2px 4px rgb(0 0 0 / 0.4))` }}
+        onError={(e) => {
+          // Hide image if it fails to load
+          (e.target as SVGImageElement).style.display = 'none';
+        }}
+      />
+      {/* Border circle */}
+      <circle cx={cx} cy={cy} r={radius} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+    </g>
+  );
+};
+
 const EndOfLineLabel = ({ points, data, color, name, isBenchmark }: any) => {
   if (!points || points.length === 0 || !data || data.length === 0) return null;
 
@@ -231,6 +274,32 @@ const formatXAxisLabel = (
     
     // Show day label only at the start of a new day at market open
     if (isNewDay && isMarketOpenTime) {
+      // For historical mode, use startDate to show the actual historical date
+      if (simulationMode === 'historical' && startDate) {
+        const start = new Date(startDate);
+        // Calculate days difference from start
+        const startDateStr = start.toLocaleDateString('en-US', { 
+          timeZone: 'America/New_York',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+        const currentDateStr = date.toLocaleDateString('en-US', { 
+          timeZone: 'America/New_York',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+        // Calculate days difference (simplified - assumes consecutive trading days)
+        const startParts = startDateStr.split('/');
+        const currentParts = currentDateStr.split('/');
+        const startDateObj = new Date(parseInt(startParts[2]), parseInt(startParts[0]) - 1, parseInt(startParts[1]));
+        const currentDateObj = new Date(parseInt(currentParts[2]), parseInt(currentParts[0]) - 1, parseInt(currentParts[1]));
+        const daysDiff = Math.floor((currentDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24));
+        const histDate = new Date(start);
+        histDate.setDate(start.getDate() + daysDiff);
+        return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      }
       // Format as "Nov 10" - use ET timezone for date
       try {
         return date.toLocaleDateString('en-US', { 
@@ -258,7 +327,44 @@ const formatXAxisLabel = (
     }
   }
   
-  // For simulated/historical mode
+  // For simulated mode, use startDate to calculate actual dates
+  if (simulationMode === 'simulated') {
+    const dayNum = Math.floor(timestamp);
+    const hourDecimal = timestamp - dayNum;
+    const hours = Math.floor(hourDecimal * 10);
+    const minutes = Math.round((hourDecimal * 10 - hours) * 60);
+    
+    // Check if this is a new day (compare day numbers)
+    const isNewDay = index === 0 || Math.floor(allTimestamps[index - 1]) !== dayNum;
+    const isMarketOpen = hours === 0 && minutes === 0; // Market open is 9:30 AM = hour 0, minute 0
+    
+    // Show date label at market open of a new day
+    if (isNewDay && isMarketOpen) {
+      if (startDate) {
+        // Calculate the actual date from startDate
+        const baseDate = new Date(startDate);
+        const simulatedDate = new Date(baseDate);
+        simulatedDate.setDate(baseDate.getDate() + dayNum);
+        simulatedDate.setHours(9, 30, 0, 0);
+        
+        // Format as "06/Jan" style
+        const day = simulatedDate.getDate();
+        const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
+        const month = monthFormatter.format(simulatedDate);
+        return `${day.toString().padStart(2, '0')}/${month}`;
+      } else {
+        // Fallback: show "Day X" if no startDate
+        const displayDay = dayNum + 1;
+        return `Day ${displayDay}`;
+      }
+    }
+    
+    // Otherwise show just the time
+    const date = new Date(Date.UTC(2000, 0, 1, 9 + hours, 30 + minutes, 0, 0));
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+  
+  // For historical/realtime mode, use date-based formatting
   const date = getDateFromTimestamp(timestamp, startDate, simulationMode);
   if (!date) {
     // Fallback to simple format
@@ -286,9 +392,17 @@ const formatXAxisLabel = (
   
   // Show day label only at the start of a new day at market open
   if (isNewDay && isMarketOpen) {
+    // For historical mode, use startDate to show the actual historical date
+    if (simulationMode === 'historical' && startDate) {
+      const start = new Date(startDate);
+      const daysToAdd = Math.floor(timestamp);
+      const histDate = new Date(start);
+      histDate.setDate(start.getDate() + daysToAdd);
+      return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
-  
+
   // Otherwise show only the hour
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 };
@@ -336,7 +450,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
   );
 
   const { chartData, yAxisDomain, dayBoundaries } = useMemo(() => {
-    if (!participants.length || participants[0].performanceHistory.length === 0) {
+    if (!participants || !participants.length || !participants[0] || !participants[0].performanceHistory || participants[0].performanceHistory.length === 0) {
       return { chartData: [], yAxisDomain: ['auto', 'auto'], dayBoundaries: [] };
     }
     
@@ -348,9 +462,11 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     // Collect all unique timestamps (including intraday)
     const allTimestamps = new Set<number>();
     visibleParticipants.forEach(p => {
-      p.performanceHistory.forEach(metric => {
-        allTimestamps.add(metric.timestamp);
-      });
+      if (p.performanceHistory && Array.isArray(p.performanceHistory)) {
+        p.performanceHistory.forEach(metric => {
+          allTimestamps.add(metric.timestamp);
+        });
+      }
     });
     
     const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
@@ -360,13 +476,64 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     let maxValue = -Infinity;
     let lastDayKey: string | null = null; // Store "YYYY-MM-DD" for day comparison
 
-    sortedTimestamps.forEach((timestamp, index) => {
-      // Filter out data points when market is closed (only for real-time mode)
-      if (simulationMode === 'realtime') {
+    // For realtime mode: filter out flat periods between market close and next day open
+    // This creates gaps in the chart similar to Yahoo Finance
+    let filteredTimestamps = sortedTimestamps;
+    if (simulationMode === 'realtime') {
+      filteredTimestamps = [];
+      let lastTimestamp: number | null = null;
+      
+      sortedTimestamps.forEach((timestamp, index) => {
         if (!isWithinMarketHours(timestamp, simulationMode, startDate)) {
-          return; // Skip this data point
+          return; // Skip data points outside market hours
         }
-      }
+        
+        // Check if this is a new trading day (gap between days)
+        if (lastTimestamp !== null && timestamp > 1000000000) {
+          const lastDate = new Date(lastTimestamp * 1000);
+          const currentDate = new Date(timestamp * 1000);
+          
+          // Check if dates are different in ET timezone
+          try {
+            const lastDateStr = lastDate.toLocaleDateString('en-US', { 
+              timeZone: 'America/New_York',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+            });
+            const currentDateStr = currentDate.toLocaleDateString('en-US', { 
+              timeZone: 'America/New_York',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+            });
+            
+            // If different days, we've already skipped the flat period (market closed hours)
+            // So we can add this point
+            if (lastDateStr !== currentDateStr) {
+              filteredTimestamps.push(timestamp);
+              lastTimestamp = timestamp;
+            } else {
+              // Same day, add it
+              filteredTimestamps.push(timestamp);
+              lastTimestamp = timestamp;
+            }
+          } catch {
+            // Fallback: add all timestamps
+            filteredTimestamps.push(timestamp);
+            lastTimestamp = timestamp;
+          }
+        } else {
+          // First timestamp or not a Unix timestamp
+          filteredTimestamps.push(timestamp);
+          lastTimestamp = timestamp;
+        }
+      });
+    }
+    
+    filteredTimestamps.forEach((timestamp, index) => {
+      // Find the original index in sortedTimestamps for boundary detection
+      const originalIndex = sortedTimestamps.indexOf(timestamp);
       
       // Check for day boundaries
       let currentDayKey: string | null = null;
@@ -438,6 +605,9 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
       
       const dayData: { [key: string]: number | string } = { timestamp };
       visibleParticipants.forEach(p => {
+        if (!p.performanceHistory || !Array.isArray(p.performanceHistory)) {
+          return;
+        }
         // Find the metric with this exact timestamp (or closest)
         // For real-time mode (Unix timestamps > 1000000000), use larger tolerance (60 seconds)
         // For simulated/historical (small timestamps), use smaller tolerance (0.01)
@@ -485,7 +655,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
   }
 
   return (
-    <div ref={containerRef} className="relative w-full h-full">
+    <div ref={containerRef} className="relative w-full" style={{ height: '400px', minHeight: '400px', position: 'relative' }}>
       {selectedParticipantId && (
         <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
           Showing: {participants.find(p => p.id === selectedParticipantId)?.name || 'Selected'}
@@ -493,11 +663,12 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         </div>
       )}
       {!selectedParticipantId && !isCompactViewport && (
-        <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
+        <div className="absolute top-2 left-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
           Hover to highlight • Click to focus
         </div>
       )}
-    <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={0} aspect={undefined}>
+      <div style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}>
+        <ResponsiveContainer width="100%" height={400} minHeight={400}>
       <LineChart
         data={chartData}
         margin={chartMargin}
@@ -558,8 +729,10 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           />
         )}
 
+        {/* Render benchmarks first (behind agents) so markers appear on top */}
         {participants
           .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
+          .filter(p => (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500")
           .map(p => {
             const isHovered = hoveredParticipantId === p.id;
             const isSelected = selectedParticipantId === p.id;
@@ -594,7 +767,59 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                   }
                 }}
                 label={
-                  !isCompactViewport ? (
+                  !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
+                    <EndOfLineLabel
+                      data={p.performanceHistory}
+                      color={p.color}
+                      name={p.name}
+                      isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
+                    />
+                  ) : undefined
+                }
+              />
+            );
+          })}
+
+        {/* Render agents after benchmarks (so markers appear on top) */}
+        {participants
+          .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
+          .filter(p => (p as Benchmark).name !== "AI Managers Index" && (p as Benchmark).name !== "S&P 500")
+          .map(p => {
+            const isHovered = hoveredParticipantId === p.id;
+            const isSelected = selectedParticipantId === p.id;
+            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.2 : 1);
+            const strokeWidth = isHovered || isSelected ? 3 : 2;
+            
+            return (
+              <Line
+                key={p.id}
+                type="linear"
+                dataKey={p.id}
+                stroke={p.color}
+                strokeWidth={strokeWidth}
+                strokeDasharray="0"
+                dot={(props) => {
+                  const { key, ...restProps } = props;
+                  return <CustomDot key={key} {...restProps} data={chartData} image={(p as Agent).image} />;
+                }}
+                activeDot={{ r: 6, strokeWidth: 2, stroke: p.color, fill: p.color, cursor: 'pointer' }}
+                isAnimationActive={false}
+                connectNulls={false}
+                name={p.name}
+                opacity={opacity}
+                style={{ cursor: 'pointer', transition: 'opacity 0.2s, stroke-width 0.2s' }}
+                onMouseEnter={() => setHoveredParticipantId(p.id)}
+                onMouseLeave={() => setHoveredParticipantId(null)}
+                onClick={(e) => {
+                  e?.stopPropagation?.(); // Prevent chart background click
+                  if (selectedParticipantId === p.id) {
+                    setSelectedParticipantId(null); // Click again to deselect
+                  } else {
+                    setSelectedParticipantId(p.id); // Click to select
+                  }
+                }}
+                label={
+                  !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
                     <EndOfLineLabel
                       data={p.performanceHistory}
                       color={p.color}
@@ -607,7 +832,8 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             );
           })}
       </LineChart>
-    </ResponsiveContainer>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };

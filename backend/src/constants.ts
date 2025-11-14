@@ -533,7 +533,7 @@ const limitedTickerCount = Math.min(requestedTickerCount, resolvedTickers.length
 
 export const S_P500_TICKERS: string[] = resolvedTickers.slice(0, limitedTickerCount);
 
-export const INITIAL_CASH = 10000;
+export const INITIAL_CASH = 1000000;
 export const RISK_FREE_RATE = 0.02;
 export const TRADING_DAYS_PER_YEAR = 252;
 export const MAX_POSITION_SIZE_PERCENT = 0.10;

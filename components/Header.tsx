@@ -1,20 +1,73 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { MarketDataTelemetry } from '../types';
 
 interface HeaderProps {
-  isLive: boolean;
-  onToggleLive: () => void;
-  isStopped: boolean;
-  simulationMode: 'simulated' | 'realtime' | 'historical';
+  simulationState?: any;
   connectionStatus?: {
     connected: boolean;
     lastChecked: string | null;
     backendInfo: any;
   };
+  mode?: 'simulated' | 'realtime' | 'historical';
+  simulationTypeName?: string;
   marketTelemetry?: MarketDataTelemetry | null;
 }
 
-export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive, isStopped, simulationMode, connectionStatus, marketTelemetry }) => {
+interface CompetitionType {
+  id: string;
+  name: string;
+  description: string;
+  chatEnabled: boolean;
+  showModelNames: boolean;
+  agentCount: number;
+}
+
+export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatus, mode, simulationTypeName, marketTelemetry }) => {
+  const navigate = useNavigate();
+  const { simulationId } = useParams<{ simulationId: string }>();
+  const [competitions, setCompetitions] = useState<CompetitionType[]>([]);
+  const [loadingCompetitions, setLoadingCompetitions] = useState(true);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const simulationMode = mode || 'simulated';
+
+  useEffect(() => {
+    const fetchCompetitions = async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+        const response = await fetch(`${API_BASE_URL}/api/simulations/types`);
+        if (response.ok) {
+          const data = await response.json();
+          setCompetitions(data.types || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch competitions:', err);
+      } finally {
+        setLoadingCompetitions(false);
+      }
+    };
+
+    fetchCompetitions();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [isDropdownOpen]);
+
   const getModeLabel = () => {
     switch (simulationMode) {
       case 'historical':
@@ -36,42 +89,110 @@ export const Header: React.FC<HeaderProps> = ({ isLive, onToggleLive, isStopped,
     ? `Yahoo Finance: ${yahooRateLimit.currentCount}/${yahooRateLimit.maxRequestsPerWindow} in ${yahooRateLimit.windowMs}ms window. Blocked ${yahooRateLimit.blockedRequests} requests${yahooRateLimit.lastThrottledAt ? `, last throttled at ${yahooRateLimit.lastThrottledAt}` : ''}.`
     : 'Rate-limit status unavailable';
 
+  const currentCompetition = competitions.find(c => c.id === simulationId);
+  const displayName = simulationTypeName || currentCompetition?.name || 'Select Competition';
+
+  const handleCompetitionSelect = (competitionId: string) => {
+    if (competitionId !== simulationId) {
+      navigate(`/simulation/${competitionId}`);
+    }
+    setIsDropdownOpen(false);
+  };
+
   return (
     <header className="bg-arena-bg border-b border-arena-border p-4 sticky top-0 z-20">
-      <div className="max-w-screen-2xl mx-auto flex justify-between items-center">
-        <div className="flex items-center space-x-8">
-          <h1 className="text-2xl font-bold text-arena-text-primary tracking-tighter">
-            LLM TRADING ARENA
-          </h1>
-          <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
-            <a href="#" className="text-arena-text-primary flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-              <span>LIVE</span>
-            </a>
-            <div className={`flex items-center space-x-2 px-3 py-1 rounded-full ${modeInfo.color} bg-opacity-20 border border-current ${modeInfo.textColor}`}>
-              <div className={`w-2 h-2 rounded-full ${modeInfo.color}`}></div>
-              <span className="text-xs font-semibold">{modeInfo.label}</span>
-            </div>
-            <div className={`flex items-center space-x-2 px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-500 bg-opacity-20 text-green-400' : 'bg-red-500 bg-opacity-20 text-red-400'}`} title={isConnected ? `Backend connected${backendInfo ? ` - Day ${backendInfo.simulation?.day || 0}, ${backendInfo.simulation?.agentsCount || 0} agents` : ''}` : 'Backend disconnected'}>
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className="font-semibold">{isConnected ? 'BACKEND' : 'OFFLINE'}</span>
-            </div>
-            {hasRateLimitPressure && (
-              <div
-                className="flex items-center space-x-2 px-2 py-1 rounded text-xs bg-orange-500 bg-opacity-20 text-orange-400"
-                title={rateLimitTitle}
+      <div className="max-w-screen-2xl mx-auto flex justify-between items-center gap-4">
+        {/* Competition Dropdown - Left side */}
+        {!loadingCompetitions && competitions.length > 0 && (
+          <div ref={dropdownRef} className="relative flex-shrink-0">
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-arena-text-primary hover:text-arena-text-primary bg-arena-surface/50 hover:bg-arena-surface rounded-lg border border-arena-border transition-colors"
+            >
+              <span>{displayName}</span>
+              <svg
+                className={`w-4 h-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></div>
-                <span className="font-semibold">RATE-LIMITED</span>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Dropdown Menu */}
+            {isDropdownOpen && (
+              <div className="absolute top-full left-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-arena-surface border border-arena-border rounded-lg shadow-xl z-50 overflow-hidden">
+                <div className="py-2">
+                  {competitions.map((competition) => {
+                    const isCurrent = competition.id === simulationId;
+                    return (
+                      <button
+                        key={competition.id}
+                        onClick={() => handleCompetitionSelect(competition.id)}
+                        className={`w-full text-left px-4 py-3 hover:bg-arena-bg transition-colors ${
+                          isCurrent ? 'bg-blue-500/10 border-l-2 border-blue-500' : ''
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className={`font-medium ${isCurrent ? 'text-blue-400' : 'text-arena-text-primary'}`}>
+                              {competition.name}
+                              {isCurrent && (
+                                <span className="ml-2 text-xs text-blue-400">(Current)</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-arena-text-secondary mt-1 line-clamp-2">
+                              {competition.description}
+                            </div>
+                          </div>
+                          {isCurrent && (
+                            <svg
+                              className="w-5 h-5 text-blue-400 flex-shrink-0 ml-2"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
-            <a href="#leaderboard" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">LEADERBOARD</a>
-            <a href="#" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">BLOG</a>
-            <a href="#" className="text-arena-text-secondary hover:text-arena-text-primary transition-colors">MODELS</a>
-          </nav>
-        </div>
+          </div>
+        )}
 
-        {/* Play/Pause button removed - backend runs automatically */}
+        {/* Status badges - Right side (hidden on mobile, visible on md+) */}
+        <div className="hidden md:flex items-center space-x-2 lg:space-x-4 flex-shrink-0">
+          <a href="#" className="text-arena-text-primary flex items-center space-x-2">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+            <span className="text-sm font-medium">LIVE</span>
+          </a>
+          <div className={`flex items-center space-x-2 px-2 lg:px-3 py-1 rounded-full ${modeInfo.color} bg-opacity-20 border border-current ${modeInfo.textColor}`}>
+            <div className={`w-2 h-2 rounded-full ${modeInfo.color}`}></div>
+            <span className="text-xs font-semibold">{modeInfo.label}</span>
+          </div>
+          <div className={`flex items-center space-x-2 px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-500 bg-opacity-20 text-green-400' : 'bg-red-500 bg-opacity-20 text-red-400'}`} title={isConnected ? `Backend connected${backendInfo ? ` - Day ${backendInfo.simulation?.day || 0}, ${backendInfo.simulation?.agentsCount || 0} agents` : ''}` : 'Backend disconnected'}>
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span className="font-semibold">{isConnected ? 'BACKEND' : 'OFFLINE'}</span>
+          </div>
+          {hasRateLimitPressure && (
+            <div
+              className="flex items-center space-x-2 px-2 py-1 rounded text-xs bg-orange-500 bg-opacity-20 text-orange-400"
+              title={rateLimitTitle}
+            >
+              <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></div>
+              <span className="font-semibold">RATE-LIMITED</span>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

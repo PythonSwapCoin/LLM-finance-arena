@@ -49,10 +49,16 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key_here
 POLYGON_API_KEY=your_polygon_key_here
 
+# LLM Control
+ENABLE_LLM=true  # Set to 'false' to use synthetic/simulated trades instead of calling LLM APIs (useful for testing without API costs)
+USE_UNIFIED_MODEL=false  # Set to 'true' to make all agents use the same model (useful for testing with cheaper models)
+UNIFIED_MODEL=google/gemini-2.5-flash-lite  # Model to use when USE_UNIFIED_MODEL=true (default: google/gemini-2.5-flash-lite)
+
 # Simulation Intervals (in milliseconds)
 # For simulated/historical mode:
 SIM_INTERVAL_MS=30000  # Price tick interval (30 seconds)
 TRADE_INTERVAL_MS=7200000  # Trade window interval (2 hours)
+SIM_MARKET_MINUTES_PER_TICK=30  # Minutes of market time that pass per price tick (default: 30 minutes)
 
 # For real-time mode (overrides above if MODE=realtime):
 REALTIME_SIM_INTERVAL_MS=600000  # Price tick interval (10 minutes)
@@ -179,9 +185,12 @@ Returns log entries. Query parameters:
 ## Environment Variables
 
 ### Required
-- `OPENROUTER_API_KEY`: Your OpenRouter API key for LLM calls
+- `OPENROUTER_API_KEY`: Your OpenRouter API key for LLM calls (only required if `ENABLE_LLM=true`)
 
 ### Optional
+- `ENABLE_LLM`: Enable or disable LLM API calls. When set to `false`, the system generates synthetic/simulated trades instead of calling LLM APIs. This is useful for testing without incurring API costs. Default: `true`
+- `USE_UNIFIED_MODEL`: When set to `true`, all agents will use the same model specified in `UNIFIED_MODEL` for API calls, while the frontend still displays their original model names. Useful for testing with cheaper models. Default: `false`
+- `UNIFIED_MODEL`: The model identifier to use when `USE_UNIFIED_MODEL=true`. Default: `google/gemini-2.5-flash-lite`
 - `BACKEND_PORT`: Server port (default: 8080)
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
 - `MODE`: Simulation mode - `simulated`, `realtime`, or `historical` (default: `simulated`)
@@ -228,6 +237,19 @@ The engine now charges transaction costs on every executed order to better appro
 - **Visibility**: Fees are logged, included in the trade history payload, and exported alongside trades
 
 Override the defaults with `TRADING_FEE_BPS` and `MIN_TRADE_FEE` in `.env` if your deployment uses different assumptions.
+
+## LLM Control and Testing
+
+### Disabling LLM Calls for Testing
+
+Set `ENABLE_LLM=false` in your `.env` file to disable actual LLM API calls. When disabled, the system generates synthetic trades based on:
+- Portfolio state (cash levels, existing positions)
+- Market data (momentum, valuations)
+- Trading rules (position limits, fees)
+
+This allows you to test the simulation engine, UI, and trading logic without incurring API costs. Synthetic trades include realistic fair value estimates, top/bottom of box scenarios, and rationales.
+
+**Note**: When `ENABLE_LLM=false`, the `OPENROUTER_API_KEY` is not required.
 
 ## LLM Request Pacing
 

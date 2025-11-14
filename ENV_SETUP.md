@@ -32,13 +32,16 @@ See `BACKEND_SETUP.md` for complete backend configuration.
 
 ### Required Configuration
 
-### LLM Provider (Required)
+### LLM Provider (Required if ENABLE_LLM=true)
 ```env
 OPENROUTER_API_KEY=your_openrouter_api_key_here
+ENABLE_LLM=true  # Set to 'false' to use synthetic trades instead of LLM API calls
 ```
 Get your key from: https://openrouter.ai/keys
 
 **Important**: This key is server-side only and never sent to the browser.
+
+**Testing Mode**: Set `ENABLE_LLM=false` to disable LLM API calls and use synthetic trades instead. This allows you to test the program without API costs. When disabled, `OPENROUTER_API_KEY` is not required.
 
 ## Backend Market Data Mode Selection
 

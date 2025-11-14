@@ -50,7 +50,8 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
               currentDate,
               simulationMode,
               sourcePoint?.timestamp,
-              sourcePoint?.intradayHour
+              sourcePoint?.intradayHour,
+              true // compact mode for x-axis labels
             );
           }}
         />

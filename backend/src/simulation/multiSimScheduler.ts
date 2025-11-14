@@ -33,6 +33,10 @@ const getSimulatedMinutesPerTick = (): number => {
   return 30;
 };
 
+// Track price ticks (yfinance rounds) to delay first trade
+let priceTickCount = 0;
+const REQUIRED_PRICE_TICKS_BEFORE_FIRST_TRADE = 3;
+
 const getFirstTradeHour = (): number => {
   const mode = getSimulationMode();
   if (mode === 'realtime') {
@@ -220,6 +224,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         return;
       }
 
+      // Increment price tick count (yfinance rounds)
+      priceTickCount++;
+
       // Check if we need to advance to next day
       const firstSim = simulations.values().next().value;
       if (!firstSim) return;
@@ -296,16 +303,30 @@ export const startMultiSimScheduler = async (): Promise<void> => {
   // Trade window handler
   const tradeWindowHandler = async () => {
     try {
+      // Check if we've had enough price ticks (yfinance rounds) before first trade
       if (!firstTradeExecuted) {
+        if (priceTickCount < REQUIRED_PRICE_TICKS_BEFORE_FIRST_TRADE) {
+          logger.logSimulationEvent('Skipping trade window - waiting for more price ticks', {
+            priceTickCount,
+            required: REQUIRED_PRICE_TICKS_BEFORE_FIRST_TRADE,
+          });
+          return;
+        }
+        
         const firstSim = simulations.values().next().value;
         if (firstSim) {
           const snapshot = firstSim.getSnapshot();
           if (snapshot.intradayHour >= firstTradeHour) {
             firstTradeExecuted = true;
+            logger.logSimulationEvent('First trade window executed', {
+              priceTickCount,
+              intradayHour: snapshot.intradayHour,
+            });
           } else {
             logger.logSimulationEvent('Skipping trade window - first trade hour not reached', {
               currentHour: snapshot.intradayHour,
               firstTradeHour,
+              priceTickCount,
             });
             return;
           }

@@ -52,7 +52,24 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
         <div className="bg-arena-surface rounded-lg shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-y-auto border border-arena-border" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-arena-surface p-4 border-b border-arena-border flex justify-between items-center z-10">
                 <div className="flex items-center space-x-3">
-                    <div className="w-4 h-4 rounded-full" style={{backgroundColor: agent.color}}></div>
+                    {agent.image ? (
+                      <img 
+                        src={agent.image} 
+                        alt={agent.name}
+                        className="w-10 h-10 rounded-full object-cover border border-arena-border"
+                        onError={(e) => {
+                          // Fallback to color dot if image fails to load
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const fallback = document.createElement('div');
+                          fallback.className = 'w-4 h-4 rounded-full';
+                          fallback.style.backgroundColor = agent.color;
+                          target.parentNode?.insertBefore(fallback, target);
+                        }}
+                      />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full" style={{backgroundColor: agent.color}}></div>
+                    )}
                     <div>
                         <h2 className="text-xl font-bold text-arena-text-primary">{agent.name}</h2>
                         {showModelName && <p className="text-sm text-arena-text-secondary">{agent.model}</p>}
@@ -171,32 +188,48 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                 </div>
 
                 {/* Valuation Analysis */}
-                {agent.tradeHistory.some(t => t.fairValue !== undefined || t.topOfBox !== undefined || t.bottomOfBox !== undefined || t.justification) && (
-                  <div className="md:col-span-2">
-                    <h3 className="text-lg font-semibold mb-2">Valuation Analysis</h3>
-                    <div className="bg-arena-bg rounded-lg max-h-96 overflow-y-auto">
-                      <table className="w-full text-sm text-left">
-                        <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
-                          <tr>
-                            <th className="p-2">When</th>
-                            <th className="p-2">Ticker</th>
-                            <th className="p-2">Action</th>
-                            <th className="p-2 text-right">Price</th>
-                            <th className="p-2 text-right">Fair Value</th>
-                            <th className="p-2 text-right">Top of Box</th>
-                            <th className="p-2 text-right">Bottom of Box</th>
-                            <th className="p-2">Justification</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-arena-border">
-                          {agent.tradeHistory
-                            .filter(t => t.fairValue !== undefined || t.topOfBox !== undefined || t.bottomOfBox !== undefined || t.justification)
-                            .reverse()
-                            .map(trade => (
-                              <tr key={`valuation-${trade.timestamp}-${trade.ticker}-${trade.action}-${Math.random()}`}>
+                {(() => {
+                  // Get currently owned tickers
+                  const ownedTickers = new Set(positions.map((p: Position) => p.ticker));
+                  
+                  // Find the most recent trade with valuation data for each owned ticker
+                  const valuationData = new Map<string, typeof agent.tradeHistory[0]>();
+                  
+                  // Sort trades by timestamp descending to get most recent first
+                  const sortedTrades = [...agent.tradeHistory].sort((a, b) => b.timestamp - a.timestamp);
+                  
+                  for (const trade of sortedTrades) {
+                    if (ownedTickers.has(trade.ticker) && 
+                        (trade.fairValue !== undefined || trade.topOfBox !== undefined || trade.bottomOfBox !== undefined || trade.justification)) {
+                      if (!valuationData.has(trade.ticker)) {
+                        valuationData.set(trade.ticker, trade);
+                      }
+                    }
+                  }
+                  
+                  const valuationEntries = Array.from(valuationData.values());
+                  
+                  return valuationEntries.length > 0 && (
+                    <div className="md:col-span-2">
+                      <h3 className="text-lg font-semibold mb-2">Valuation Analysis</h3>
+                      <div className="bg-arena-bg rounded-lg">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-gray-900 text-arena-text-secondary">
+                            <tr>
+                              <th className="p-2">When</th>
+                              <th className="p-2">Ticker</th>
+                              <th className="p-2 text-right">Price</th>
+                              <th className="p-2 text-right">Fair Value</th>
+                              <th className="p-2 text-right">Top of Box</th>
+                              <th className="p-2 text-right">Bottom of Box</th>
+                              <th className="p-2">Justification</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-arena-border">
+                            {valuationEntries.map(trade => (
+                              <tr key={`valuation-${trade.timestamp}-${trade.ticker}-${Math.random()}`}>
                                 <td className="p-2 font-mono text-center">{formatTradeTimestamp(trade.timestamp, startDate, currentDate, simulationMode)}</td>
                                 <td className="p-2 font-mono">{trade.ticker}</td>
-                                <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
                                 <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
                                 <td className="p-2 font-mono text-right">{trade.fairValue != null ? `$${(trade.fairValue ?? 0).toFixed(2)}` : '-'}</td>
                                 <td className="p-2 font-mono text-right">{trade.topOfBox != null ? `$${(trade.topOfBox ?? 0).toFixed(2)}` : '-'}</td>
@@ -204,16 +237,12 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                 <td className="p-2 text-arena-text-secondary text-xs">{trade.justification || '-'}</td>
                               </tr>
                             ))}
-                          {agent.tradeHistory.filter(t => t.fairValue !== undefined || t.topOfBox !== undefined || t.bottomOfBox !== undefined || t.justification).length === 0 && (
-                            <tr>
-                              <td colSpan={8} className="p-4 text-center text-arena-text-secondary">No valuation analysis available yet.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
             </div>
         </div>

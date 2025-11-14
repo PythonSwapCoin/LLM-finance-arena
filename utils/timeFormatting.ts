@@ -12,7 +12,8 @@ export const formatTimestampToDate = (
   currentDate?: string,
   simulationMode?: SimulationMode,
   day?: number,
-  intradayHour?: number
+  intradayHour?: number,
+  compact?: boolean // If true, don't include day prefix for intraday hours (for x-axis labels)
 ): string => {
   if (!startDate) {
     // Fallback to Day X format if no date info
@@ -74,20 +75,55 @@ export const formatTimestampToDate = (
       date.setDate(start.getDate() + daysToAdd);
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     } else {
-      // Simulated: generate dates from start date
+      // Simulated: use startDate to calculate actual dates, format as "06/Jan"
       const daysToAdd = Math.floor(timestamp);
-      const date = new Date(start);
-      date.setDate(start.getDate() + daysToAdd);
-
       const hourDecimal = timestamp - daysToAdd;
       const hours = Math.floor(hourDecimal * 10);
       const minutes = Math.round((hourDecimal * 10 - hours) * 60);
 
-      if (hours === 0 && minutes === 0) {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      // Calculate the actual date from startDate
+      if (startDate) {
+        const baseDate = new Date(startDate);
+        const simulatedDate = new Date(baseDate);
+        simulatedDate.setDate(baseDate.getDate() + daysToAdd);
+        simulatedDate.setHours(9 + hours, 30 + minutes, 0, 0);
+
+        // Format as "06/Jan" style
+        const day = simulatedDate.getDate();
+        const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
+        const month = monthFormatter.format(simulatedDate);
+        const dateLabel = `${day.toString().padStart(2, '0')}/${month}`;
+
+        if (hours === 0 && minutes === 0) {
+          return dateLabel;
+        }
+        
+        // Format time as "9:30 AM" style
+        const timeStr = simulatedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        
+        // For compact format (x-axis labels), show only time for intraday hours
+        if (compact) {
+          return timeStr;
+        }
+        
+        // For tooltips and other places, show full "06/Jan 10:30 AM" format
+        return `${dateLabel} ${timeStr}`;
+      } else {
+        // Fallback: show "Day X" format if no startDate
+        const displayDay = daysToAdd + 1;
+        if (hours === 0 && minutes === 0) {
+          return `Day ${displayDay}`;
+        }
+        
+        const date = new Date(Date.UTC(2000, 0, 1, 9 + hours, 30 + minutes, 0, 0));
+        const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        
+        if (compact) {
+          return timeStr;
+        }
+        
+        return `Day ${displayDay} ${timeStr}`;
       }
-      date.setHours(9 + hours, 30 + minutes, 0, 0);
-      return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     }
   } catch (error) {
     // Fallback on error

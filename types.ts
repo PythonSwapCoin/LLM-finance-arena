@@ -113,6 +113,7 @@ export interface Agent {
   performanceHistory: PerformanceMetrics[];
   rationale: string; // Current rationale
   rationaleHistory: { [day: number]: string }; // Historical rationales by day
+  image?: string; // Path to agent image/logo
   memory?: { // Agent memory/context for past decisions
     recentTrades: Trade[]; // Last N trades for context
     pastRationales: string[]; // Recent rationales

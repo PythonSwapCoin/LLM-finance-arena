@@ -119,15 +119,18 @@ const handleTradeWindowAgent = async (
     timestamp: number;
     currentTimestamp?: number;
     chatContext?: AgentChatContext;
+    previousFailedTrades?: Array<{ ticker: string; action: string; quantity: number; reason: string }>;
   }
-): Promise<{ agent: Agent; reply?: string }> => {
-  const { marketData, day, intradayHour, mode, timestamp, currentTimestamp, chatContext } = options;
+): Promise<{ agent: Agent; reply?: string; failedTrades?: Array<{ ticker: string; action: string; quantity: number; reason: string }> }> => {
+  const { marketData, day, intradayHour, mode, timestamp, currentTimestamp, chatContext, previousFailedTrades } = options;
 
   try {
+    // Increased timeout to 60 seconds to account for retries and exponential backoff
+    const timeoutMs = 60000;
     const tradeDecision = await Promise.race([
-      getTradeDecisions(agent, marketData, day, 30000, chatContext),
+      getTradeDecisions(agent, marketData, day, timeoutMs, chatContext, previousFailedTrades),
       new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string; reply?: string }>((_, reject) =>
-        setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
+        setTimeout(() => reject(new Error('Trade decision timeout')), timeoutMs)
       )
     ]).catch(error => {
       console.warn(`[${agent.name}] Trade decision timeout or error:`, error);
@@ -146,6 +149,14 @@ const handleTradeWindowAgent = async (
     });
 
     const { trades: decidedTrades, rationale, reply: rawReply } = tradeDecision;
+    
+    // Log trade decision results for debugging
+    if (decidedTrades.length === 0) {
+      console.log(`[${agent.name}] No trades decided. Rationale: ${rationale.substring(0, 100)}...`);
+    } else {
+      console.log(`[${agent.name}] Decided ${decidedTrades.length} trade(s)`);
+    }
+    
     const trimmedReply = rawReply?.trim();
     const hasUserMessagesThisRound = Boolean(chatContext?.messages && chatContext.messages.length > 0);
     const shouldProvideFallbackReply = !trimmedReply && chatContext?.enabled && hasUserMessagesThisRound;
@@ -159,6 +170,10 @@ const handleTradeWindowAgent = async (
         intradayHour,
       });
     }
+    
+    // Track failed trades for prompt feedback
+    const failedTrades: Array<{ ticker: string; action: string; quantity: number; reason: string }> = [];
+    
     const newTradeHistory = [...agent.tradeHistory];
     const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
 
@@ -211,6 +226,12 @@ const handleTradeWindowAgent = async (
           const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
           console.warn(`[${agent.name}] Insufficient cash for ${trade.quantity} shares of ${trade.ticker}`);
           logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
+          failedTrades.push({
+            ticker: trade.ticker,
+            action: 'buy',
+            quantity: trade.quantity,
+            reason: errorMsg,
+          });
         }
       } else if (trade.action === 'sell') {
         const existingPosition = newPortfolio.positions[trade.ticker];
@@ -242,6 +263,12 @@ const handleTradeWindowAgent = async (
           const errorMsg = existingPosition ? `only owns ${existingPosition.quantity}` : 'does not own this stock';
           console.warn(`[${agent.name}] Cannot sell ${trade.quantity} shares of ${trade.ticker} - ${errorMsg}`);
           logger.logTrade(agent.name, trade.ticker, 'sell', trade.quantity, tradePrice, false, errorMsg);
+          failedTrades.push({
+            ticker: trade.ticker,
+            action: 'sell',
+            quantity: trade.quantity,
+            reason: errorMsg,
+          });
         }
       }
     });
@@ -266,6 +293,7 @@ const handleTradeWindowAgent = async (
       })].slice(-10),
       pastRationales: [...(agent.memory?.pastRationales || []), rationale].slice(-5),
       pastPerformance: [...(agent.memory?.pastPerformance || []), newMetrics].slice(-10),
+      failedTrades: failedTrades, // Store failed trades for next round
     };
 
     return {
@@ -282,6 +310,7 @@ const handleTradeWindowAgent = async (
         memory: updatedMemory,
       },
       reply,
+      failedTrades,
     };
   } catch (error) {
     console.error(`Failed to process agent ${agent.name}:`, error);
@@ -319,10 +348,12 @@ const handleAdvanceDayAgent = async (
   const { nextDay, marketData } = options;
 
   try {
+    // Increased timeout to 60 seconds to account for retries and exponential backoff
+    const timeoutMs = 60000;
     const { trades: decidedTrades, rationale } = await Promise.race([
-      getTradeDecisions(agent, marketData, nextDay, 30000),
+      getTradeDecisions(agent, marketData, nextDay, timeoutMs),
       new Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string }>((_, reject) =>
-        setTimeout(() => reject(new Error('Trade decision timeout')), 30000)
+        setTimeout(() => reject(new Error('Trade decision timeout')), timeoutMs)
       )
     ]).catch(error => {
       console.warn(`[${agent.name}] Trade decision timeout or error:`, error);
@@ -611,6 +642,12 @@ export const tradeWindow = async (
     };
   }
 
+  // Get previous failed trades from agent's last trade window
+  const getPreviousFailedTrades = (agent: Agent): Array<{ ticker: string; action: string; quantity: number; reason: string }> => {
+    // Get failed trades from agent's memory (stored in previous round)
+    return (agent.memory as any)?.failedTrades || [];
+  };
+
   const agentResults = await processAgentsWithPacing(agents, mode, agent => {
     const messages = chatWithDeliveredMessages.config.enabled
       ? chatWithDeliveredMessages.messages
@@ -624,6 +661,9 @@ export const tradeWindow = async (
         .map(message => ({ sender: message.sender, content: message.content }))
       : [];
 
+    // Get failed trades from previous round
+    const previousFailedTrades = getPreviousFailedTrades(agent);
+
     return handleTradeWindowAgent(agent, {
       marketData,
       day,
@@ -636,6 +676,7 @@ export const tradeWindow = async (
         messages,
         maxReplyLength: chatWithDeliveredMessages.config.maxMessageLength,
       },
+      previousFailedTrades,
     });
   });
 
@@ -678,8 +719,26 @@ export const tradeWindow = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // S&P 500 benchmark updates based on market data changes (already handled in step)
-      newTotalValue = lastPerf.totalValue;
+      // S&P 500 benchmark updates based on market data changes
+      const tickers = Object.keys(marketData);
+      let totalReturn = 0;
+      let validReturns = 0;
+      
+      tickers.forEach(ticker => {
+        const currentStock = marketData[ticker];
+        const prevStock = currentSnapshot.marketData[ticker];
+        
+        if (prevStock && prevStock.price > 0 && currentStock.price > 0) {
+          const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
+          totalReturn += stockReturn;
+          validReturns++;
+        }
+      });
+      
+      if (validReturns > 0) {
+        const avgReturn = totalReturn / validReturns;
+        newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+      }
     } else if (b.id === AI_MANAGERS_INDEX_ID) {
       const avgAgentReturn = updatedAgents.reduce((acc, agent) => {
         const lastMetric = agent.performanceHistory[agent.performanceHistory.length - 1];

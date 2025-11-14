@@ -22,12 +22,12 @@ export function SimulationSelector() {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
         const response = await fetch(`${API_BASE_URL}/api/simulations/types`);
         if (!response.ok) {
-          throw new Error('Failed to fetch simulation types');
+          throw new Error('Failed to fetch competition types');
         }
         const data = await response.json();
         setTypes(data.types);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load simulation types');
+        setError(err instanceof Error ? err.message : 'Failed to load competition types');
       } finally {
         setLoading(false);
       }
@@ -45,7 +45,7 @@ export function SimulationSelector() {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
-          <p className="text-slate-300 text-lg">Loading simulation types...</p>
+          <p className="text-slate-300 text-lg">Loading competitions...</p>
         </div>
       </div>
     );
@@ -56,7 +56,7 @@ export function SimulationSelector() {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <div className="text-center max-w-md p-6">
           <div className="text-red-400 text-6xl mb-4">⚠️</div>
-          <h2 className="text-xl font-bold text-red-400 mb-2">Error Loading Simulations</h2>
+          <h2 className="text-xl font-bold text-red-400 mb-2">Error Loading Competitions</h2>
           <p className="text-slate-300">{error}</p>
           <button
             onClick={() => window.location.reload()}
@@ -78,12 +78,12 @@ export function SimulationSelector() {
             LLM Finance Arena
           </h1>
           <p className="text-xl text-slate-300 max-w-3xl mx-auto">
-            Watch AI models compete in real-time stock trading simulations.
+            Watch AI models compete in real-time stock trading competitions.
             Choose your arena below to see different AI strategies in action.
           </p>
         </div>
 
-        {/* Simulation Cards Grid */}
+        {/* Competition Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {types.map((type) => (
             <div
@@ -145,7 +145,7 @@ export function SimulationSelector() {
         {/* Footer Info */}
         <div className="mt-12 text-center">
           <p className="text-slate-500 text-sm">
-            All simulations run with the same underlying market data for fair comparison
+            All competitions run with the same underlying market data for fair comparison
           </p>
         </div>
       </div>

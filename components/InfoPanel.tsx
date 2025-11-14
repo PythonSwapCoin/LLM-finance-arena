@@ -11,6 +11,8 @@ interface InfoPanelProps {
   isHistoricalComplete?: boolean;
   variant?: 'desktop' | 'mobile';
   className?: string;
+  simulationTypeName?: string;
+  simulationTypeDescription?: string;
 }
 
 export const InfoPanel: React.FC<InfoPanelProps> = ({
@@ -23,6 +25,8 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
   isHistoricalComplete,
   variant = 'desktop',
   className = '',
+  simulationTypeName,
+  simulationTypeDescription,
 }) => {
   const historicalComplete = simulationMode === 'historical' ? Boolean(isHistoricalComplete) : false;
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
@@ -59,8 +63,17 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
     <div className={`${containerClasses} ${className}`}>
         <div className={`flex justify-between items-center border-b border-arena-border ${headerPadding}`}>
             <div>
-                <span className="text-arena-text-secondary">Trading Day</span>
-                <p className={`${headingSize} font-bold text-arena-text-primary`}>{day}</p>
+                {simulationTypeName && simulationTypeDescription ? (
+                  <>
+                    <span className="text-arena-text-secondary">{simulationTypeName}</span>
+                    <p className={`${headingSize} font-bold text-arena-text-primary`}>{simulationTypeDescription}</p>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-arena-text-secondary">Trading Day</span>
+                    <p className={`${headingSize} font-bold text-arena-text-primary`}>{day}</p>
+                  </>
+                )}
                 {intradayHour > 0 && (
                   <span className="text-xs text-arena-text-secondary block mt-1">
                     Intraday: {Math.floor(intradayHour)}:{(intradayHour % 1 * 60).toFixed(0).padStart(2, '0')}

@@ -4,9 +4,21 @@ import { sanitizeOutgoingMessage } from '../utils/chatUtils.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const ENABLE_LLM = (process.env.ENABLE_LLM ?? 'true').toLowerCase() === 'true';
+const USE_UNIFIED_MODEL = (process.env.USE_UNIFIED_MODEL ?? 'false').toLowerCase() === 'true';
+const UNIFIED_MODEL = process.env.UNIFIED_MODEL || 'google/gemini-2.5-flash-lite';
 
-if (!OPENROUTER_API_KEY) {
+if (!OPENROUTER_API_KEY && ENABLE_LLM) {
   console.warn('OPENROUTER_API_KEY is not set. LLM agents will not be able to make trading decisions.');
+}
+
+if (!ENABLE_LLM) {
+  console.log('⚠️ LLM mode is DISABLED. Using synthetic/simulated trades for testing.');
+}
+
+if (USE_UNIFIED_MODEL) {
+  console.log(`⚠️ Unified model mode ENABLED. All agents will use: ${UNIFIED_MODEL}`);
+  console.log('   (Frontend will still show original model names for display purposes)');
 }
 
 const getAgentPrompt = (agent: Agent): string => {
@@ -61,13 +73,212 @@ interface ChatPromptContext {
   maxReplyLength: number;
 }
 
+/**
+ * Generate synthetic trades for testing when LLM is disabled
+ */
+const generateSyntheticTrades = (
+  agent: Agent,
+  marketData: MarketData,
+  day: number,
+  chatContext?: ChatPromptContext
+): { trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string; reply?: string } => {
+  const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => 
+    acc + pos.quantity * (marketData[pos.ticker]?.price || 0), agent.portfolio.cash);
+  
+  const availableCash = agent.portfolio.cash;
+  const availableTickers = Object.keys(marketData);
+  const currentPositions = Object.keys(agent.portfolio.positions);
+  
+  const trades: Omit<Trade, 'price' | 'timestamp'>[] = [];
+  let remainingCash = availableCash;
+  
+  // Determine if we should buy or sell based on portfolio state
+  const totalPositionValue = portfolioValue - availableCash;
+  const cashPercent = portfolioValue > 0 ? (availableCash / portfolioValue) : 1;
+  
+  // If we have significant cash (>30%), try to buy stocks
+  if (cashPercent > 0.3 && availableTickers.length > 0) {
+    // Find stocks with positive momentum or good fundamentals
+    const buyCandidates = availableTickers
+      .filter(ticker => {
+        const stock = marketData[ticker];
+        const position = agent.portfolio.positions[ticker];
+        const positionValue = position ? position.quantity * stock.price : 0;
+        const positionPercent = portfolioValue > 0 ? (positionValue / portfolioValue) : 0;
+        
+        // Don't exceed max position size
+        if (positionPercent >= MAX_POSITION_SIZE_PERCENT) {
+          return false;
+        }
+        
+        // Prefer stocks with positive momentum or reasonable P/E
+        const hasPositiveMomentum = stock.dailyChangePercent > -0.02; // Not down more than 2%
+        const hasReasonablePE = !stock.trailingPE || stock.trailingPE < 50;
+        
+        return hasPositiveMomentum && hasReasonablePE;
+      })
+      .sort((a, b) => {
+        // Sort by momentum (positive change first)
+        return marketData[b].dailyChangePercent - marketData[a].dailyChangePercent;
+      })
+      .slice(0, 3); // Consider top 3 candidates
+    
+    // Buy up to 2-3 stocks
+    for (const ticker of buyCandidates.slice(0, Math.min(2, buyCandidates.length))) {
+      const stock = marketData[ticker];
+      const currentPrice = stock.price;
+      const position = agent.portfolio.positions[ticker];
+      const positionValue = position ? position.quantity * currentPrice : 0;
+      const maxPositionValue = portfolioValue * MAX_POSITION_SIZE_PERCENT;
+      const availableForPosition = maxPositionValue - positionValue;
+      
+      // Calculate how much we can spend on this stock
+      const maxSpend = Math.min(remainingCash * 0.4, availableForPosition); // Use up to 40% of remaining cash per stock
+      
+      if (maxSpend > currentPrice * 10) { // Only buy if we can afford at least 10 shares
+        const notional = Math.min(maxSpend, remainingCash * 0.5);
+        const quantity = Math.floor((notional - estimateTradeFee(notional)) / currentPrice);
+        
+        if (quantity > 0) {
+          const fairValue = currentPrice * (0.95 + Math.random() * 0.1); // Fair value within 95-105% of current price
+          const volatility = Math.abs(stock.dailyChangePercent) || 0.02;
+          const topOfBox = fairValue * (1 + Math.max(0.05, volatility * 1.5));
+          const bottomOfBox = fairValue * (1 - Math.max(0.05, volatility * 1.5));
+          
+          trades.push({
+            ticker,
+            action: 'buy',
+            quantity,
+            fairValue: Math.round(fairValue * 100) / 100,
+            topOfBox: Math.round(topOfBox * 100) / 100,
+            bottomOfBox: Math.round(bottomOfBox * 100) / 100,
+            justification: `${ticker} shows positive momentum and reasonable valuation. Building position for diversification.`,
+            fees: estimateTradeFee(quantity * currentPrice),
+          });
+          
+          remainingCash -= (quantity * currentPrice + estimateTradeFee(quantity * currentPrice));
+        }
+      }
+    }
+  }
+  
+  // If we have positions and need to rebalance or take profits, consider selling
+  if (currentPositions.length > 0 && cashPercent < 0.2) {
+    // Find positions to potentially trim
+    const sellCandidates = currentPositions
+      .map(ticker => {
+        const position = agent.portfolio.positions[ticker];
+        const stock = marketData[ticker];
+        const currentPrice = stock.price;
+        const unrealizedGain = (currentPrice - position.averageCost) * position.quantity;
+        const unrealizedGainPercent = position.averageCost > 0 
+          ? ((currentPrice - position.averageCost) / position.averageCost) 
+          : 0;
+        
+        return {
+          ticker,
+          position,
+          stock,
+          unrealizedGain,
+          unrealizedGainPercent,
+        };
+      })
+      .filter(candidate => {
+        // Consider selling if:
+        // 1. Large gain (>10%) - take profits
+        // 2. Large loss (>5%) - cut losses
+        // 3. Negative momentum
+        return candidate.unrealizedGainPercent > 0.10 || 
+               candidate.unrealizedGainPercent < -0.05 ||
+               candidate.stock.dailyChangePercent < -0.03;
+      })
+      .sort((a, b) => {
+        // Prioritize taking profits on winners
+        if (a.unrealizedGainPercent > 0.10 && b.unrealizedGainPercent <= 0.10) return -1;
+        if (b.unrealizedGainPercent > 0.10 && a.unrealizedGainPercent <= 0.10) return 1;
+        // Then prioritize cutting losses
+        return a.unrealizedGainPercent - b.unrealizedGainPercent;
+      })
+      .slice(0, 1); // Sell at most 1 position per round
+    
+    for (const candidate of sellCandidates) {
+      const { ticker, position, stock } = candidate;
+      // Sell 30-50% of the position
+      const sellPercent = 0.3 + Math.random() * 0.2;
+      const quantity = Math.max(1, Math.floor(position.quantity * sellPercent));
+      
+      if (quantity > 0 && quantity <= position.quantity) {
+        const currentPrice = stock.price;
+        const fairValue = currentPrice * (0.95 + Math.random() * 0.1);
+        const volatility = Math.abs(stock.dailyChangePercent) || 0.02;
+        const topOfBox = fairValue * (1 + Math.max(0.05, volatility * 1.5));
+        const bottomOfBox = fairValue * (1 - Math.max(0.05, volatility * 1.5));
+        
+        const reason = candidate.unrealizedGainPercent > 0.10 
+          ? `Taking profits on ${ticker} after strong performance.`
+          : candidate.unrealizedGainPercent < -0.05
+          ? `Cutting losses on ${ticker} to preserve capital.`
+          : `Rebalancing portfolio by trimming ${ticker} position.`;
+        
+        trades.push({
+          ticker,
+          action: 'sell',
+          quantity,
+          fairValue: Math.round(fairValue * 100) / 100,
+          topOfBox: Math.round(topOfBox * 100) / 100,
+          bottomOfBox: Math.round(bottomOfBox * 100) / 100,
+          justification: reason,
+          fees: estimateTradeFee(quantity * currentPrice),
+        });
+      }
+    }
+  }
+  
+  // Generate rationale
+  let rationale: string;
+  if (trades.length === 0) {
+    rationale = `Maintaining current positions. Portfolio is well-balanced with ${(cashPercent * 100).toFixed(1)}% cash.`;
+  } else {
+    const buyCount = trades.filter(t => t.action === 'buy').length;
+    const sellCount = trades.filter(t => t.action === 'sell').length;
+    rationale = `Executing ${buyCount > 0 ? `${buyCount} buy${buyCount > 1 ? 's' : ''}` : ''}${buyCount > 0 && sellCount > 0 ? ' and ' : ''}${sellCount > 0 ? `${sellCount} sell${sellCount > 1 ? 's' : ''}` : ''} to ${buyCount > 0 ? 'deploy cash into positions with positive momentum' : ''}${buyCount > 0 && sellCount > 0 ? ' and ' : ''}${sellCount > 0 ? 'rebalance portfolio by taking profits and cutting losses' : ''}.`;
+  }
+  
+  // Generate chat reply if needed
+  let reply: string | undefined;
+  if (chatContext?.enabled && chatContext.messages.length > 0) {
+    const genericReplies = [
+      'Thanks for the update—staying focused on our strategy.',
+      'Appreciate the feedback—keeping our positions aligned with market conditions.',
+      'Noted—maintaining our disciplined approach to portfolio management.',
+    ];
+    reply = genericReplies[Math.floor(Math.random() * genericReplies.length)];
+  }
+  
+  return { trades, rationale, reply };
+};
+
 export const getTradeDecisions = async (
   agent: Agent,
   marketData: MarketData,
   day: number,
   timeoutMs: number = 30000,
-  chatContext?: ChatPromptContext
+  chatContext?: ChatPromptContext,
+  previousFailedTrades?: Array<{ ticker: string; action: string; quantity: number; reason: string }>
 ): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string; reply?: string }> => {
+  // Determine which model will be used (for logging)
+  const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
+  const displayModel = USE_UNIFIED_MODEL ? `${agent.model} (→ ${UNIFIED_MODEL})` : agent.model;
+  console.log(`[${agent.name}] Starting trade decision request (model: ${displayModel})`);
+  
+  // If LLM is disabled, use synthetic trades
+  if (!ENABLE_LLM) {
+    console.log(`[${agent.name}] Using synthetic trades (LLM disabled)`);
+    logger.log(LogLevel.INFO, LogCategory.LLM,
+      `Using synthetic trades for ${agent.name} (ENABLE_LLM=false)`, { agent: agent.name });
+    return generateSyntheticTrades(agent, marketData, day, chatContext);
+  }
+  
   if (!OPENROUTER_API_KEY) {
     // Return empty trades gracefully instead of throwing
     logger.log(LogLevel.WARNING, LogCategory.LLM,
@@ -81,6 +292,11 @@ export const getTradeDecisions = async (
     acc + pos.quantity * (marketData[pos.ticker]?.price || 0), agent.portfolio.cash);
   
   const systemInstruction = getAgentPrompt(agent);
+  
+  // Check if agent is allowed to hold all cash (e.g., Big Short Guy)
+  const allowAllCash = agent.id === 'big-short-guy' || 
+    systemInstruction.toLowerCase().includes('all cash is') ||
+    systemInstruction.toLowerCase().includes('holding 100% cash is allowed');
 
   const availableCash = agent.portfolio.cash;
   const currentPositions = Object.values(agent.portfolio.positions).map(p => {
@@ -165,6 +381,13 @@ ${currentPositions.length > 0
   : '  No positions held.'
 }
 
+${previousFailedTrades && previousFailedTrades.length > 0 ? `
+=== PREVIOUS TRADE RESULTS ===
+Some of your previous trades failed to execute:
+${previousFailedTrades.map(ft => `- ${ft.action.toUpperCase()} ${ft.quantity} ${ft.ticker}: FAILED - ${ft.reason}`).join('\n')}
+Please adjust your strategy accordingly. For BUY orders, ensure you have enough cash. For SELL orders, ensure you own the stock.
+` : ''}
+
 ${chatSection}
 
 === TRADING RULES ===
@@ -205,14 +428,23 @@ Example response:
   "reply": "Thanks for the support—staying nimble today."` : ''}
 }
 
+CRITICAL JSON FORMAT REQUIREMENTS:
+- You MUST return ONLY valid, complete JSON - no additional text before or after
+- The JSON must be properly closed with all brackets and braces
+- Do NOT truncate the JSON response - ensure the entire "trades" array is complete
+- If the response is too long, prioritize completing the JSON structure over verbose text
+- Return ONLY the JSON object, nothing else
+
 IMPORTANT:
 - Only include trades you want to execute (don't include "hold" actions)
 - For BUY: Make sure (quantity × price) ≤ available cash
-- For SELL: Make sure you own at least that many shares
+- For SELL: Make sure you own at least that many shares${allowAllCash ? '' : `
 - If you have cash available, you should make buy trades to invest it
-- Holding 100% cash is not acceptable - you are a portfolio manager, not a cash holder
+- Holding 100% cash is not acceptable - you are a portfolio manager, not a cash holder`}
 - If you don't want to trade, return an empty trades array: {"rationale": "...", "trades": []}${communityMessages.length > 0 ? `
 - Your reply must be respectful, one sentence, and contain no URLs or promotional content` : ''}
+
+Remember: Return ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON.
 `;
 
   const startTime = Date.now();
@@ -235,6 +467,9 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
 ` : '';
     
     const fetchFn = async () => {
+      // Use unified model if enabled, otherwise use agent's configured model
+      const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
+      
       const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -245,7 +480,7 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
           'X-Title': 'LLM Finance Arena',
         },
         body: JSON.stringify({
-          model: agent.model,
+          model: modelToUse,
           messages: [
             {
               role: 'system',
@@ -260,7 +495,7 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
             type: 'json_object'
           },
           temperature: 0.7,
-          max_tokens: 2000,
+          max_tokens: 3000, // Increased for Gemini Pro which may generate longer responses
         })
       });
       
@@ -290,18 +525,18 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
       if (response.status === 429) {
         const retryAfter = response.headers.get('retry-after');
         const error = new Error(`Rate limit exceeded. ${errorMessage}${retryAfter ? ` Retry after ${retryAfter} seconds.` : ''}`);
-        logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
+        logger.logLLMCall(agent.name, modelToUse, false, undefined, responseTime, error);
         throw error;
       }
       
       if (response.status === 404) {
-        const error = new Error(`Model not found: ${agent.model}. Please check the model identifier.`);
-        logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
+        const error = new Error(`Model not found: ${modelToUse}. Please check the model identifier.`);
+        logger.logLLMCall(agent.name, modelToUse, false, undefined, responseTime, error);
         throw error;
       }
       
       const error = new Error(`OpenRouter API error: ${response.status} - ${errorMessage}`);
-      logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, error);
+      logger.logLLMCall(agent.name, modelToUse, false, undefined, responseTime, error);
       throw error;
     }
 
@@ -312,64 +547,170 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     
     if (!jsonText) {
       const error = new Error('No response content from OpenRouter');
-      logger.logLLMCall(agent.name, agent.model, false, tokensUsed, responseTime, error);
+      logger.logLLMCall(agent.name, modelToUse, false, tokensUsed, responseTime, error);
+      console.error(`[${agent.name}] No response content from OpenRouter`);
       throw error;
     }
     
-    logger.logLLMCall(agent.name, agent.model, true, tokensUsed, responseTime);
+    console.log(`[${agent.name}] Received response (${responseTime}ms, ${tokensUsed} tokens). JSON length: ${jsonText.length}`);
+    logger.logLLMCall(agent.name, modelToUse, true, tokensUsed, responseTime);
 
-    // Parse and validate response
+    // Parse and validate response with improved JSON repair
     let result: any;
     try {
       result = JSON.parse(jsonText);
     } catch (parseError) {
+      console.warn(`[${agent.name}] Initial JSON parse failed, attempting repair. Error: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+      // Try to extract JSON from markdown code blocks
       const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
       if (jsonMatch) {
         try {
           result = JSON.parse(jsonMatch[1]);
         } catch (e) {
-          // Try to extract partial JSON
+          // Continue to repair logic
         }
       }
       
       if (!result) {
+        // Find the start of JSON
         const jsonStart = jsonText.indexOf('{');
         if (jsonStart !== -1) {
           let jsonCandidate = jsonText.substring(jsonStart);
+          
+          // Count braces to detect incomplete JSON
           const openBraces = (jsonCandidate.match(/\{/g) || []).length;
           const closeBraces = (jsonCandidate.match(/\}/g) || []).length;
+          const openBrackets = (jsonCandidate.match(/\[/g) || []).length;
+          const closeBrackets = (jsonCandidate.match(/\]/g) || []).length;
           
-          if (openBraces > closeBraces) {
-            const tradesMatch = jsonCandidate.match(/"trades"\s*:\s*\[/);
-            if (tradesMatch && !jsonCandidate.includes(']')) {
-              jsonCandidate = jsonCandidate.replace(/"trades"\s*:\s*\[([^\]]*)$/, '"trades": [$1]');
+          // Repair incomplete JSON structure
+          if (openBraces > closeBraces || openBrackets > closeBrackets) {
+            // Check if trades array is incomplete
+            const tradesArrayStart = jsonCandidate.indexOf('"trades"');
+            if (tradesArrayStart !== -1) {
+              const tradesSection = jsonCandidate.substring(tradesArrayStart);
+              const tradesArrayMatch = tradesSection.match(/"trades"\s*:\s*\[/);
+              
+              if (tradesArrayMatch) {
+                // Find where the trades array should end
+                let arrayContent = tradesSection.substring(tradesArrayMatch.index! + tradesArrayMatch[0].length);
+                
+                // If array is incomplete, try to close it properly
+                if (!arrayContent.includes(']') || (arrayContent.match(/\[/g) || []).length > (arrayContent.match(/\]/g) || []).length) {
+                  // Find the last complete trade object
+                  const tradeObjects = arrayContent.match(/\{[^}]*"ticker"[^}]*\}/g);
+                  if (tradeObjects && tradeObjects.length > 0) {
+                    // Use only complete trade objects
+                    const completeTrades = tradeObjects.filter(t => {
+                      try {
+                        JSON.parse(t);
+                        return true;
+                      } catch {
+                        return false;
+                      }
+                    });
+                    
+                    // Reconstruct JSON with only complete trades
+                    const rationaleMatch = jsonCandidate.match(/"rationale"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
+                    const rationale = rationaleMatch ? rationaleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').substring(0, 500) : 'Trading decision made.';
+                    
+                    result = {
+                      rationale: rationale,
+                      trades: completeTrades.map(t => {
+                        try {
+                          return JSON.parse(t);
+                        } catch {
+                          return null;
+                        }
+                      }).filter(t => t !== null)
+                    };
+                    
+                    // Add reply if present
+                    const replyMatch = jsonCandidate.match(/"reply"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
+                    if (replyMatch) {
+                      result.reply = replyMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').substring(0, 200);
+                    }
+                  }
+                }
+              }
             }
-            jsonCandidate += '}'.repeat(openBraces - closeBraces);
-          }
-          
-          try {
-            result = JSON.parse(jsonCandidate);
-          } catch (e) {
-            const rationaleMatch = jsonCandidate.match(/"rationale"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
-            if (rationaleMatch) {
-              result = {
-                rationale: rationaleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' '),
-                trades: []
-              };
-            } else {
-              throw new Error(`Invalid JSON response from AI model. Received: ${jsonText.substring(0, 300)}`);
+            
+            // If still no result, try basic repair
+            if (!result) {
+              // Close incomplete strings in rationale
+              const rationaleMatch = jsonCandidate.match(/"rationale"\s*:\s*"([^"]*)/);
+              if (rationaleMatch && !jsonCandidate.includes(rationaleMatch[0] + '"')) {
+                const rationale = rationaleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').substring(0, 500);
+                jsonCandidate = jsonCandidate.replace(/"rationale"\s*:\s*"[^"]*/, `"rationale": "${rationale.replace(/"/g, '\\"')}"`);
+              }
+              
+              // Close brackets and braces
+              if (openBrackets > closeBrackets) {
+                jsonCandidate += ']'.repeat(openBrackets - closeBrackets);
+              }
+              if (openBraces > closeBraces) {
+                jsonCandidate += '}'.repeat(openBraces - closeBraces);
+              }
+              
+              try {
+                result = JSON.parse(jsonCandidate);
+              } catch (e) {
+                // Last resort: extract rationale and return empty trades
+                const rationaleMatch = jsonCandidate.match(/"rationale"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
+                if (rationaleMatch) {
+                  result = {
+                    rationale: rationaleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').substring(0, 500),
+                    trades: []
+                  };
+                }
+              }
+            }
+          } else {
+            // JSON structure seems complete, try parsing as-is
+            try {
+              result = JSON.parse(jsonCandidate);
+            } catch (e) {
+              // Extract rationale as fallback
+              const rationaleMatch = jsonCandidate.match(/"rationale"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
+              if (rationaleMatch) {
+                result = {
+                  rationale: rationaleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').substring(0, 500),
+                  trades: []
+                };
+              }
             }
           }
         }
       }
       
+      // Final fallback: extract rationale and return empty trades
       if (!result) {
-        throw new Error(`Invalid JSON response from AI model. Received: ${jsonText.substring(0, 300)}`);
+        const rationaleMatch = jsonText.match(/"rationale"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
+        if (rationaleMatch) {
+          console.warn(`[${agent.name}] JSON repair failed, using fallback: extracted rationale only`);
+          result = {
+            rationale: rationaleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').substring(0, 500),
+            trades: []
+          };
+        } else {
+          console.error(`[${agent.name}] Complete JSON parse failure. First 500 chars: ${jsonText.substring(0, 500)}`);
+          throw new Error(`Invalid JSON response from AI model. Received: ${jsonText.substring(0, 300)}...`);
+        }
+      } else {
+        console.log(`[${agent.name}] JSON repair successful`);
       }
     }
     
     // Validate and filter trades
-    const validTrades = (result.trades || [])
+    const rawTrades = result.trades || [];
+    if (rawTrades.length === 0 && result.rationale) {
+      // Log when agent returns empty trades (might be intentional or a problem)
+      console.log(`[${agent.name}] Returned ${rawTrades.length} trades. Rationale: ${result.rationale.substring(0, 150)}...`);
+    } else if (rawTrades.length > 0) {
+      console.log(`[${agent.name}] Returned ${rawTrades.length} trade(s)`);
+    }
+    
+    const validTrades = rawTrades
       .filter((t: any) => {
         if (t.action === 'hold' || !['buy', 'sell'].includes(t.action)) {
           return false;
@@ -442,7 +783,8 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
   } catch (error) {
     const responseTime = Date.now() - startTime;
     const errorMessage = error instanceof Error ? error.message : String(error || 'Unknown error');
-    logger.logLLMCall(agent.name, agent.model, false, undefined, responseTime, errorMessage);
+    const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
+    logger.logLLMCall(agent.name, modelToUse, false, undefined, responseTime, errorMessage);
     console.error("Error fetching trade decisions:", error);
     // Never throw past the service boundary - return empty trades instead
     const communityMessages = chatContext?.messages ?? [];

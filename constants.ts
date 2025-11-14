@@ -506,7 +506,7 @@ export const S_P500_TICKERS: string[] = [
   'NWS'
 ];
 
-export const INITIAL_CASH = 10000;
+export const INITIAL_CASH = 1000000;
 export const RISK_FREE_RATE = 0.02; // Annual risk-free rate for Sharpe ratio
 export const TRADING_DAYS_PER_YEAR = 252;
 export const MAX_POSITION_SIZE_PERCENT = 0.10; // 10%

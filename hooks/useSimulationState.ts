@@ -111,40 +111,58 @@ export const useSimulationState = (simulationTypeId: string) => {
 
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error(`Simulation type '${simulationTypeId}' not found`);
+          throw new Error(`Competition '${simulationTypeId}' is not available. It may be disabled or not running.`);
         }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data: SimulationStateResponse = await response.json();
 
-      setState((prev) => ({
-        ...prev,
-        agents: data.snapshot.agents,
-        benchmarks: data.snapshot.benchmarks,
-        simulationState: {
-          day: data.snapshot.day,
-          intradayHour: data.snapshot.intradayHour,
-          isLoading: data.isLoading,
-          lastUpdated: data.snapshot.lastUpdated,
-          startDate: data.snapshot.startDate,
-          currentDate: data.snapshot.currentDate,
-          currentTimestamp: data.snapshot.currentTimestamp,
-        },
-        marketData: data.snapshot.marketData,
-        simulationMode: data.snapshot.mode,
-        chat: data.snapshot.chat,
-        simulationType: data.simulationType,
-        connectionStatus: {
-          connected: true,
-          lastChecked: new Date().toISOString(),
-          backendInfo: {
-            status: 'connected',
-            backend: 'online',
+      setState((prev) => {
+        // Merge chat messages to prevent losing messages during rapid updates
+        // If new chat has fewer messages than previous, keep the previous ones (defensive)
+        const prevMessageIds = new Set(prev.chat.messages.map(m => m.id));
+        const newMessageIds = new Set(data.snapshot.chat.messages.map(m => m.id));
+        const mergedMessages = [...data.snapshot.chat.messages];
+        
+        // Add any messages from previous state that aren't in new state (shouldn't happen, but defensive)
+        prev.chat.messages.forEach(msg => {
+          if (!newMessageIds.has(msg.id)) {
+            mergedMessages.push(msg);
+          }
+        });
+        
+        return {
+          ...prev,
+          agents: data.snapshot.agents,
+          benchmarks: data.snapshot.benchmarks,
+          simulationState: {
+            day: data.snapshot.day,
+            intradayHour: data.snapshot.intradayHour,
+            isLoading: data.isLoading,
+            lastUpdated: data.snapshot.lastUpdated,
+            startDate: data.snapshot.startDate,
+            currentDate: data.snapshot.currentDate,
+            currentTimestamp: data.snapshot.currentTimestamp,
           },
-        },
-        error: null,
-      }));
+          marketData: data.snapshot.marketData,
+          simulationMode: data.snapshot.mode,
+          chat: {
+            ...data.snapshot.chat,
+            messages: mergedMessages,
+          },
+          simulationType: data.simulationType,
+          connectionStatus: {
+            connected: true,
+            lastChecked: new Date().toISOString(),
+            backendInfo: {
+              status: 'connected',
+              backend: 'online',
+            },
+          },
+          error: null,
+        };
+      });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return; // Ignore aborted requests
@@ -201,7 +219,7 @@ export const useSimulationState = (simulationTypeId: string) => {
   }, []);
 
   const sendChatMessage = useCallback(
-    async (username: string, agentId: string, content: string) => {
+    async (payload: { username: string; agentId: string; content: string }) => {
       try {
         const response = await fetch(
           `${API_BASE_URL}/api/simulations/${simulationTypeId}/chat/messages`,
@@ -210,11 +228,7 @@ export const useSimulationState = (simulationTypeId: string) => {
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              username,
-              agentId,
-              content,
-            }),
+            body: JSON.stringify(payload),
           }
         );
 

@@ -119,8 +119,21 @@ class SimulationInstance {
         currentDate = now.toISOString();
       }
     } else {
-      startDate = getMarketOpenDate(now);
-      currentDate = startDate;
+      // Simulated mode: use HISTORICAL_SIMULATION_START_DATE if set, otherwise use current date
+      const SIMULATED_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE || process.env.SIMULATED_START_DATE;
+      if (SIMULATED_START_DATE) {
+        const date = new Date(SIMULATED_START_DATE);
+        if (!isNaN(date.getTime())) {
+          startDate = getMarketOpenDate(date);
+          currentDate = startDate;
+        } else {
+          startDate = getMarketOpenDate(now);
+          currentDate = startDate;
+        }
+      } else {
+        startDate = getMarketOpenDate(now);
+        currentDate = startDate;
+      }
     }
 
     let currentTimestamp: number | undefined;
@@ -210,7 +223,8 @@ class SimulationManager {
   async initializeAll(initialMarketData: MarketData): Promise<void> {
     this.sharedMarketData = initialMarketData;
 
-    for (const simType of SIMULATION_TYPES) {
+    const enabledTypes = SIMULATION_TYPES;
+    for (const simType of enabledTypes) {
       const instance = new SimulationInstance(simType);
       await instance.initialize(initialMarketData);
       this.simulations.set(simType.id, instance);
@@ -218,7 +232,9 @@ class SimulationManager {
 
     logger.logSimulationEvent('All simulation instances initialized', {
       count: this.simulations.size,
-      types: SIMULATION_TYPES.map(t => t.id),
+      types: enabledTypes.map(t => t.id),
+      enabledCount: enabledTypes.length,
+      totalAvailable: enabledTypes.length,
     });
   }
 

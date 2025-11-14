@@ -128,6 +128,11 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
     const { typeId } = request.params;
     const { username, agentId, content } = request.body;
 
+    if (!username || !agentId || !content) {
+      reply.code(400);
+      return { error: 'Missing required fields: username, agentId, and content are required' };
+    }
+
     try {
       const instance = simulationManager.getSimulation(typeId);
       if (!instance) {
@@ -142,7 +147,7 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
       }
 
       logger.log(LogLevel.INFO, LogCategory.SYSTEM,
-        `[CHAT] Received message for simulation ${typeId}`, { username, agentId, contentLength: content.length });
+        `[CHAT] Received message for simulation ${typeId}`, { username, agentId, contentLength: content?.length ?? 0 });
 
       const result = addUserMessageToSimulation(typeId, { username, agentId, content });
 

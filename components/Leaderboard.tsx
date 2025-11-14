@@ -102,7 +102,24 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
                   <td className="p-3 font-bold text-center">{index + 1}</td>
                   <td className="p-3 text-left">
                      <div className="flex items-center space-x-3">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: agent.color }}></div>
+                        {agent.image ? (
+                          <img 
+                            src={agent.image} 
+                            alt={agent.name}
+                            className="w-8 h-8 rounded-full object-cover border border-arena-border"
+                            onError={(e) => {
+                              // Fallback to color dot if image fails to load
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const fallback = document.createElement('div');
+                              fallback.className = 'w-3 h-3 rounded-full';
+                              fallback.style.backgroundColor = agent.color;
+                              target.parentNode?.insertBefore(fallback, target);
+                            }}
+                          />
+                        ) : (
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: agent.color }}></div>
+                        )}
                         <div>
                             <div className="font-semibold text-arena-text-primary">{agent.name}</div>
                             {showModelNames && <div className="text-xs text-arena-text-secondary">{agent.model}</div>}

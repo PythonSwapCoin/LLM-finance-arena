@@ -115,6 +115,7 @@ export interface Agent {
   performanceHistory: PerformanceMetrics[];
   rationale: string;
   rationaleHistory: { [day: number]: string };
+  image?: string; // Path to agent image/logo
   memory?: {
     recentTrades: Trade[];
     pastRationales: string[];
