@@ -4,7 +4,8 @@ import { InformationCircleIcon } from './icons/Icons';
 
 interface LeaderboardProps {
   agents: Agent[];
-  onSelectAgent: (agent: Agent) => void;
+  onAgentClick: (agent: Agent) => void;
+  showModelNames?: boolean;
 }
 
 type SortKey = keyof PerformanceMetrics | 'name';
@@ -32,7 +33,7 @@ const columns: { key: SortKey; label: string; format: (val: any) => string; clas
   { key: 'annualizedVolatility', label: 'Volatility (Ann.)', format: formatPercent, className: 'text-right' },
 ];
 
-export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent }) => {
+export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, showModelNames = true }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'totalReturn', direction: 'desc' });
   
   const sortedAgents = useMemo(() => {
@@ -104,7 +105,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: agent.color }}></div>
                         <div>
                             <div className="font-semibold text-arena-text-primary">{agent.name}</div>
-                            <div className="text-xs text-arena-text-secondary">{agent.model}</div>
+                            {showModelNames && <div className="text-xs text-arena-text-secondary">{agent.model}</div>}
                         </div>
                     </div>
                   </td>
@@ -123,7 +124,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onSelectAgent 
                     );
                   })}
                   <td className="p-3 text-center">
-                      <button onClick={() => onSelectAgent(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
+                      <button onClick={() => onAgentClick(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
                           <InformationCircleIcon className="h-6 w-6" />
                       </button>
                   </td>
