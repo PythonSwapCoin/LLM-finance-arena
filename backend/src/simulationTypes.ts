@@ -1,5 +1,5 @@
-import { Agent, Portfolio } from './types';
-import { AGENT_COLORS, UNIFIED_SYSTEM_PROMPT, INITIAL_CASH } from './constants';
+import { Agent, Portfolio } from './types.js';
+import { AGENT_COLORS, UNIFIED_SYSTEM_PROMPT, INITIAL_CASH } from './constants.js';
 
 export interface TraderConfig {
   id: string;
