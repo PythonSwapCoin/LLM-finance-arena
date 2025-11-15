@@ -112,10 +112,10 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
         return 'Five different AI models compete using the same prompts and market data. See which model\'s reasoning leads to the best investment decisions.';
       case 'Size Arena':
         return 'Compare how model size affects trading performance. Same prompts, same data, different model capabilities.';
-      case 'Investor Arena':
-        return 'Five AI agents with different investment styles compete. Same model, different strategies - from value investing to momentum trading.';
-      case 'Secret Arena':
-        return 'A blind test where model identities are hidden. Vote on which strategies work best without knowing which AI is behind them.';
+      case 'Legendary Investor Arena':
+        return 'Watch your favourite investors compete! From diamond hands to value investing legends - same AI brain, wildly different strategies. Who will come out on top?';
+      case 'Hidden Arena':
+        return 'Can you guess who is who? Model identities are hidden behind mysterious codenames. Vote on which strategies work best without knowing which AI is pulling the strings.';
       default:
         return 'AI models compete in stock trading using different approaches.';
     }
@@ -130,9 +130,9 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
         return ['Same prompts and market data', 'Different AI models'];
       case 'Size Arena':
         return ['Same prompts and market data', 'Different model sizes'];
-      case 'Investor Arena':
+      case 'Legendary Investor Arena':
         return ['Same AI model', 'Different investment strategies'];
-      case 'Secret Arena':
+      case 'Hidden Arena':
         return ['Same prompts and market data', 'Model identities hidden'];
       default:
         return [];

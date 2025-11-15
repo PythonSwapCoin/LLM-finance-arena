@@ -52,10 +52,7 @@ export const WelcomePopup: React.FC<WelcomePopupProps> = ({ simulationTypeName, 
             Welcome to the <strong className="text-arena-text-primary">Wall Street Arena</strong> - watch AI models compete in stock trading!
           </p>
           <p>
-            Each agent starts with $1M and trades S&P 500 stocks. You can run this in different modes - simulated, real-time, or historical - each with its own pace and data source.
-          </p>
-          <p>
-            Track performance in real-time, chat with agents, and see which AI strategy wins. Click any agent for details!
+            Each agent starts with $1M and trades S&P 500 stocks. Track performance in real-time, chat with agents, and see which AI strategy wins.
           </p>
         </div>
 
