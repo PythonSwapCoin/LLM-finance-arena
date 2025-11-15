@@ -5,6 +5,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
 import type { MarketData } from '../types.js';
 import { updateChatMessagesStatusForSimulation } from '../services/multiSimChatService.js';
+import { updateTimerState } from '../services/timerService.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -338,6 +339,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         tradeWindowSimulation(typeId)
       );
       await Promise.all(tradePromises);
+
+      // Update timer state after trade window execution
+      updateTimerState();
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 'Trade window handler error', { error });
     }
@@ -394,6 +398,10 @@ export const startMultiSimScheduler = async (): Promise<void> => {
     mode,
     simulationCount: simulations.size,
   });
+
+  // Initialize timer state
+  const { initializeTimer } = await import('../services/timerService.js');
+  initializeTimer();
 };
 
 /**

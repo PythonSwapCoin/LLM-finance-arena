@@ -180,6 +180,14 @@ class ApiClient {
       body: JSON.stringify(payload),
     });
   }
+
+  async getTimer(): Promise<{
+    countdownSeconds: number;
+    nextTradeWindowTimestamp: number;
+    nextTradeWindowISO: string;
+  }> {
+    return this.request('/timer');
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE);

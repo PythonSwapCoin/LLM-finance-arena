@@ -12,6 +12,7 @@ import { createInitialMarketData } from './services/marketDataService.js';
 import { S_P500_TICKERS } from './constants.js';
 import { logger, LogLevel, LogCategory } from './services/logger.js';
 import { startMultiSimScheduler, stopMultiSimScheduler } from './simulation/multiSimScheduler.js';
+import { initializeTimer } from './services/timerService.js';
 
 const PORT = parseInt(process.env.BACKEND_PORT || '8080', 10);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
@@ -116,6 +117,9 @@ const initializeAllSimulations = async (): Promise<void> => {
   // Auto-start multi-simulation scheduler
   await startMultiSimScheduler();
   logger.logSimulationEvent('Multi-simulation scheduler started', {});
+
+  // Initialize timer service
+  initializeTimer();
 };
 
 // Start server

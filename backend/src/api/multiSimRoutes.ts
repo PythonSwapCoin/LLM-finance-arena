@@ -5,6 +5,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { createInitialMarketData, getMarketDataTelemetry } from '../services/marketDataService.js';
 import { S_P500_TICKERS } from '../constants.js';
 import { addUserMessageToSimulation } from '../services/multiSimChatService.js';
+import { getTimerState } from '../services/timerService.js';
 import type { ChatMessageResponse } from './dto.js';
 
 export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<void> => {
@@ -188,6 +189,16 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
     return {
       isRunning: isSchedulerRunning(),
       timestamp: new Date().toISOString(),
+    };
+  });
+
+  // Get timer countdown for next trade window
+  fastify.get('/api/timer', async () => {
+    const timerState = getTimerState();
+    return {
+      countdownSeconds: timerState.countdownSeconds,
+      nextTradeWindowTimestamp: timerState.nextTradeWindowTimestamp,
+      nextTradeWindowISO: new Date(timerState.nextTradeWindowTimestamp).toISOString(),
     };
   });
 };

@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import type { Agent, ChatState, ChatMessage, SimulationMode } from '../types';
-import { calculateNextChatDelivery, formatCountdownMessage } from '../utils/chatCountdown';
+import { formatCountdownMessage } from '../utils/chatCountdown';
+import { apiClient } from '../services/apiClient';
 
 interface LiveChatProps {
   chat: ChatState | null;
@@ -56,29 +57,56 @@ export const LiveChat: React.FC<LiveChatProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+  const [nextTradeWindowTimestamp, setNextTradeWindowTimestamp] = useState<number | null>(null);
 
-  // Calculate and update countdown timer
+  // Fetch timer from server and update countdown
   useEffect(() => {
     if (!chat?.config.enabled) {
       setCountdownSeconds(null);
+      setNextTradeWindowTimestamp(null);
       return;
     }
 
-    // Calculate initial countdown
-    const result = calculateNextChatDelivery(intradayHour, simulationMode);
-    setCountdownSeconds(result.totalSeconds);
+    // Fetch timer from server
+    const fetchTimer = async () => {
+      try {
+        const timer = await apiClient.getTimer();
+        setNextTradeWindowTimestamp(timer.nextTradeWindowTimestamp);
+        setCountdownSeconds(timer.countdownSeconds);
+      } catch (error) {
+        console.error('Failed to fetch timer:', error);
+        // Fallback to client-side calculation if server fails
+        const { calculateNextChatDelivery } = await import('../utils/chatCountdown');
+        const result = calculateNextChatDelivery(intradayHour, simulationMode);
+        setCountdownSeconds(result.totalSeconds);
+      }
+    };
 
-    // Update every second for real-time countdown
+    fetchTimer();
+
+    // Update countdown every second using server timestamp
+    let lastServerSync = Date.now();
     const interval = setInterval(() => {
-      setCountdownSeconds((prev) => {
-        if (prev === null || prev <= 0) {
-          // Recalculate if we've reached zero or need fresh data
-          const newResult = calculateNextChatDelivery(intradayHour, simulationMode);
-          return newResult.totalSeconds;
+      if (nextTradeWindowTimestamp !== null) {
+        const now = Date.now();
+        const secondsUntilNext = Math.max(0, Math.floor((nextTradeWindowTimestamp - now) / 1000));
+        setCountdownSeconds(secondsUntilNext);
+
+        // Refresh timer from server every 30 seconds to stay in sync
+        if (now - lastServerSync > 30000) {
+          lastServerSync = now;
+          fetchTimer().catch(console.error);
         }
-        // Decrement by 1 second
-        return prev - 1;
-      });
+      } else {
+        // Fallback: decrement if we don't have server timestamp
+        setCountdownSeconds((prev) => {
+          if (prev === null || prev <= 0) {
+            fetchTimer().catch(console.error);
+            return prev;
+          }
+          return prev - 1;
+        });
+      }
     }, 1000);
 
     return () => clearInterval(interval);
