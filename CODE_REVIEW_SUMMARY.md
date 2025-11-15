@@ -134,3 +134,4 @@ VITE_OPENROUTER_API_KEY=your_key
 - State is managed in React (in-memory)
 - For production, build with `npm run build` and serve the `dist/` folder
 
+

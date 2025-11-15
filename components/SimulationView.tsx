@@ -46,7 +46,7 @@ export function SimulationView() {
   };
 
   const handleBackToSelector = () => {
-    navigate('/');
+    navigate('/menu');
   };
 
   // Show welcome popup for Wall Street Arena on first load

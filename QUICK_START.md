@@ -121,3 +121,4 @@ The app will start at `http://localhost:3000`
 - See [ENV_SETUP.md](./ENV_SETUP.md) for detailed environment configuration
 - See [README.md](./README.md) for full documentation
 
+

@@ -163,3 +163,4 @@ OPENROUTER_API_KEY=...
 - `getSimulationMode()` and `isHistoricalSimulationComplete()` in frontend should use API state
 - Consider WebSocket support in Phase 2 to reduce polling overhead
 
+
