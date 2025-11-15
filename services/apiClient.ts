@@ -1,7 +1,8 @@
 import type { MarketDataTelemetry, ChatState, ChatMessage } from '../types';
+import { getApiBaseUrl } from '../utils/apiConfig';
 
 // API client for backend communication
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
+const API_BASE = `${getApiBaseUrl()}/api`;
 
 export interface SimulationStateResponse {
   snapshot: {

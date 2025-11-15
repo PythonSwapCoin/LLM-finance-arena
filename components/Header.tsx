@@ -36,7 +36,8 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
   useEffect(() => {
     const fetchCompetitions = async () => {
       try {
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+        const { getApiBaseUrl } = await import('../utils/apiConfig');
+        const API_BASE_URL = getApiBaseUrl();
         const response = await fetch(`${API_BASE_URL}/api/simulations/types`);
         if (response.ok) {
           const data = await response.json();

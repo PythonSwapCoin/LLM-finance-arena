@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getApiBaseUrl } from '../utils/apiConfig';
 
 interface SimulationType {
   id: string;
@@ -19,7 +20,7 @@ export function SimulationSelector() {
   useEffect(() => {
     const fetchTypes = async () => {
       try {
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+        const API_BASE_URL = getApiBaseUrl();
         const response = await fetch(`${API_BASE_URL}/api/simulations/types`);
         if (!response.ok) {
           throw new Error('Failed to fetch competition types');

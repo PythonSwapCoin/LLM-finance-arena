@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Agent, Benchmark, MarketData, SimulationMode, ChatState } from '../types';
+import { getApiBaseUrl } from '../utils/apiConfig';
 
 interface SimulationType {
   id: string;
@@ -62,7 +63,7 @@ export interface SimulationState {
   error: string | null;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+const API_BASE_URL = getApiBaseUrl();
 const POLL_INTERVAL = 5000; // Poll every 5 seconds
 const CONNECTION_CHECK_INTERVAL = 30000; // Check connection every 30 seconds
 
