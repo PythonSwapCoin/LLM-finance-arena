@@ -9,6 +9,7 @@ interface SimulationType {
   chatEnabled: boolean;
   showModelNames: boolean;
   agentCount: number;
+  enabled?: boolean; // Optional for backward compatibility
 }
 
 export function SimulationSelector() {
@@ -37,7 +38,11 @@ export function SimulationSelector() {
     fetchTypes();
   }, []);
 
-  const handleSelectSimulation = (typeId: string) => {
+  const handleSelectSimulation = (typeId: string, enabled: boolean) => {
+    if (!enabled) {
+      // Don't navigate if disabled
+      return;
+    }
     navigate(`/simulation/${typeId}`);
   };
 
@@ -86,22 +91,37 @@ export function SimulationSelector() {
 
         {/* Competition Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {types.map((type) => (
-            <div
-              key={type.id}
-              onClick={() => handleSelectSimulation(type.id)}
-              className="group cursor-pointer bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 transform hover:scale-[1.02]"
-            >
-              {/* Card Header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-blue-400 transition-colors">
-                    {type.name}
-                  </h2>
-                  <p className="text-slate-400 text-sm leading-relaxed">
-                    {type.description}
-                  </p>
-                </div>
+          {types.map((type) => {
+            const isEnabled = type.enabled !== false; // Default to enabled if not specified
+            return (
+              <div
+                key={type.id}
+                onClick={() => handleSelectSimulation(type.id, isEnabled)}
+                className={`group rounded-xl p-6 transition-all duration-300 ${
+                  isEnabled
+                    ? 'cursor-pointer bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10 transform hover:scale-[1.02]'
+                    : 'cursor-not-allowed bg-slate-800/30 backdrop-blur-sm border border-slate-700/30 opacity-60'
+                }`}
+              >
+                {/* Card Header */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <h2 className={`text-2xl font-bold mb-2 transition-colors ${
+                      isEnabled
+                        ? 'text-white group-hover:text-blue-400'
+                        : 'text-slate-500'
+                    }`}>
+                      {type.name}
+                      {!isEnabled && (
+                        <span className="ml-2 text-sm text-slate-500 italic">(Coming Soon)</span>
+                      )}
+                    </h2>
+                    <p className={`text-sm leading-relaxed ${
+                      isEnabled ? 'text-slate-400' : 'text-slate-500'
+                    }`}>
+                      {type.description}
+                    </p>
+                  </div>
                 <div className="ml-4 text-3xl group-hover:scale-110 transition-transform">
                   {type.id === 'multi-model' && '🤖'}
                   {type.id === 'model-sizes' && '📏'}
@@ -135,12 +155,19 @@ export function SimulationSelector() {
               </div>
 
               {/* Enter Button */}
-              <div className="mt-6 flex items-center justify-end text-blue-400 group-hover:text-blue-300 font-medium">
-                <span className="mr-2">Enter Arena</span>
-                <span className="group-hover:translate-x-1 transition-transform">→</span>
-              </div>
+              {isEnabled ? (
+                <div className="mt-6 flex items-center justify-end text-blue-400 group-hover:text-blue-300 font-medium">
+                  <span className="mr-2">Enter Arena</span>
+                  <span className="group-hover:translate-x-1 transition-transform">→</span>
+                </div>
+              ) : (
+                <div className="mt-6 flex items-center justify-end text-slate-500 font-medium">
+                  <span className="mr-2">Coming Soon</span>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Footer Info */}

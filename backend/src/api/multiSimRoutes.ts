@@ -8,9 +8,9 @@ import { addUserMessageToSimulation } from '../services/multiSimChatService.js';
 import type { ChatMessageResponse } from './dto.js';
 
 export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<void> => {
-  // Get list of all simulation types
+  // Get list of all simulation types (including disabled ones)
   fastify.get('/api/simulations/types', async () => {
-    const types = simulationManager.getSimulationTypes();
+    const types = simulationManager.getAllSimulationTypesWithStatus();
     return {
       types: types.map(t => ({
         id: t.id,
@@ -19,6 +19,7 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
         chatEnabled: t.chatEnabled,
         showModelNames: t.showModelNames,
         agentCount: t.traderConfigs.length,
+        enabled: t.enabled,
       })),
     };
   });
@@ -29,6 +30,15 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
     const instance = simulationManager.getSimulation(typeId);
 
     if (!instance) {
+      // Check if this simulation type exists but is disabled
+      const allTypes = simulationManager.getAllSimulationTypesWithStatus();
+      const simType = allTypes.find(t => t.id === typeId);
+      
+      if (simType && !simType.enabled) {
+        reply.code(403); // Forbidden - exists but disabled
+        return { error: `Simulation type '${typeId}' is currently disabled` };
+      }
+      
       reply.code(404);
       return { error: `Simulation type '${typeId}' not found` };
     }
@@ -123,14 +133,14 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
   // Send chat message to a specific simulation
   fastify.post<{
     Params: { typeId: string };
-    Body: { username: string; agentId: string; content: string };
+    Body: { username: string; agentId?: string; content: string };
   }>('/api/simulations/:typeId/chat/messages', async (request, reply): Promise<ChatMessageResponse | { error: string }> => {
     const { typeId } = request.params;
     const { username, agentId, content } = request.body;
 
-    if (!username || !agentId || !content) {
+    if (!username || !content) {
       reply.code(400);
-      return { error: 'Missing required fields: username, agentId, and content are required' };
+      return { error: 'Missing required fields: username and content are required' };
     }
 
     try {

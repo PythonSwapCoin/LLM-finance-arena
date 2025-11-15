@@ -2,11 +2,26 @@
 
 Place agent images/logos in this folder with the following filenames:
 
+## Investor Arena (Prompt Strategies)
 - `ark-invest.png` - ARK Invest logo for "ARKian Visionary"
 - `cramer.png` - Jim Cramer/Mad Money logo for "Cramer Cultist"
 - `big-short.png` - Logo/icon for "The Big Short Guy"
 - `wsb.png` - WallStreetBets logo/icon for "WSB Degenerate"
 - `buffett.png` - Warren Buffett/Berkshire Hathaway logo for "The Warren Buffett Disciple"
+
+## Wall Street Arena (Multi-Model)
+- `google.png` - Google logo for Gemini models
+- `anthropic.png` - Anthropic logo for Claude models
+- `xai.png` - xAI logo for Grok models
+- `openai.png` - OpenAI logo for GPT models
+- `qwen.png` - Qwen logo for Qwen models
+
+## Secret Arena (Blind Test)
+- `phoenix.png` - Image/icon for "Phoenix" agent
+- `shadow.png` - Image/icon for "Shadow" agent
+- `nova.png` - Image/icon for "Nova" agent
+- `zenith.png` - Image/icon for "Zenith" agent
+- `nexus.png` - Image/icon for "Nexus" agent
 
 ## Image Requirements
 

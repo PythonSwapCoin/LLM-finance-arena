@@ -167,6 +167,8 @@ export function SimulationView() {
               agents={agents}
               currentRoundId={`${simState.day}-${simState.intradayHour.toFixed(3)}`}
               onSendMessage={sendChatMessage}
+              simulationMode={simulationMode}
+              intradayHour={simState.intradayHour}
             />
           )}
         </div>

@@ -662,11 +662,6 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           <span className="ml-2 text-arena-text-tertiary">(Click chart to show all)</span>
         </div>
       )}
-      {!selectedParticipantId && !isCompactViewport && (
-        <div className="absolute top-2 left-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
-          Hover to highlight • Click to focus
-        </div>
-      )}
       <div style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}>
         <ResponsiveContainer width="100%" height={400} minHeight={400}>
       <LineChart

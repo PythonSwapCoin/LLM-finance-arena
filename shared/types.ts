@@ -71,8 +71,8 @@ export type ChatMessageStatus = 'pending' | 'delivered' | 'responded' | 'ignored
 
 export interface ChatMessage {
   id: string;
-  agentId: string;
-  agentName: string;
+  agentId?: string; // Optional - undefined for general chat messages
+  agentName?: string; // Optional - undefined for general chat messages
   sender: string;
   senderType: ChatSenderType;
   content: string;

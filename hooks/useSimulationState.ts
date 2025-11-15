@@ -220,7 +220,7 @@ export const useSimulationState = (simulationTypeId: string) => {
   }, []);
 
   const sendChatMessage = useCallback(
-    async (payload: { username: string; agentId: string; content: string }) => {
+    async (payload: { username: string; agentId?: string; content: string }) => {
       try {
         const response = await fetch(
           `${API_BASE_URL}/api/simulations/${simulationTypeId}/chat/messages`,
