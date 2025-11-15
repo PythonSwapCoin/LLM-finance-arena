@@ -21,6 +21,7 @@ interface CompetitionType {
   chatEnabled: boolean;
   showModelNames: boolean;
   agentCount: number;
+  enabled?: boolean; // Optional for backward compatibility
 }
 
 export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatus, mode, simulationTypeName, marketTelemetry }) => {
@@ -93,7 +94,11 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
   const currentCompetition = competitions.find(c => c.id === simulationId);
   const displayName = simulationTypeName || currentCompetition?.name || 'Select Competition';
 
-  const handleCompetitionSelect = (competitionId: string) => {
+  const handleCompetitionSelect = (competitionId: string, enabled: boolean) => {
+    if (!enabled) {
+      // Don't navigate if disabled
+      return;
+    }
     if (competitionId !== simulationId) {
       navigate(`/simulation/${competitionId}`);
     }
@@ -127,23 +132,40 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
                 <div className="py-2">
                   {competitions.map((competition) => {
                     const isCurrent = competition.id === simulationId;
+                    const isEnabled = competition.enabled !== false; // Default to enabled if not specified
                     return (
                       <button
                         key={competition.id}
-                        onClick={() => handleCompetitionSelect(competition.id)}
-                        className={`w-full text-left px-4 py-3 hover:bg-arena-bg transition-colors ${
-                          isCurrent ? 'bg-blue-500/10 border-l-2 border-blue-500' : ''
+                        onClick={() => handleCompetitionSelect(competition.id, isEnabled)}
+                        disabled={!isEnabled}
+                        className={`w-full text-left px-4 py-3 transition-colors ${
+                          !isEnabled
+                            ? 'opacity-50 cursor-not-allowed'
+                            : isCurrent
+                            ? 'bg-blue-500/10 border-l-2 border-blue-500 hover:bg-arena-bg'
+                            : 'hover:bg-arena-bg'
                         }`}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0">
-                            <div className={`font-medium ${isCurrent ? 'text-blue-400' : 'text-arena-text-primary'}`}>
+                            <div className={`font-medium ${
+                              !isEnabled
+                                ? 'text-arena-text-tertiary'
+                                : isCurrent
+                                ? 'text-blue-400'
+                                : 'text-arena-text-primary'
+                            }`}>
                               {competition.name}
                               {isCurrent && (
                                 <span className="ml-2 text-xs text-blue-400">(Current)</span>
                               )}
+                              {!isEnabled && (
+                                <span className="ml-2 text-xs text-arena-text-tertiary italic">(Coming Soon)</span>
+                              )}
                             </div>
-                            <div className="text-xs text-arena-text-secondary mt-1 line-clamp-2">
+                            <div className={`text-xs mt-1 line-clamp-2 ${
+                              !isEnabled ? 'text-arena-text-tertiary' : 'text-arena-text-secondary'
+                            }`}>
                               {competition.description}
                             </div>
                           </div>

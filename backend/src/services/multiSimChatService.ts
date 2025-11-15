@@ -14,7 +14,7 @@ import { getSimInterval } from '../simulation/multiSimScheduler.js';
 
 interface UserMessageInput {
   username: string;
-  agentId: string;
+  agentId?: string; // Optional - undefined for general chat
   content: string;
 }
 
@@ -48,10 +48,13 @@ export const addUserMessageToSimulation = (
     throw new Error('Chat is disabled');
   }
 
-  // Validate agent exists
-  const agent = snapshot.agents.find(a => a.id === input.agentId);
-  if (!agent) {
-    throw new Error(`Agent '${input.agentId}' not found`);
+  // Validate agent exists (if agentId is provided)
+  let agent: typeof snapshot.agents[0] | undefined;
+  if (input.agentId) {
+    agent = snapshot.agents.find(a => a.id === input.agentId);
+    if (!agent) {
+      throw new Error(`Agent '${input.agentId}' not found`);
+    }
   }
 
   // Sanitize and validate username
@@ -87,22 +90,24 @@ export const addUserMessageToSimulation = (
     throw new Error('You have reached the message limit for this round.');
   }
 
-  // Check messages for this agent in this round
-  const agentMessagesThisRound = chat.messages.filter(message =>
-    message.senderType === 'user'
-    && message.roundId === roundId
-    && message.agentId === agent.id
-  ).length;
+  // Check messages for this agent in this round (only if targeting an agent)
+  if (agent) {
+    const agentMessagesThisRound = chat.messages.filter(message =>
+      message.senderType === 'user'
+      && message.roundId === roundId
+      && message.agentId === agent.id
+    ).length;
 
-  if (agentMessagesThisRound >= chat.config.maxMessagesPerAgent) {
-    throw new Error('This agent already received the maximum community messages for this round.');
+    if (agentMessagesThisRound >= chat.config.maxMessagesPerAgent) {
+      throw new Error('This agent already received the maximum community messages for this round.');
+    }
   }
 
   // Create new message using correct ChatMessage interface
   const newMessage: ChatMessage = {
     id: randomUUID(),
-    agentId: agent.id,
-    agentName: agent.name,
+    agentId: agent?.id,
+    agentName: agent?.name,
     sender: username,
     senderType: 'user',
     content: sanitizedContent,

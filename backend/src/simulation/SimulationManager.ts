@@ -1,5 +1,5 @@
 import type { SimulationSnapshot, Agent, Benchmark, MarketData, ChatState } from '../types.js';
-import { SIMULATION_TYPES, SimulationType, createAgentsFromConfigs } from '../simulationTypes.js';
+import { SIMULATION_TYPES, SimulationType, createAgentsFromConfigs, getAllSimulationTypes } from '../simulationTypes.js';
 import { INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getSimulationMode } from '../services/marketDataService.js';
@@ -224,17 +224,27 @@ class SimulationManager {
     this.sharedMarketData = initialMarketData;
 
     const enabledTypes = SIMULATION_TYPES;
+    const allTypes = getAllSimulationTypes();
+    
+    // Log which simulations are enabled/disabled
+    logger.logSimulationEvent('Simulation types status', {
+      enabled: enabledTypes.map(t => t.id),
+      disabled: allTypes.filter(t => !t.enabled).map(t => t.id),
+      totalAvailable: allTypes.length,
+    });
+
+    // Only initialize enabled simulations
     for (const simType of enabledTypes) {
       const instance = new SimulationInstance(simType);
       await instance.initialize(initialMarketData);
       this.simulations.set(simType.id, instance);
     }
 
-    logger.logSimulationEvent('All simulation instances initialized', {
-      count: this.simulations.size,
-      types: enabledTypes.map(t => t.id),
+    logger.logSimulationEvent('Simulation instances initialized', {
+      initializedCount: this.simulations.size,
+      initializedTypes: enabledTypes.map(t => t.id),
       enabledCount: enabledTypes.length,
-      totalAvailable: enabledTypes.length,
+      totalAvailable: allTypes.length,
     });
   }
 
@@ -300,10 +310,17 @@ class SimulationManager {
   }
 
   /**
-   * Get list of all simulation types
+   * Get list of all simulation types (only enabled ones)
    */
   getSimulationTypes(): SimulationType[] {
     return SIMULATION_TYPES;
+  }
+
+  /**
+   * Get all simulation types including disabled ones with enabled status
+   */
+  getAllSimulationTypesWithStatus(): Array<SimulationType & { enabled: boolean }> {
+    return getAllSimulationTypes();
   }
 }
 

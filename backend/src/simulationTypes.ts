@@ -266,26 +266,31 @@ const BLIND_TEST_CONFIGS: TraderConfig[] = [
     id: 'agent-phoenix',
     name: 'Phoenix',
     model: 'google/gemini-2.5-flash',
+    image: '/images/agents/phoenix.png',
   },
   {
     id: 'agent-shadow',
     name: 'Shadow',
     model: 'anthropic/claude-3-haiku',
+    image: '/images/agents/shadow.png',
   },
   {
     id: 'agent-nova',
     name: 'Nova',
     model: 'x-ai/grok-4-fast',
+    image: '/images/agents/nova.png',
   },
   {
     id: 'agent-zenith',
     name: 'Zenith',
     model: 'openai/gpt-5-chat',
+    image: '/images/agents/zenith.png',
   },
   {
     id: 'agent-nexus',
     name: 'Nexus',
     model: 'qwen/qwen-2.5-72b-instruct',
+    image: '/images/agents/nexus.png',
   },
 ];
 
@@ -326,16 +331,29 @@ const ALL_SIMULATION_TYPES: SimulationType[] = [
 
 // Filter simulation types based on environment variables
 // Set to 'false' to disable a simulation type, defaults to enabled
-const isSimulationEnabled = (simId: string): boolean => {
+export const isSimulationEnabled = (simId: string): boolean => {
   const envVar = `SIM_ENABLE_${simId.toUpperCase().replace(/-/g, '_')}`;
   const envValue = process.env[envVar];
-  // Default to enabled if not set, only disable if explicitly set to 'false'
-  return envValue !== 'false';
+  // Default to enabled if not set, only disable if explicitly set to 'false' (case-insensitive)
+  // Handle both string 'false' and boolean false, and also 'False', 'FALSE', etc.
+  if (envValue === undefined || envValue === null) {
+    return true; // Default to enabled
+  }
+  const normalizedValue = String(envValue).toLowerCase().trim();
+  return normalizedValue !== 'false' && normalizedValue !== '0' && normalizedValue !== 'no' && normalizedValue !== 'off';
 };
 
 export const SIMULATION_TYPES: SimulationType[] = ALL_SIMULATION_TYPES.filter(
   simType => isSimulationEnabled(simType.id)
 );
+
+// Export all simulation types (including disabled ones) for API
+export const getAllSimulationTypes = (): Array<SimulationType & { enabled: boolean }> => {
+  return ALL_SIMULATION_TYPES.map(simType => ({
+    ...simType,
+    enabled: isSimulationEnabled(simType.id),
+  }));
+};
 
 // Helper function to create agents from configs
 const initialPortfolio: Portfolio = {

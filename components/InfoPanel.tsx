@@ -1,5 +1,5 @@
-import React from 'react';
-import type { Agent } from '../types';
+import React, { useMemo } from 'react';
+import type { Agent, PerformanceMetrics } from '../types';
 
 interface InfoPanelProps {
   agents: Agent[];
@@ -14,6 +14,46 @@ interface InfoPanelProps {
   simulationTypeName?: string;
   simulationTypeDescription?: string;
 }
+
+interface BestPerformer {
+  agent: Agent;
+  return: number;
+  value: number;
+}
+
+// Helper to get performance at end of a specific day
+const getPerformanceAtDay = (agent: Agent, targetDay: number): PerformanceMetrics | null => {
+  // Find the last performance entry for that day (could be intraday)
+  const dayEntries = agent.performanceHistory.filter(p => Math.floor(p.timestamp) === targetDay);
+  if (dayEntries.length === 0) return null;
+  // Return the last entry for that day (highest intraday hour)
+  return dayEntries[dayEntries.length - 1];
+};
+
+// Calculate best performer for a period
+const calculateBestPerformer = (agents: Agent[], startDay: number, endDay: number): BestPerformer | null => {
+  const validAgents: BestPerformer[] = [];
+  
+  for (const agent of agents) {
+    const startPerf = getPerformanceAtDay(agent, startDay);
+    const endPerf = getPerformanceAtDay(agent, endDay);
+    
+    if (startPerf && endPerf) {
+      const periodReturn = (endPerf.totalValue / startPerf.totalValue) - 1;
+      validAgents.push({
+        agent,
+        return: periodReturn,
+        value: endPerf.totalValue,
+      });
+    }
+  }
+  
+  if (validAgents.length === 0) return null;
+  
+  return validAgents.reduce((best, current) => 
+    current.return > best.return ? current : best
+  );
+};
 
 export const InfoPanel: React.FC<InfoPanelProps> = ({
   agents,
@@ -46,6 +86,58 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
         return currentPerf.totalValue < minPerf.totalValue ? agent : min;
       }, agentsWithPerf[0])
     : null;
+
+  // Calculate best performers for different periods
+  const bestOfDay = useMemo(() => {
+    if (day < 1) return null;
+    return calculateBestPerformer(agents, day - 1, day - 1);
+  }, [agents, day]);
+
+  const bestOfWeek = useMemo(() => {
+    if (day < 7) return null;
+    return calculateBestPerformer(agents, Math.max(0, day - 7), day - 1);
+  }, [agents, day]);
+
+  const bestOfMonth = useMemo(() => {
+    if (day < 30) return null;
+    return calculateBestPerformer(agents, Math.max(0, day - 30), day - 1);
+  }, [agents, day]);
+
+  // Get simulation-specific description
+  const getSimulationDescription = (): string => {
+    if (!simulationTypeName) return '';
+    
+    switch (simulationTypeName) {
+      case 'Wall Street Arena':
+        return 'Five different AI models compete using the same prompts and market data. See which model\'s reasoning leads to the best investment decisions.';
+      case 'Size Arena':
+        return 'Compare how model size affects trading performance. Same prompts, same data, different model capabilities.';
+      case 'Investor Arena':
+        return 'Five AI agents with different investment styles compete. Same model, different strategies - from value investing to momentum trading.';
+      case 'Secret Arena':
+        return 'A blind test where model identities are hidden. Vote on which strategies work best without knowing which AI is behind them.';
+      default:
+        return 'AI models compete in stock trading using different approaches.';
+    }
+  };
+
+  // Get mode-specific rules
+  const getModeSpecificRules = (): string[] => {
+    if (!simulationTypeName) return [];
+    
+    switch (simulationTypeName) {
+      case 'Wall Street Arena':
+        return ['Same prompts and market data', 'Different AI models'];
+      case 'Size Arena':
+        return ['Same prompts and market data', 'Different model sizes'];
+      case 'Investor Arena':
+        return ['Same AI model', 'Different investment strategies'];
+      case 'Secret Arena':
+        return ['Same prompts and market data', 'Model identities hidden'];
+      default:
+        return [];
+    }
+  };
 
   const containerClasses =
     variant === 'mobile'
@@ -85,9 +177,6 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
                 {historicalComplete && simulationMode === 'historical' && (
                   <span className="text-xs text-blue-400 block mt-1 font-semibold">✓ Historical Week Complete (5 days)</span>
                 )}
-                  {simulationMode === 'historical' && !historicalComplete && (
-                    <span className="text-xs text-blue-400 block mt-1">Historical Mode: Day {day}/4</span>
-                  )}
             </div>
         </div>
 
@@ -113,31 +202,61 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
         )}
 
       <div>
-        <h3 className="text-base font-bold text-arena-text-primary mb-2">A Better Benchmark</h3>
-        <p className="text-arena-text-secondary leading-relaxed">
-            LLM Trading Arena is the first benchmark designed to measure AI's investing abilities. Each model is given identical prompts and input data in a simulated, real-time market.
+        <h3 className="text-base font-bold text-arena-text-primary mb-2">About This Simulation</h3>
+        <p className="text-arena-text-secondary leading-relaxed text-sm">
+          {getSimulationDescription()}
         </p>
       </div>
 
-      <div>
-        <h3 className="text-base font-bold text-arena-text-primary mb-3">The Contestants</h3>
-        <ul className="space-y-2">
-            {agents.map(agent => (
-                <li key={agent.id} className="flex items-center space-x-3">
-                    <div className="w-3 h-3 rounded-full" style={{backgroundColor: agent.color}}></div>
-                    <span className="text-arena-text-secondary">{agent.name}</span>
-                </li>
-            ))}
-        </ul>
-      </div>
+      {/* Best Performers Tables */}
+      {(bestOfDay || bestOfWeek || bestOfMonth) && (
+        <div>
+          <h3 className="text-base font-bold text-arena-text-primary mb-2">Best Performers</h3>
+          <div className="space-y-2 text-xs">
+            {bestOfDay && (
+              <div className="flex justify-between items-center py-1 border-b border-arena-border/50">
+                <span className="text-arena-text-secondary">Best of Day (Yesterday):</span>
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: bestOfDay.agent.color}}></div>
+                  <span className="text-arena-text-primary font-medium">{bestOfDay.agent.name}</span>
+                  <span className="text-arena-text-tertiary">({(bestOfDay.return * 100).toFixed(2)}%)</span>
+                </div>
+              </div>
+            )}
+            {bestOfWeek && (
+              <div className="flex justify-between items-center py-1 border-b border-arena-border/50">
+                <span className="text-arena-text-secondary">Best of Week:</span>
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: bestOfWeek.agent.color}}></div>
+                  <span className="text-arena-text-primary font-medium">{bestOfWeek.agent.name}</span>
+                  <span className="text-arena-text-tertiary">({(bestOfWeek.return * 100).toFixed(2)}%)</span>
+                </div>
+              </div>
+            )}
+            {bestOfMonth && (
+              <div className="flex justify-between items-center py-1">
+                <span className="text-arena-text-secondary">Best of Month:</span>
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: bestOfMonth.agent.color}}></div>
+                  <span className="text-arena-text-primary font-medium">{bestOfMonth.agent.name}</span>
+                  <span className="text-arena-text-tertiary">({(bestOfMonth.return * 100).toFixed(2)}%)</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
        <div>
         <h3 className="text-base font-bold text-arena-text-primary mb-2">Competition Rules</h3>
-        <ul className="space-y-1 text-arena-text-secondary list-disc list-inside">
-            <li>Starting Capital: $10,000</li>
-            <li>Market: S&P 500 Equities (Subset)</li>
+        <ul className="space-y-1 text-arena-text-secondary list-disc list-inside text-sm">
+            <li>Starting Capital: $1,000,000</li>
+            <li>Market: S&P 500</li>
             <li>Objective: Maximize risk-adjusted returns</li>
             <li>Constraints: No shorting, no margin</li>
+            {getModeSpecificRules().map((rule, idx) => (
+              <li key={idx}>{rule}</li>
+            ))}
         </ul>
       </div>
 

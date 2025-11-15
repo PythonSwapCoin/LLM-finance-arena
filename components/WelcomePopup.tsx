@@ -49,16 +49,13 @@ export const WelcomePopup: React.FC<WelcomePopupProps> = ({ simulationTypeName, 
 
         <div className="space-y-4 text-arena-text-secondary leading-relaxed">
           <p>
-            Welcome to the <strong className="text-arena-text-primary">Wall Street Arena</strong> - where five cutting-edge AI models compete head-to-head in real-time stock trading.
+            Welcome to the <strong className="text-arena-text-primary">Wall Street Arena</strong> - watch AI models compete in stock trading!
           </p>
           <p>
-            Each AI agent starts with $1,000,000 and makes independent trading decisions based on the same market data. Watch as different models apply their unique strategies to maximize returns.
+            Each agent starts with $1M and trades S&P 500 stocks. You can run this in different modes - simulated, real-time, or historical - each with its own pace and data source.
           </p>
           <p>
-            <strong className="text-arena-text-primary">What's happening:</strong> The simulation runs continuously, with agents making trading decisions at regular intervals. You can track their performance in real-time through the leaderboard and performance charts.
-          </p>
-          <p>
-            Click on any agent to see detailed metrics, trading history, and portfolio composition. The competition never stops - see which AI comes out on top!
+            Track performance in real-time, chat with agents, and see which AI strategy wins. Click any agent for details!
           </p>
         </div>
 

@@ -1,11 +1,14 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import type { Agent, ChatState, ChatMessage } from '../types';
+import type { Agent, ChatState, ChatMessage, SimulationMode } from '../types';
+import { calculateNextChatDelivery, formatCountdownMessage } from '../utils/chatCountdown';
 
 interface LiveChatProps {
   chat: ChatState | null;
   agents: Agent[];
   currentRoundId: string;
   onSendMessage: (payload: { username: string; agentId: string; content: string }) => Promise<ChatMessage>;
+  simulationMode: SimulationMode;
+  intradayHour: number;
   className?: string;
 }
 
@@ -42,23 +45,55 @@ export const LiveChat: React.FC<LiveChatProps> = ({
   agents,
   currentRoundId,
   onSendMessage,
+  simulationMode,
+  intradayHour,
   className
 }) => {
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(() => agents[0]?.id ?? '');
+  // Single state for target: "general" or agent ID
+  const [targetId, setTargetId] = useState<string>('general');
   const [username, setUsername] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+
+  // Calculate and update countdown timer
+  useEffect(() => {
+    if (!chat?.config.enabled) {
+      setCountdownSeconds(null);
+      return;
+    }
+
+    // Calculate initial countdown
+    const result = calculateNextChatDelivery(intradayHour, simulationMode);
+    setCountdownSeconds(result.totalSeconds);
+
+    // Update every second for real-time countdown
+    const interval = setInterval(() => {
+      setCountdownSeconds((prev) => {
+        if (prev === null || prev <= 0) {
+          // Recalculate if we've reached zero or need fresh data
+          const newResult = calculateNextChatDelivery(intradayHour, simulationMode);
+          return newResult.totalSeconds;
+        }
+        // Decrement by 1 second
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [chat?.config.enabled, intradayHour, simulationMode]);
 
   useEffect(() => {
     if (agents.length === 0) {
-      setSelectedAgentId('');
+      setTargetId('general');
       return;
     }
-    if (!agents.some(agent => agent.id === selectedAgentId)) {
-      setSelectedAgentId(agents[0].id);
+    // If targetId is set to an agent that no longer exists, reset to general chat
+    if (targetId !== 'general' && !agents.some(agent => agent.id === targetId)) {
+      setTargetId('general');
     }
-  }, [agents, selectedAgentId]);
+  }, [agents, targetId]);
 
   const sortedMessages = useMemo(() => {
     if (!chat) {
@@ -95,12 +130,15 @@ export const LiveChat: React.FC<LiveChatProps> = ({
   ).length;
   const remainingForUser = normalizedName ? Math.max(chat.config.maxMessagesPerUser - userMessagesThisRound, 0) : chat.config.maxMessagesPerUser;
 
-  const agentMessagesThisRound = chat.messages.filter(messageItem =>
+  const isGeneralChat = targetId === 'general';
+  const selectedAgent = agents.find(a => a.id === targetId);
+  
+  const agentMessagesThisRound = !isGeneralChat ? chat.messages.filter(messageItem =>
     messageItem.senderType === 'user'
     && messageItem.roundId === currentRoundId
-    && messageItem.agentId === selectedAgentId
-  ).length;
-  const remainingForAgent = Math.max(chat.config.maxMessagesPerAgent - agentMessagesThisRound, 0);
+    && messageItem.agentId === targetId
+  ).length : 0;
+  const remainingForAgent = !isGeneralChat ? Math.max(chat.config.maxMessagesPerAgent - agentMessagesThisRound, 0) : 0;
 
   const chatDisabled = !chat.config.enabled;
   const noAgentsAvailable = agents.length === 0;
@@ -116,11 +154,6 @@ export const LiveChat: React.FC<LiveChatProps> = ({
 
     if (!trimmedName) {
       setError('Please enter your name.');
-      return;
-    }
-
-    if (!selectedAgentId) {
-      setError('Please choose an agent to message.');
       return;
     }
 
@@ -144,15 +177,25 @@ export const LiveChat: React.FC<LiveChatProps> = ({
       return;
     }
 
-    if (remainingForAgent <= 0) {
-      setError('This agent already has the maximum number of community messages for this round.');
-      return;
+    if (!isGeneralChat) {
+      if (!targetId || !selectedAgent) {
+        setError('Please select a valid recipient.');
+        return;
+      }
+      if (remainingForAgent <= 0) {
+        setError('This agent already has the maximum number of community messages for this round.');
+        return;
+      }
     }
 
     setIsSending(true);
     setError(null);
     try {
-      await onSendMessage({ username: trimmedName, agentId: selectedAgentId, content: trimmedMessage });
+      await onSendMessage({ 
+        username: trimmedName, 
+        agentId: isGeneralChat ? undefined : targetId, 
+        content: trimmedMessage 
+      });
       setMessage('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message. Please try again.');
@@ -169,6 +212,15 @@ export const LiveChat: React.FC<LiveChatProps> = ({
           {chatDisabled ? 'Offline' : 'Live'}
         </span>
       </div>
+
+      {/* Countdown Timer */}
+      {!chatDisabled && countdownSeconds !== null && (
+        <div className="mb-3 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-md">
+          <p className="text-xs text-blue-400 font-medium">
+            {formatCountdownMessage(countdownSeconds)}
+          </p>
+        </div>
+      )}
 
       <div className="flex-1 min-h-[220px] max-h-80 overflow-y-auto space-y-3 pr-1">
         {sortedMessages.length === 0 ? (
@@ -195,11 +247,18 @@ export const LiveChat: React.FC<LiveChatProps> = ({
               </div>
               <div className="text-sm font-semibold text-arena-text-primary">
                 {messageItem.senderType === 'user' ? (
-                  <>
-                    {messageItem.sender}
-                    <span className="text-arena-text-tertiary"> → </span>
-                    <span>{messageItem.agentName}</span>
-                  </>
+                  messageItem.agentId ? (
+                    <>
+                      {messageItem.sender}
+                      <span className="text-arena-text-tertiary"> → </span>
+                      <span>{messageItem.agentName}</span>
+                    </>
+                  ) : (
+                    <>
+                      {messageItem.sender}
+                      <span className="ml-1 text-xs uppercase tracking-wide text-arena-text-tertiary">general chat</span>
+                    </>
+                  )
                 ) : (
                   <>
                     {messageItem.sender}
@@ -228,13 +287,14 @@ export const LiveChat: React.FC<LiveChatProps> = ({
             />
           </label>
           <label className="flex flex-col text-sm text-arena-text-secondary">
-            <span className="font-medium text-arena-text-primary">Target agent</span>
+            <span className="font-medium text-arena-text-primary">Send to</span>
             <select
-              value={selectedAgentId}
-              onChange={event => setSelectedAgentId(event.target.value)}
+              value={targetId}
+              onChange={event => setTargetId(event.target.value)}
               className="mt-1 rounded-md border border-arena-border bg-arena-bg px-3 py-2 text-arena-text-primary focus:outline-none focus:ring-2 focus:ring-arena-border"
               disabled={chatDisabled || noAgentsAvailable}
             >
+              <option value="general">General Chat</option>
               {agents.map(agent => (
                 <option key={agent.id} value={agent.id}>{agent.name}</option>
               ))}
@@ -257,17 +317,29 @@ export const LiveChat: React.FC<LiveChatProps> = ({
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-arena-text-tertiary">
           <span>Messages remaining for you this round: {remainingForUser}</span>
-          <span>Messages remaining for {selectedAgentId ? agents.find(agent => agent.id === selectedAgentId)?.name ?? 'agent' : 'agent'}: {remainingForAgent}</span>
+          {!isGeneralChat && selectedAgent && (
+            <span>Messages remaining for {selectedAgent.name}: {remainingForAgent}</span>
+          )}
         </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <button
           type="submit"
-          className="w-full sm:w-auto inline-flex justify-center rounded-md bg-arena-accent px-4 py-2 text-sm font-semibold text-white shadow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-arena-accent disabled:opacity-60"
+          className="w-full sm:w-auto inline-flex justify-center items-center rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 px-6 py-2.5 text-sm font-semibold text-white shadow-md hover:shadow-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600 disabled:hover:shadow-md"
           disabled={chatDisabled || noAgentsAvailable || isSending}
         >
-          {isSending ? 'Sending…' : 'Send message'}
+          {isSending ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Sending…
+            </>
+          ) : (
+            'Send Message'
+          )}
         </button>
       </form>
 
