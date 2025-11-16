@@ -29,6 +29,7 @@ export interface TickerData {
   sector?: string;
   industry?: string;
   longName?: string;
+  shortName?: string;
 }
 
 export interface MarketData {

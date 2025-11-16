@@ -114,6 +114,51 @@ export const getETTime = (date: Date = new Date()): Date => {
   return new Date(etMilliseconds);
 };
 
+/**
+ * Set a date to market open time (9:30 AM ET) for a given date
+ * This properly handles ET timezone conversion
+ * ET is UTC-5 (EST) or UTC-4 (EDT) depending on DST
+ */
+export const setDateToMarketOpenET = (date: Date, config: MarketHoursConfig = {}): Date => {
+  const cfg = { ...DEFAULT_CONFIG, ...config };
+  
+  // Get the year, month, and day from the input date
+  // Use UTC methods to avoid timezone issues when parsing date strings like "2025-11-09"
+  // If the date was created from a string like "2025-11-09", it's already at midnight UTC
+  // If it was created from local time, we need to get the UTC components
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
+  
+  // Create a date at noon UTC for the given date to check DST (avoid edge cases at midnight)
+  const checkDate = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  
+  // Find DST start (2nd Sunday in March)
+  const march1 = new Date(Date.UTC(year, 2, 1));
+  const march1Day = march1.getUTCDay();
+  const dstStart = new Date(Date.UTC(year, 2, (8 - march1Day) % 7 + 8)); // 2nd Sunday
+  
+  // Find DST end (1st Sunday in November)
+  const nov1 = new Date(Date.UTC(year, 10, 1));
+  const nov1Day = nov1.getUTCDay();
+  const dstEnd = new Date(Date.UTC(year, 10, (8 - nov1Day) % 7 + 1)); // 1st Sunday
+  
+  // Check if date is in DST period
+  const isDST = checkDate >= dstStart && checkDate < dstEnd;
+  const etOffsetHours = isDST ? 4 : 5; // EDT is UTC-4, EST is UTC-5
+  
+  // Market open is 9:30 AM ET
+  // To convert to UTC: 9:30 AM ET = 9:30 + offset hours UTC
+  // So UTC time = 9:30 + 4 (EDT) or 9:30 + 5 (EST) = 13:30 UTC (EDT) or 14:30 UTC (EST)
+  const utcHour = cfg.openHour + etOffsetHours;
+  const utcMinute = cfg.openMinute;
+  
+  // Create UTC date for market open
+  const marketOpenUTC = new Date(Date.UTC(year, month, day, utcHour, utcMinute, 0, 0));
+  
+  return marketOpenUTC;
+};
+
 export const getNextMarketOpen = (date: Date = new Date(), config: MarketHoursConfig = {}): Date => {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const next = new Date(date);

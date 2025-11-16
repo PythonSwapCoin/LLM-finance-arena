@@ -41,9 +41,14 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
           dataKey="timestamp"
           stroke="#A3A3A3"
           tick={{ fill: '#A3A3A3', fontSize: 12 }}
-          tickFormatter={(value, index) => {
+          tickFormatter={(value) => {
             const numericValue = typeof value === 'number' ? value : Number(value);
-            const sourcePoint = data[index];
+            // Find the actual data point that matches this timestamp
+            const sourcePoint = data.find(d => {
+              const tolerance = numericValue > 1000000000 ? 60 : 0.01; // Unix timestamp tolerance vs day-based
+              return Math.abs((d.timestamp as number) - numericValue) < tolerance;
+            }) || data.find(d => Math.abs((d.timestamp as number) - numericValue) < 1);
+            
             return formatTimestampToDate(
               numericValue,
               startDate,

@@ -165,6 +165,8 @@ export function SimulationView() {
             isHistoricalComplete={false}
             simulationTypeName={simulationType?.name}
             simulationTypeDescription={simulationType?.description}
+            startDate={simState.startDate}
+            currentDate={simState.currentDate}
           />
 
           {/* Chat - only show if enabled for this competition */}

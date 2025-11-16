@@ -5,6 +5,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { saveSnapshot } from '../store/persistence.js';
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
+import { priceLogService } from '../services/priceLogService.js';
 import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -115,6 +116,10 @@ export const startScheduler = async (): Promise<void> => {
           exportLogs().catch(err => {
             logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to export logs on completion', { error: err });
+          }),
+          priceLogService.exportLogs().catch(err => {
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+              'Failed to export price logs on completion', { error: err });
           })
         ]);
         stopScheduler();
@@ -124,14 +129,19 @@ export const startScheduler = async (): Promise<void> => {
       const mode = getSimulationMode();
 
       // Check if hybrid mode should transition to realtime
+      // This check must happen BEFORE advancing time to prevent overshooting
       if (mode === 'hybrid' && !hasHybridModeTransitioned()) {
         const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
-        if (shouldHybridModeTransition(currentDate, snapshot.day, snapshot.intradayHour)) {
+        const minutesPerTick = getSimulatedMinutesPerTick();
+        
+        // Check if we should transition (including checking if next tick would overshoot)
+        if (shouldHybridModeTransition(currentDate, snapshot.day, snapshot.intradayHour, minutesPerTick)) {
           logger.logSimulationEvent('Hybrid mode transitioning from accelerated to realtime', {
             currentDay: snapshot.day,
             intradayHour: snapshot.intradayHour,
             currentDate: currentDate,
-            realtime: new Date().toISOString()
+            realtime: new Date().toISOString(),
+            minutesPerTick: minutesPerTick
           });
           setHybridModeTransitioned(true);
 
@@ -254,6 +264,8 @@ export const startScheduler = async (): Promise<void> => {
         
         // Process only if market is open
         // Even with delayed data, stop processing when market is closed
+        // Exception: On the very first tick, if market is closed (e.g., Sunday), 
+        // we should wait for the next market open before processing
         if (!marketOpen) {
           if (USE_DELAYED_DATA) {
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
@@ -263,6 +275,22 @@ export const startScheduler = async (): Promise<void> => {
                 useDelayedData: USE_DELAYED_DATA
               });
           } else {
+            // Check if this is the first tick and market is closed (e.g., weekend)
+            // In this case, we should wait for the next market open
+            // We check if we're on day 0 with no previous market day tracked
+            const isFirstTick = snapshot.day === 0 && snapshot.intradayHour === 0 && !lastMarketDay;
+            if (isFirstTick) {
+              const { getNextMarketOpen } = await import('./marketHours.js');
+              const nextOpen = getNextMarketOpen(effectiveTime);
+              const msUntilOpen = nextOpen.getTime() - effectiveTime.getTime();
+              logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+                `Market closed on first tick (ET time: ${etTimeString}), waiting for next market open`, {
+                  etTime: etTimeString,
+                  nextMarketOpen: nextOpen.toISOString(),
+                  waitTimeMinutes: Math.round(msUntilOpen / 60000)
+                });
+              return; // Skip processing - will retry when market opens
+            }
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               `Skipping price tick: market closed (ET time: ${etTimeString})`, {
                 etTime: etTimeString,
@@ -856,6 +884,10 @@ export const startScheduler = async (): Promise<void> => {
           exportLogs().catch(err => {
             logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
               'Failed to export logs', { error: err });
+          }),
+          priceLogService.exportLogs().catch(err => {
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+              'Failed to export price logs', { error: err });
           })
         ]);
       }
@@ -897,6 +929,12 @@ export const stopScheduler = (): void => {
     clearInterval(exportInterval);
     exportInterval = null;
   }
+
+  // Export price logs when stopping
+  priceLogService.exportLogs().catch(err => {
+    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+      'Failed to export price logs when stopping scheduler', { error: err });
+  });
 
   saveSnapshot(simulationState.getSnapshot()).catch(err => {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,

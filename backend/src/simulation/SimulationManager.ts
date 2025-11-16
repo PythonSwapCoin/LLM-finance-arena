@@ -123,18 +123,18 @@ class SimulationInstance {
     let startDate: string;
     let currentDate: string;
 
-    const getMarketOpenDate = (source: Date): string => {
-      const marketOpen = new Date(source);
-      marketOpen.setHours(9, 30, 0, 0);
+    const getMarketOpenDate = async (source: Date): Promise<string> => {
+      const { setDateToMarketOpenET, getNextMarketOpen, isMarketOpen } = await import('./marketHours.js');
+      // If the source date is a weekend or market is closed, get the next market open
+      if (!isMarketOpen(source)) {
+        const nextOpen = getNextMarketOpen(source);
+        return nextOpen.toISOString();
+      }
+      const marketOpen = setDateToMarketOpenET(source);
       return marketOpen.toISOString();
     };
 
-    if (mode === 'historical') {
-      const { getHistoricalSimulationStartDate } = await import('../services/marketDataService.js');
-      const histStart = getHistoricalSimulationStartDate();
-      startDate = histStart.toISOString();
-      currentDate = startDate;
-    } else if (mode === 'realtime') {
+    if (mode === 'realtime') {
       startDate = now.toISOString();
 
       const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
@@ -147,20 +147,28 @@ class SimulationInstance {
         currentDate = now.toISOString();
       }
     } else {
-      // Simulated mode: use HISTORICAL_SIMULATION_START_DATE if set, otherwise use current date
-      const SIMULATED_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE || process.env.SIMULATED_START_DATE;
-      if (SIMULATED_START_DATE) {
-        const date = new Date(SIMULATED_START_DATE);
-        if (!isNaN(date.getTime())) {
-          startDate = getMarketOpenDate(date);
-          currentDate = startDate;
+      // For all non-realtime modes (historical, simulated, hybrid): begin at market open
+      if (mode === 'historical') {
+        const { getHistoricalSimulationStartDate } = await import('../services/marketDataService.js');
+        const histStart = getHistoricalSimulationStartDate();
+        startDate = histStart.toISOString();
+        currentDate = startDate;
+      } else {
+        // Simulated or hybrid mode: use HISTORICAL_SIMULATION_START_DATE if set, otherwise use current date
+        const SIMULATED_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE || process.env.SIMULATED_START_DATE;
+        if (SIMULATED_START_DATE) {
+          const date = new Date(SIMULATED_START_DATE);
+          if (!isNaN(date.getTime())) {
+            startDate = await getMarketOpenDate(date);
+            currentDate = startDate;
+          } else {
+            startDate = await getMarketOpenDate(now);
+            currentDate = startDate;
+          }
         } else {
-          startDate = getMarketOpenDate(now);
+          startDate = await getMarketOpenDate(now);
           currentDate = startDate;
         }
-      } else {
-        startDate = getMarketOpenDate(now);
-        currentDate = startDate;
       }
     }
 

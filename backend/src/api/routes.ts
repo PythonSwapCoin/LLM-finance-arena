@@ -10,6 +10,7 @@ import {
 } from '../services/marketDataService.js';
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
+import { priceLogService } from '../services/priceLogService.js';
 import { S_P500_TICKERS } from '../constants.js';
 import {
   getPersistenceDriver,
@@ -188,6 +189,79 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
       return { 
         ok: false, 
         error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  });
+
+  // Export price logs (stock prices and portfolio values)
+  fastify.post('/api/price-logs/export', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const filepath = await priceLogService.exportLogs();
+      return { 
+        ok: true, 
+        filepath,
+        message: 'Price logs exported successfully'
+      };
+    } catch (error) {
+      reply.code(500);
+      return { 
+        ok: false, 
+        error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  });
+
+  // Get price logs summary
+  fastify.get<{ Querystring: { day?: string } }>('/api/price-logs/summary', async (request) => {
+    try {
+      const day = request.query.day ? parseInt(request.query.day, 10) : undefined;
+      const summary = priceLogService.getPriceMovementSummary(day);
+      const logCount = priceLogService.getLogs().length;
+      return { 
+        ok: true, 
+        summary,
+        day: day || 'all',
+        totalLogEntries: logCount
+      };
+    } catch (error) {
+      return { 
+        ok: false, 
+        error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  });
+
+  // Get price logs status (diagnostic endpoint)
+  fastify.get('/api/price-logs/status', async () => {
+    try {
+      const logs = priceLogService.getLogs();
+      const latestLog = logs.length > 0 ? logs[logs.length - 1] : null;
+      return {
+        ok: true,
+        totalEntries: logs.length,
+        latestLog: latestLog ? {
+          day: latestLog.day,
+          intradayHour: latestLog.intradayHour,
+          timestamp: latestLog.timestamp,
+          stockCount: latestLog.stockPrices.length,
+          agentCount: latestLog.portfolioValues.length
+        } : null,
+        message: logs.length === 0 
+          ? 'No logs captured yet. Make sure the simulation is running and price ticks are occurring.'
+          : `Logging is working. ${logs.length} entries captured.`
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
       };
     }
   });

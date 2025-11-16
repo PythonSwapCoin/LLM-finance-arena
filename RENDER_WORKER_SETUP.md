@@ -131,6 +131,9 @@ SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
 # Simulation Control
 RESET_SIMULATION=false
 
+# Worker Heartbeat (optional)
+HEARTBEAT_INTERVAL_MS=300000  # Heartbeat log interval in milliseconds (default: 300000 = 5 minutes)
+
 # Worker Control (optional - for testing worker separation)
 DISABLE_SCHEDULER=false  # Set to 'true' to disable scheduler in web server
 

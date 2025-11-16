@@ -105,7 +105,9 @@ const initializeAllSimulations = async (): Promise<void> => {
   });
 
   // Create initial market data (shared across all simulations)
-  const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
+  // Always include SPY for S&P 500 benchmark tracking
+  const tickersWithSpy = [...new Set([...S_P500_TICKERS, 'SPY'])];
+  const initialMarketData = await createInitialMarketData(tickersWithSpy);
 
   // Initialize all simulation types with the same market data
   await simulationManager.initializeAll(initialMarketData);

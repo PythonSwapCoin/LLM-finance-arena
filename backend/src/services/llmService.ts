@@ -354,7 +354,7 @@ You may provide a reply (optional). If you choose to reply, it must be one sente
 `
     : '';
 
-  // Build market data based on SIMPLE_BOT_PROMPTS setting
+  // Build market data for prompt - only include ticker, price, and change %
   const marketDataForPrompt = SIMPLE_BOT_PROMPTS
     ? Object.values(marketData).map(d => ({
         ticker: d.ticker,
@@ -362,15 +362,8 @@ You may provide a reply (optional). If you choose to reply, it must be one sente
       }))
     : Object.values(marketData).map(d => ({
         ticker: d.ticker,
-        longName: d.longName || d.ticker,
         price: parseFloat(d.price.toFixed(2)),
-        trailingPE: d.trailingPE ? parseFloat(d.trailingPE.toFixed(2)) : null,
-        priceToBook: d.priceToBook ? parseFloat(d.priceToBook.toFixed(2)) : null,
-        marketCap: d.marketCap ? parseFloat((d.marketCap / 1e9).toFixed(1)) : null,
-        beta: d.beta ? parseFloat(d.beta.toFixed(2)) : null,
-        dividendYield: d.dividendYield ? parseFloat((d.dividendYield * 100).toFixed(2)) : null,
-        sector: d.sector || null,
-        dailyChangePercent: parseFloat((d.dailyChangePercent * 100).toFixed(2))
+        changePercent: parseFloat((d.dailyChangePercent * 100).toFixed(2))
       }));
 
   const prompt = SIMPLE_BOT_PROMPTS
@@ -442,22 +435,18 @@ Example response:
 IMPORTANT:
 - Return ONLY valid JSON, no markdown or code blocks
 - Only include trades to execute (no "hold" actions)
-- Ensure you have enough cash for buys and shares for sells${allowAllCash ? '' : `
+- TRADE EXECUTION ORDER: Sells are executed FIRST, then buys. This means you can sell shares to free up cash for purchases in the same round. Even if you don't have cash right now, you can sell some shares and buy others—the sells will execute first, providing cash for your buys.
+- For BUY: You can include buy orders even if you don't currently have enough cash, as long as you also include sell orders that will free up the necessary cash (sells execute first)
+- For SELL: Ensure you have enough shares for sells${allowAllCash ? '' : `
 - You must invest available cash—holding 100% cash is not acceptable`}
 - Return empty trades array if no action: {"rationale": "...", "trades": []}`
     : `
 You are a portfolio manager making trading decisions for Day ${day}.
 
 === MARKET DATA ===
-Available stocks with comprehensive financial data (ONLY trade these tickers):
+Available stocks (ONLY trade these tickers):
 ${Object.values(marketData).map(d => {
-  const peInfo = d.trailingPE ? `P/E: ${d.trailingPE.toFixed(2)}` : 'P/E: N/A';
-  const pbInfo = d.priceToBook ? `P/B: ${d.priceToBook.toFixed(2)}` : 'P/B: N/A';
-  const marketCapInfo = d.marketCap ? `Mkt Cap: $${(d.marketCap / 1e9).toFixed(1)}B` : 'Mkt Cap: N/A';
-  const betaInfo = d.beta ? `Beta: ${d.beta.toFixed(2)}` : 'Beta: N/A';
-  const divYieldInfo = d.dividendYield ? `Div Yield: ${(d.dividendYield * 100).toFixed(2)}%` : '';
-  const sectorInfo = d.sector ? `Sector: ${d.sector}` : '';
-  return `- ${d.ticker} (${d.longName || d.ticker}): $${d.price.toFixed(2)} | ${peInfo} | ${pbInfo} | ${marketCapInfo} | ${betaInfo}${divYieldInfo ? ` | ${divYieldInfo}` : ''}${sectorInfo ? ` | ${sectorInfo}` : ''} | Change: ${(d.dailyChangePercent * 100).toFixed(2)}%`;
+  return `- ${d.ticker}: $${d.price.toFixed(2)} | Change: ${(d.dailyChangePercent * 100).toFixed(2)}%`;
 }).join('\n')}
 
 IMPORTANT: You can ONLY trade the tickers listed above. Do NOT suggest tickers that are not in this list.
@@ -536,7 +525,8 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 
 IMPORTANT:
 - Only include trades you want to execute (don't include "hold" actions)
-- For BUY: Make sure (quantity × price) ≤ available cash
+- TRADE EXECUTION ORDER: Sells are executed FIRST, then buys. This means you can sell shares to free up cash for purchases in the same round. Even if you don't have cash right now, you can sell some shares and buy others—the sells will execute first, providing cash for your buys.
+- For BUY: You can include buy orders even if you don't currently have enough cash, as long as you also include sell orders that will free up the necessary cash (sells execute first)
 - For SELL: Make sure you own at least that many shares${allowAllCash ? '' : `
 - If you have cash available, you should make buy trades to invest it
 - Holding 100% cash is not acceptable - you are a portfolio manager, not a cash holder`}

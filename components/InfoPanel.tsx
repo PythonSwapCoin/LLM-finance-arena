@@ -13,6 +13,8 @@ interface InfoPanelProps {
   className?: string;
   simulationTypeName?: string;
   simulationTypeDescription?: string;
+  startDate?: string;
+  currentDate?: string;
 }
 
 interface BestPerformer {
@@ -30,8 +32,8 @@ const getPerformanceAtDay = (agent: Agent, targetDay: number): PerformanceMetric
   return dayEntries[dayEntries.length - 1];
 };
 
-// Calculate best performer for a period
-const calculateBestPerformer = (agents: Agent[], startDay: number, endDay: number): BestPerformer | null => {
+// Calculate top N performers for a period
+const calculateTopPerformers = (agents: Agent[], startDay: number, endDay: number, topN: number = 3): BestPerformer[] => {
   const validAgents: BestPerformer[] = [];
   
   for (const agent of agents) {
@@ -48,11 +50,77 @@ const calculateBestPerformer = (agents: Agent[], startDay: number, endDay: numbe
     }
   }
   
-  if (validAgents.length === 0) return null;
+  if (validAgents.length === 0) return [];
   
-  return validAgents.reduce((best, current) => 
-    current.return > best.return ? current : best
-  );
+  // Sort by return (descending) and return top N
+  return validAgents
+    .sort((a, b) => b.return - a.return)
+    .slice(0, topN);
+};
+
+// Helper to format date for display
+const formatDateForDisplay = (day: number, startDate?: string, simulationMode?: string): string => {
+  if (!startDate) {
+    return `Day ${day}`;
+  }
+  
+  try {
+    const start = new Date(startDate);
+    const date = new Date(start);
+    date.setDate(start.getDate() + day);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return `Day ${day}`;
+  }
+};
+
+// Helper to get date from day number
+const getDateFromDay = (day: number, startDate?: string): Date | null => {
+  if (!startDate) return null;
+  try {
+    const start = new Date(startDate);
+    const date = new Date(start);
+    date.setDate(start.getDate() + day);
+    return date;
+  } catch {
+    return null;
+  }
+};
+
+// Helper to calculate previous Monday-Friday week
+const getPreviousWeekMondayFriday = (currentDay: number, startDate?: string): { mondayDay: number; fridayDay: number } | null => {
+  if (!startDate) return null;
+  
+  const currentDate = getDateFromDay(currentDay, startDate);
+  if (!currentDate) return null;
+  
+  // Get day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+  const dayOfWeek = currentDate.getDay();
+  
+  // Calculate how many days to go back to get to the previous Monday
+  // If today is Monday (1), go back 7 days to get previous Monday
+  // If today is Tuesday (2), go back 8 days
+  // If today is Wednesday (3), go back 9 days
+  // etc.
+  let daysToPreviousMonday: number;
+  if (dayOfWeek === 0) {
+    // Sunday - go back 6 days to get to previous Monday
+    daysToPreviousMonday = 6;
+  } else if (dayOfWeek === 1) {
+    // Monday - go back 7 days to get previous Monday
+    daysToPreviousMonday = 7;
+  } else {
+    // Tuesday-Saturday - go back (dayOfWeek - 1 + 7) days
+    daysToPreviousMonday = dayOfWeek - 1 + 7;
+  }
+  
+  const previousMondayDay = currentDay - daysToPreviousMonday;
+  const previousFridayDay = previousMondayDay + 4; // Friday is 4 days after Monday
+  
+  // Make sure we don't go negative
+  if (previousMondayDay < 0) return null;
+  
+  return { mondayDay: previousMondayDay, fridayDay: previousFridayDay };
 };
 
 export const InfoPanel: React.FC<InfoPanelProps> = ({
@@ -67,6 +135,8 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
   className = '',
   simulationTypeName,
   simulationTypeDescription,
+  startDate,
+  currentDate,
 }) => {
   const historicalComplete = simulationMode === 'historical' ? Boolean(isHistoricalComplete) : false;
   const agentsWithPerf = agents.filter(a => a.performanceHistory.length > 0);
@@ -87,21 +157,36 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
       }, agentsWithPerf[0])
     : null;
 
-  // Calculate best performers for different periods
-  const bestOfDay = useMemo(() => {
-    if (day < 1) return null;
-    return calculateBestPerformer(agents, day - 1, day - 1);
+  // Calculate top 3 performers for different periods
+  const topOfDay = useMemo(() => {
+    if (day < 1) return [];
+    return calculateTopPerformers(agents, day - 1, day - 1, 3);
   }, [agents, day]);
 
-  const bestOfWeek = useMemo(() => {
-    if (day < 7) return null;
-    return calculateBestPerformer(agents, Math.max(0, day - 7), day - 1);
-  }, [agents, day]);
+  const topOfWeek = useMemo(() => {
+    // Calculate previous Monday-Friday week
+    const weekRange = getPreviousWeekMondayFriday(day - 1, startDate); // Use day - 1 as current day (yesterday)
+    if (!weekRange || weekRange.mondayDay < 0) return [];
+    return calculateTopPerformers(agents, weekRange.mondayDay, weekRange.fridayDay, 3);
+  }, [agents, day, startDate]);
 
-  const bestOfMonth = useMemo(() => {
-    if (day < 30) return null;
-    return calculateBestPerformer(agents, Math.max(0, day - 30), day - 1);
-  }, [agents, day]);
+  // Format dates for display
+  const yesterdayDate = useMemo(() => {
+    if (day < 1) return '';
+    return formatDateForDisplay(day - 1, startDate, simulationMode);
+  }, [day, startDate, simulationMode]);
+
+  const weekStartDate = useMemo(() => {
+    const weekRange = getPreviousWeekMondayFriday(day - 1, startDate);
+    if (!weekRange) return '';
+    return formatDateForDisplay(weekRange.mondayDay, startDate, simulationMode);
+  }, [day, startDate, simulationMode]);
+
+  const weekEndDate = useMemo(() => {
+    const weekRange = getPreviousWeekMondayFriday(day - 1, startDate);
+    if (!weekRange) return '';
+    return formatDateForDisplay(weekRange.fridayDay, startDate, simulationMode);
+  }, [day, startDate, simulationMode]);
 
   // Get simulation-specific description
   const getSimulationDescription = (): string => {
@@ -166,11 +251,6 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
                     <p className={`${headingSize} font-bold text-arena-text-primary`}>{day}</p>
                   </>
                 )}
-                {intradayHour > 0 && (
-                  <span className="text-xs text-arena-text-secondary block mt-1">
-                    Intraday: {Math.floor(intradayHour)}:{(intradayHour % 1 * 60).toFixed(0).padStart(2, '0')}
-                  </span>
-                )}
                 {isStopped && (
                   <span className="text-xs text-arena-text-tertiary block mt-1">Simulation Stopped</span>
                 )}
@@ -209,37 +289,45 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
       </div>
 
       {/* Best Performers Tables */}
-      {(bestOfDay || bestOfWeek || bestOfMonth) && (
+      {(topOfDay.length > 0 || topOfWeek.length > 0) && (
         <div>
           <h3 className="text-base font-bold text-arena-text-primary mb-2">Best Performers</h3>
-          <div className="space-y-2 text-xs">
-            {bestOfDay && (
-              <div className="flex justify-between items-center py-1 border-b border-arena-border/50">
-                <span className="text-arena-text-secondary">Best of Day (Yesterday):</span>
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: bestOfDay.agent.color}}></div>
-                  <span className="text-arena-text-primary font-medium">{bestOfDay.agent.name}</span>
-                  <span className="text-arena-text-tertiary">({(bestOfDay.return * 100).toFixed(2)}%)</span>
+          <div className="space-y-3 text-xs">
+            {topOfDay.length > 0 && (
+              <div>
+                <div className="text-arena-text-secondary mb-1.5">Best Yesterday ({yesterdayDate}):</div>
+                <div className="space-y-1">
+                  {topOfDay.map((performer, index) => {
+                    const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+                    return (
+                      <div key={performer.agent.id} className="flex justify-between items-center py-1 px-2 rounded bg-arena-surface/30">
+                        <div className="flex items-center space-x-2">
+                          <span>{emoji}</span>
+                          <span className="text-arena-text-primary font-medium">{performer.agent.name}</span>
+                        </div>
+                        <span className="text-arena-text-tertiary font-mono">{(performer.return * 100).toFixed(2)}%</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
-            {bestOfWeek && (
-              <div className="flex justify-between items-center py-1 border-b border-arena-border/50">
-                <span className="text-arena-text-secondary">Best of Week:</span>
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: bestOfWeek.agent.color}}></div>
-                  <span className="text-arena-text-primary font-medium">{bestOfWeek.agent.name}</span>
-                  <span className="text-arena-text-tertiary">({(bestOfWeek.return * 100).toFixed(2)}%)</span>
-                </div>
-              </div>
-            )}
-            {bestOfMonth && (
-              <div className="flex justify-between items-center py-1">
-                <span className="text-arena-text-secondary">Best of Month:</span>
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: bestOfMonth.agent.color}}></div>
-                  <span className="text-arena-text-primary font-medium">{bestOfMonth.agent.name}</span>
-                  <span className="text-arena-text-tertiary">({(bestOfMonth.return * 100).toFixed(2)}%)</span>
+            {topOfWeek.length > 0 && (
+              <div>
+                <div className="text-arena-text-secondary mb-1.5">Best Last Week ({weekStartDate} to {weekEndDate}):</div>
+                <div className="space-y-1">
+                  {topOfWeek.map((performer, index) => {
+                    const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+                    return (
+                      <div key={performer.agent.id} className="flex justify-between items-center py-1 px-2 rounded bg-arena-surface/30">
+                        <div className="flex items-center space-x-2">
+                          <span>{emoji}</span>
+                          <span className="text-arena-text-primary font-medium">{performer.agent.name}</span>
+                        </div>
+                        <span className="text-arena-text-tertiary font-mono">{(performer.return * 100).toFixed(2)}%</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -252,7 +340,7 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
         <ul className="space-y-1 text-arena-text-secondary list-disc list-inside text-sm">
             <li>Starting Capital: $1,000,000</li>
             <li>Market: S&P 500</li>
-            <li>Objective: Maximize risk-adjusted returns</li>
+            <li>Objective: Maximize returns</li>
             <li>Constraints: No shorting, no margin</li>
             {getModeSpecificRules().map((rule, idx) => (
               <li key={idx}>{rule}</li>
