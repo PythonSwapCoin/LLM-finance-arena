@@ -805,6 +805,12 @@ export const advanceDay = async (
       if (validReturns > 0) {
         const avgReturn = totalReturn / validReturns;
         newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+      } else {
+        // Fallback: use dailyChangePercent if available
+        const marketReturn = Object.values(newMarketData).reduce((acc, stock) => {
+          return acc + (stock.dailyChangePercent || 0);
+        }, 0) / Object.values(newMarketData).length;
+        newTotalValue = lastPerf.totalValue * (1 + marketReturn);
       }
     } else if (b.id === AI_MANAGERS_INDEX_ID) {
       const avgAgentReturn = updatedAgents.reduce((acc, agent) => acc + (agent.performanceHistory.slice(-1)[0]?.dailyReturn ?? 0), 0) / updatedAgents.length;

@@ -45,25 +45,28 @@ const exponentialBackoff = async <T>(
   baseDelay: number = 1000
 ): Promise<T> => {
   let lastError: Error | null = null;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
-      // Don't retry on certain errors
-      if (lastError.message.includes('404') || lastError.message.includes('401')) {
+
+      // Don't retry on certain errors (auth failures, not found, insufficient credits)
+      if (lastError.message.includes('404') ||
+          lastError.message.includes('401') ||
+          lastError.message.includes('402') ||
+          lastError.message.includes('Insufficient credits')) {
         throw lastError;
       }
-      
+
       if (attempt < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000; // Add jitter
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
-  
+
   throw lastError || new Error('Max retries exceeded');
 };
 
