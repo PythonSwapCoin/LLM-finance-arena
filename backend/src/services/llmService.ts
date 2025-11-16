@@ -568,7 +568,17 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     const fetchFn = async () => {
       // Use unified model if enabled, otherwise use agent's configured model
       const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
-      
+
+      // Log the full prompt being sent to OpenRouter
+      console.log('\n' + '='.repeat(80));
+      console.log(`PROMPT FOR ${agent.name} (${modelToUse})`);
+      console.log('='.repeat(80));
+      console.log('\n--- SYSTEM PROMPT ---');
+      console.log(systemInstruction);
+      console.log('\n--- USER PROMPT ---');
+      console.log(memoryContext + prompt);
+      console.log('='.repeat(80) + '\n');
+
       const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
       const response = await fetch(endpoint, {
         method: 'POST',
