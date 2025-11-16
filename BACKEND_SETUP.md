@@ -57,6 +57,7 @@ POLYGON_API_KEY=your_polygon_key_here
 ENABLE_LLM=true  # Set to 'false' to use synthetic/simulated trades instead of calling LLM APIs (useful for testing without API costs)
 USE_UNIFIED_MODEL=false  # Set to 'true' to make all agents use the same model (useful for testing with cheaper models)
 UNIFIED_MODEL=google/gemini-2.5-flash-lite  # Model to use when USE_UNIFIED_MODEL=true (default: google/gemini-2.5-flash-lite)
+SIMPLE_BOT_PROMPTS=false  # Set to 'true' to use simplified JSON prompts with only ticker and price (reduces token usage significantly)
 
 # Simulation Intervals (in milliseconds)
 # For simulated/historical mode:
@@ -195,6 +196,7 @@ Returns log entries. Query parameters:
 - `ENABLE_LLM`: Enable or disable LLM API calls. When set to `false`, the system generates synthetic/simulated trades instead of calling LLM APIs. This is useful for testing without incurring API costs. Default: `true`
 - `USE_UNIFIED_MODEL`: When set to `true`, all agents will use the same model specified in `UNIFIED_MODEL` for API calls, while the frontend still displays their original model names. Useful for testing with cheaper models. Default: `false`
 - `UNIFIED_MODEL`: The model identifier to use when `USE_UNIFIED_MODEL=true`. Default: `google/gemini-2.5-flash-lite`
+- `SIMPLE_BOT_PROMPTS`: When set to `true`, uses simplified JSON-formatted prompts that only include ticker and price (no P/E, market cap, sector, etc.). This significantly reduces token usage and can lower API costs. Default: `false`
 - `BACKEND_PORT`: Server port (default: 8080)
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
 - `MODE`: Simulation mode - `simulated`, `realtime`, `historical`, or `hybrid` (default: `simulated`)
