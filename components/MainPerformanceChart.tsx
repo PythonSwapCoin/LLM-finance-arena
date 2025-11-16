@@ -708,16 +708,6 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           domain={yAxisDomain}
           width={80}
         />
-        <Tooltip content={
-          <CustomTooltip 
-            selectedParticipantId={selectedParticipantId || hoveredParticipantId}
-            startDate={startDate}
-            currentDate={currentDate}
-            simulationMode={simulationMode}
-            day={day}
-            intradayHour={intradayHour}
-          />
-        } />
         
         {/* Initial Capital line - only show if no participant is selected, or dimmed if hovering */}
         {!selectedParticipantId && (
