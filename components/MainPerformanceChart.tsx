@@ -102,18 +102,18 @@ const EndOfLineLabel = ({ points, data, color, name, isBenchmark }: any) => {
   const value = data[data.length - 1].totalValue;
 
   return (
-    <g transform={`translate(${x + 8}, ${y - 10})`}>
+    <g transform={`translate(${x + 8}, ${y - 10})`} style={{ pointerEvents: 'none' }}>
       <rect
         height="22"
         width={name.length * 8 + 65}
         fill={color}
         rx="4"
-        style={{ filter: `drop-shadow(0 1px 1px rgb(0 0 0 / 0.5))` }}
+        style={{ filter: `drop-shadow(0 1px 1px rgb(0 0 0 / 0.5))`, pointerEvents: 'none' }}
       />
-      <text x="5" y="15" fill="#fff" fontSize="12px" fontWeight={isBenchmark ? "normal" : "bold"}>
+      <text x="5" y="15" fill="#fff" fontSize="12px" fontWeight={isBenchmark ? "normal" : "bold"} style={{ pointerEvents: 'none' }}>
         {name}
       </text>
-      <text x={name.length * 8 + 5} y="15" fill="#fff" fontSize="12px" fontWeight="normal" opacity="0.8">
+      <text x={name.length * 8 + 5} y="15" fill="#fff" fontSize="12px" fontWeight="normal" opacity="0.8" style={{ pointerEvents: 'none' }}>
         ${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
       </text>
     </g>
@@ -654,12 +654,20 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     return <div className="flex items-center justify-center h-full text-arena-text-secondary">Awaiting simulation data...</div>;
   }
 
+  // Separate participants into benchmarks and agents for legend
+  const benchmarks = participants.filter(p =>
+    (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500"
+  );
+  const agents = participants.filter(p =>
+    (p as Benchmark).name !== "AI Managers Index" && (p as Benchmark).name !== "S&P 500"
+  );
+
   return (
-    <div ref={containerRef} className="relative w-full" style={{ height: '400px', minHeight: '400px', position: 'relative' }}>
+    <div ref={containerRef} className="relative w-full flex flex-col" style={{ gap: '12px' }}>
       {selectedParticipantId && (
         <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
           Showing: {participants.find(p => p.id === selectedParticipantId)?.name || 'Selected'}
-          <span className="ml-2 text-arena-text-tertiary">(Click chart to show all)</span>
+          <span className="ml-2 text-arena-text-tertiary">(Click to deselect)</span>
         </div>
       )}
       <div style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}>
@@ -673,6 +681,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             setSelectedParticipantId(null);
           }
         }}
+        style={{ cursor: hoveredParticipantId ? 'pointer' : 'default' }}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
         {/* Day boundary reference lines (dotted vertical lines) */}
@@ -731,47 +740,66 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           .map(p => {
             const isHovered = hoveredParticipantId === p.id;
             const isSelected = selectedParticipantId === p.id;
-            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.2 : 1);
-            const strokeWidth = isHovered || isSelected 
-              ? ((p as Benchmark).name === "AI Managers Index" ? 4 : 3)
-              : ((p as Benchmark).name === "AI Managers Index" ? 3 : 2);
-            
+            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
+            const strokeWidth = isHovered || isSelected
+              ? ((p as Benchmark).name === "AI Managers Index" ? 5 : 4)
+              : ((p as Benchmark).name === "AI Managers Index" ? 3 : 2.5);
+
             return (
-              <Line
-                key={p.id}
-                type="linear"
-                dataKey={p.id}
-                stroke={p.color}
-                strokeWidth={strokeWidth}
-                strokeDasharray={(p as Benchmark).name === "S&P 500" ? "3 3" : "0"}
-                dot={false}
-                activeDot={{ r: 6, strokeWidth: 2, stroke: p.color, fill: p.color, cursor: 'pointer' }}
-                isAnimationActive={false}
-                connectNulls={false}
-                name={p.name}
-                opacity={opacity}
-                style={{ cursor: 'pointer', transition: 'opacity 0.2s, stroke-width 0.2s' }}
-                onMouseEnter={() => setHoveredParticipantId(p.id)}
-                onMouseLeave={() => setHoveredParticipantId(null)}
-                onClick={(e) => {
-                  e?.stopPropagation?.(); // Prevent chart background click
-                  if (selectedParticipantId === p.id) {
-                    setSelectedParticipantId(null); // Click again to deselect
-                  } else {
-                    setSelectedParticipantId(p.id); // Click to select
+              <React.Fragment key={p.id}>
+                {/* Invisible thicker line for better hover/click detection */}
+                <Line
+                  type="linear"
+                  dataKey={p.id}
+                  stroke="transparent"
+                  strokeWidth={20}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  onMouseEnter={() => setHoveredParticipantId(p.id)}
+                  onMouseLeave={() => setHoveredParticipantId(null)}
+                  onClick={(e) => {
+                    e?.stopPropagation?.();
+                    if (selectedParticipantId === p.id) {
+                      setSelectedParticipantId(null);
+                    } else {
+                      setSelectedParticipantId(p.id);
+                    }
+                  }}
+                />
+                {/* Visible line */}
+                <Line
+                  type="linear"
+                  dataKey={p.id}
+                  stroke={p.color}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={(p as Benchmark).name === "S&P 500" ? "3 3" : "0"}
+                  dot={false}
+                  activeDot={{
+                    r: isHovered || isSelected ? 8 : 5,
+                    strokeWidth: 2,
+                    stroke: '#ffffff',
+                    fill: p.color,
+                    style: { cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
+                  }}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  name={p.name}
+                  opacity={opacity}
+                  style={{ pointerEvents: 'none' }}
+                  label={
+                    !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
+                      <EndOfLineLabel
+                        data={p.performanceHistory}
+                        color={p.color}
+                        name={p.name}
+                        isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
+                      />
+                    ) : undefined
                   }
-                }}
-                label={
-                  !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
-                    <EndOfLineLabel
-                      data={p.performanceHistory}
-                      color={p.color}
-                      name={p.name}
-                      isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
-                    />
-                  ) : undefined
-                }
-              />
+                />
+              </React.Fragment>
             );
           })}
 
@@ -782,53 +810,193 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           .map(p => {
             const isHovered = hoveredParticipantId === p.id;
             const isSelected = selectedParticipantId === p.id;
-            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.2 : 1);
-            const strokeWidth = isHovered || isSelected ? 3 : 2;
-            
+            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
+            const strokeWidth = isHovered || isSelected ? 4 : 2.5;
+
             return (
-              <Line
-                key={p.id}
-                type="linear"
-                dataKey={p.id}
-                stroke={p.color}
-                strokeWidth={strokeWidth}
-                strokeDasharray="0"
-                dot={(props) => {
-                  const { key, ...restProps } = props;
-                  return <CustomDot key={key} {...restProps} data={chartData} image={(p as Agent).image} />;
-                }}
-                activeDot={{ r: 6, strokeWidth: 2, stroke: p.color, fill: p.color, cursor: 'pointer' }}
-                isAnimationActive={false}
-                connectNulls={false}
-                name={p.name}
-                opacity={opacity}
-                style={{ cursor: 'pointer', transition: 'opacity 0.2s, stroke-width 0.2s' }}
-                onMouseEnter={() => setHoveredParticipantId(p.id)}
-                onMouseLeave={() => setHoveredParticipantId(null)}
-                onClick={(e) => {
-                  e?.stopPropagation?.(); // Prevent chart background click
-                  if (selectedParticipantId === p.id) {
-                    setSelectedParticipantId(null); // Click again to deselect
-                  } else {
-                    setSelectedParticipantId(p.id); // Click to select
+              <React.Fragment key={p.id}>
+                {/* Invisible thicker line for better hover/click detection */}
+                <Line
+                  type="linear"
+                  dataKey={p.id}
+                  stroke="transparent"
+                  strokeWidth={20}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  onMouseEnter={() => setHoveredParticipantId(p.id)}
+                  onMouseLeave={() => setHoveredParticipantId(null)}
+                  onClick={(e) => {
+                    e?.stopPropagation?.();
+                    if (selectedParticipantId === p.id) {
+                      setSelectedParticipantId(null);
+                    } else {
+                      setSelectedParticipantId(p.id);
+                    }
+                  }}
+                />
+                {/* Visible line */}
+                <Line
+                  type="linear"
+                  dataKey={p.id}
+                  stroke={p.color}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray="0"
+                  dot={(props) => {
+                    const { key, ...restProps } = props;
+                    return <CustomDot key={key} {...restProps} data={chartData} image={(p as Agent).image} />;
+                  }}
+                  activeDot={{
+                    r: isHovered || isSelected ? 8 : 5,
+                    strokeWidth: 2,
+                    stroke: '#ffffff',
+                    fill: p.color,
+                    style: { cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
+                  }}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  name={p.name}
+                  opacity={opacity}
+                  style={{ pointerEvents: 'none' }}
+                  label={
+                    !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
+                      <EndOfLineLabel
+                        data={p.performanceHistory}
+                        color={p.color}
+                        name={p.name}
+                        isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
+                      />
+                    ) : undefined
                   }
-                }}
-                label={
-                  !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
-                    <EndOfLineLabel
-                      data={p.performanceHistory}
-                      color={p.color}
-                      name={p.name}
-                      isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
-                    />
-                  ) : undefined
-                }
-              />
+                />
+              </React.Fragment>
             );
           })}
       </LineChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Interactive Legend */}
+      {!isCompactViewport && (
+        <div className="flex flex-wrap gap-3 px-2 py-3 bg-arena-surface/50 rounded-md border border-arena-border/50">
+          {/* Benchmarks section */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs text-arena-text-tertiary uppercase tracking-wider mr-1">Benchmarks:</span>
+            {benchmarks.map(p => {
+              const isHovered = hoveredParticipantId === p.id;
+              const isSelected = selectedParticipantId === p.id;
+              const isDimmed = (hoveredParticipantId && !isHovered) || (selectedParticipantId && !isSelected);
+
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    if (selectedParticipantId === p.id) {
+                      setSelectedParticipantId(null);
+                    } else {
+                      setSelectedParticipantId(p.id);
+                    }
+                  }}
+                  onMouseEnter={() => setHoveredParticipantId(p.id)}
+                  onMouseLeave={() => setHoveredParticipantId(null)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${
+                    isSelected
+                      ? 'bg-arena-surface border-2 shadow-md'
+                      : isHovered
+                      ? 'bg-arena-surface/80 border-2 shadow-sm'
+                      : 'bg-arena-surface/40 border border-arena-border hover:bg-arena-surface/60'
+                  }`}
+                  style={{
+                    borderColor: isSelected || isHovered ? p.color : undefined,
+                    opacity: isDimmed ? 0.3 : 1,
+                  }}
+                >
+                  <div
+                    className="w-6 h-0.5 rounded-full"
+                    style={{
+                      backgroundColor: p.color,
+                      ...(((p as Benchmark).name === "S&P 500") && {
+                        backgroundImage: `repeating-linear-gradient(90deg, ${p.color} 0, ${p.color} 3px, transparent 3px, transparent 6px)`,
+                        backgroundColor: 'transparent'
+                      })
+                    }}
+                  />
+                  <span className={`text-sm ${isHovered || isSelected ? 'font-semibold' : 'font-medium'}`} style={{ color: p.color }}>
+                    {p.name}
+                  </span>
+                  {p.performanceHistory && p.performanceHistory.length > 0 && (
+                    <span className="text-xs text-arena-text-secondary font-mono">
+                      ${p.performanceHistory[p.performanceHistory.length - 1].totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Divider */}
+          {agents.length > 0 && benchmarks.length > 0 && (
+            <div className="w-px h-8 bg-arena-border/50" />
+          )}
+
+          {/* Agents section */}
+          {agents.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-arena-text-tertiary uppercase tracking-wider mr-1">Agents:</span>
+              {agents.map(p => {
+                const isHovered = hoveredParticipantId === p.id;
+                const isSelected = selectedParticipantId === p.id;
+                const isDimmed = (hoveredParticipantId && !isHovered) || (selectedParticipantId && !isSelected);
+
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      if (selectedParticipantId === p.id) {
+                        setSelectedParticipantId(null);
+                      } else {
+                        setSelectedParticipantId(p.id);
+                      }
+                    }}
+                    onMouseEnter={() => setHoveredParticipantId(p.id)}
+                    onMouseLeave={() => setHoveredParticipantId(null)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${
+                      isSelected
+                        ? 'bg-arena-surface border-2 shadow-md'
+                        : isHovered
+                        ? 'bg-arena-surface/80 border-2 shadow-sm'
+                        : 'bg-arena-surface/40 border border-arena-border hover:bg-arena-surface/60'
+                    }`}
+                    style={{
+                      borderColor: isSelected || isHovered ? p.color : undefined,
+                      opacity: isDimmed ? 0.3 : 1,
+                    }}
+                  >
+                    {(p as Agent).image && (
+                      <img
+                        src={(p as Agent).image}
+                        alt={p.name}
+                        className="w-5 h-5 rounded-full object-cover"
+                        style={{ boxShadow: `0 0 0 1px ${p.color}` }}
+                      />
+                    )}
+                    <div className="w-6 h-0.5 rounded-full" style={{ backgroundColor: p.color }} />
+                    <span className={`text-sm ${isHovered || isSelected ? 'font-semibold' : 'font-medium'}`} style={{ color: p.color }}>
+                      {p.name}
+                    </span>
+                    {p.performanceHistory && p.performanceHistory.length > 0 && (
+                      <span className="text-xs text-arena-text-secondary font-mono">
+                        ${p.performanceHistory[p.performanceHistory.length - 1].totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
