@@ -3,7 +3,7 @@ import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 import { S_P500_TICKERS } from '../constants.js';
 
-const resolveMode = (): 'simulated' | 'realtime' | 'historical' => {
+const resolveMode = (): 'simulated' | 'realtime' | 'historical' | 'hybrid' => {
   const raw = (process.env.MODE || 'simulated').toLowerCase();
 
   if (raw === 'simulation' || raw === 'simulated') {
@@ -16,6 +16,10 @@ const resolveMode = (): 'simulated' | 'realtime' | 'historical' => {
 
   if (raw === 'historical') {
     return 'historical';
+  }
+
+  if (raw === 'hybrid') {
+    return 'hybrid';
   }
 
   logger.log(
@@ -43,6 +47,9 @@ let historicalWeekEnd: Date | null = null;
 let currentHistoricalDay = 0;
 let currentIntradayHour = 0;
 let lastTradingHour = 0;
+
+// Hybrid mode state tracking
+let hybridModeHasTransitioned = false;
 
 // Rate limiting: simple in-memory tracking
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -257,14 +264,23 @@ export const getHistoricalSimulationStartDate = (): Date => {
 };
 
 export const isHistoricalSimulationComplete = (simulationDay?: number): boolean => {
-  if (MODE !== 'historical') return false;
-  if (simulationDay !== undefined) {
-    return simulationDay > 4;
+  // Check if there's a configured max simulation day
+  const maxSimulationDay = process.env.MAX_SIMULATION_DAYS
+    ? parseInt(process.env.MAX_SIMULATION_DAYS, 10) - 1  // Convert to 0-indexed day
+    : undefined;
+
+  // If no max day is configured, simulation never completes automatically
+  if (maxSimulationDay === undefined || !Number.isFinite(maxSimulationDay)) {
+    return false;
   }
-  return currentHistoricalDay > 4;
+
+  if (simulationDay !== undefined) {
+    return simulationDay > maxSimulationDay;
+  }
+  return currentHistoricalDay > maxSimulationDay;
 };
 
-export const getSimulationMode = (): 'simulated' | 'realtime' | 'historical' => {
+export const getSimulationMode = (): 'simulated' | 'realtime' | 'historical' | 'hybrid' => {
   return MODE;
 };
 
@@ -273,6 +289,49 @@ export const getHistoricalSimulationPeriod = (): { start: Date | null, end: Date
     start: historicalWeekStart,
     end: historicalWeekEnd,
   };
+};
+
+// Hybrid mode helper functions
+export const hasHybridModeTransitioned = (): boolean => {
+  return hybridModeHasTransitioned;
+};
+
+export const setHybridModeTransitioned = (transitioned: boolean): void => {
+  hybridModeHasTransitioned = transitioned;
+};
+
+export const shouldHybridModeTransition = (currentDate: string, currentDay: number, intradayHour: number): boolean => {
+  if (MODE !== 'hybrid' || hybridModeHasTransitioned) {
+    return false;
+  }
+
+  const now = new Date();
+  const simulationDate = new Date(currentDate);
+
+  // Add intraday hours to simulation date (assuming market opens at 9:30 AM)
+  const marketOpenHour = 9;
+  const marketOpenMinute = 30;
+  simulationDate.setHours(marketOpenHour + Math.floor(intradayHour), marketOpenMinute + Math.round((intradayHour % 1) * 60), 0, 0);
+
+  // Check if simulation has caught up to current time (within a threshold)
+  // Use a threshold of the tick interval to avoid overshooting
+  const catchUpThresholdMs = 15 * 60 * 1000; // 15 minutes threshold
+  const timeDifference = now.getTime() - simulationDate.getTime();
+
+  logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+    'Checking hybrid mode transition', {
+      currentDate,
+      currentDay,
+      intradayHour,
+      simulationDateTime: simulationDate.toISOString(),
+      currentDateTime: now.toISOString(),
+      timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
+      threshold: catchUpThresholdMs / 60000,
+      shouldTransition: timeDifference >= -catchUpThresholdMs && timeDifference <= catchUpThresholdMs
+    });
+
+  // Transition when simulation time is within threshold of current time
+  return timeDifference >= -catchUpThresholdMs && timeDifference <= catchUpThresholdMs;
 };
 
 const getNextPrice = (currentPrice: number): number => {

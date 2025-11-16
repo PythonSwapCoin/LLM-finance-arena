@@ -22,7 +22,7 @@ const maxConcurrentRequests = Math.max(0, parseIntWithDefault(process.env.LLM_MA
 const realtimeIntervalMs = Math.max(0, parseIntWithDefault(process.env.REALTIME_SIM_INTERVAL_MS, 600000));
 const simulatedIntervalMs = Math.max(0, parseIntWithDefault(process.env.SIM_INTERVAL_MS, 30000));
 
-const getRequestSpacingMs = (mode: 'simulated' | 'realtime' | 'historical' | undefined, agentCount: number): number => {
+const getRequestSpacingMs = (mode: 'simulated' | 'realtime' | 'historical' | 'hybrid' | undefined, agentCount: number): number => {
   if (manualSpacingMs >= 0) {
     return manualSpacingMs;
   }
@@ -62,7 +62,7 @@ interface AgentChatContext {
 
 const processAgentsWithPacing = async <T>(
   agents: Agent[],
-  mode: 'simulated' | 'realtime' | 'historical' | undefined,
+  mode: 'simulated' | 'realtime' | 'historical' | 'hybrid' | undefined,
   handler: (agent: Agent) => Promise<T>
 ): Promise<T[]> => {
   if (agents.length === 0) {
@@ -115,7 +115,7 @@ const handleTradeWindowAgent = async (
     marketData: MarketData;
     day: number;
     intradayHour: number;
-    mode: 'simulated' | 'realtime' | 'historical' | undefined;
+    mode: 'simulated' | 'realtime' | 'historical' | 'hybrid' | undefined;
     timestamp: number;
     currentTimestamp?: number;
     chatContext?: AgentChatContext;
@@ -494,7 +494,7 @@ export const step = async (
     agents: Agent[];
     benchmarks: Benchmark[];
     chat: ChatState;
-    mode?: 'simulated' | 'realtime' | 'historical';
+    mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
     currentTimestamp?: number;
   },
   newMarketData: MarketData
@@ -597,7 +597,7 @@ export const tradeWindow = async (
     agents: Agent[];
     benchmarks: Benchmark[];
     chat: ChatState;
-    mode?: 'simulated' | 'realtime' | 'historical';
+    mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
     currentTimestamp?: number;
   }
 ): Promise<{
@@ -759,7 +759,7 @@ export const advanceDay = async (
     agents: Agent[];
     benchmarks: Benchmark[];
     chat: ChatState;
-    mode?: 'simulated' | 'realtime' | 'historical';
+    mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   },
   newMarketData: MarketData
 ): Promise<{

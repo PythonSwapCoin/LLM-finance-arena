@@ -9,7 +9,7 @@ interface HeaderProps {
     lastChecked: string | null;
     backendInfo: any;
   };
-  mode?: 'simulated' | 'realtime' | 'historical';
+  mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   simulationTypeName?: string;
   marketTelemetry?: MarketDataTelemetry | null;
 }

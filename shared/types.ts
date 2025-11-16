@@ -137,7 +137,7 @@ export interface SimulationSnapshot {
   marketData: MarketData;
   agents: Agent[];
   benchmarks: Benchmark[];
-  mode: 'simulated' | 'realtime' | 'historical';
+  mode: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   historicalPeriod?: {
     start: string;
     end: string;

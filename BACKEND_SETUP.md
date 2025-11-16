@@ -38,11 +38,15 @@ cp .env.example .env
 BACKEND_PORT=8080
 ALLOWED_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
 
-# Simulation Mode: simulated | realtime | historical
+# Simulation Mode: simulated | realtime | historical | hybrid
 MODE=simulated
 
-# Historical Simulation (only used if MODE=historical)
+# Historical Simulation (only used if MODE=historical or MODE=hybrid)
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
+
+# Optional: Maximum number of simulation days before auto-stop (works for all modes)
+# If not set, simulation runs indefinitely until manually stopped
+# MAX_SIMULATION_DAYS=5
 
 # API Keys (server-side only)
 OPENROUTER_API_KEY=your_openrouter_api_key_here
@@ -193,8 +197,9 @@ Returns log entries. Query parameters:
 - `UNIFIED_MODEL`: The model identifier to use when `USE_UNIFIED_MODEL=true`. Default: `google/gemini-2.5-flash-lite`
 - `BACKEND_PORT`: Server port (default: 8080)
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
-- `MODE`: Simulation mode - `simulated`, `realtime`, or `historical` (default: `simulated`)
-- `HISTORICAL_SIMULATION_START_DATE`: Start date for historical mode (YYYY-MM-DD)
+- `MODE`: Simulation mode - `simulated`, `realtime`, `historical`, or `hybrid` (default: `simulated`)
+- `HISTORICAL_SIMULATION_START_DATE`: Start date for historical or hybrid mode (YYYY-MM-DD)
+- `MAX_SIMULATION_DAYS`: Maximum number of simulation days before auto-stop (works for all modes). If not set or set to a non-numeric value, the simulation runs indefinitely until manually stopped. Default: none (runs forever)
 - `ALPHA_VANTAGE_API_KEY`: Alpha Vantage API key (fallback data source)
 - `POLYGON_API_KEY`: Polygon.io API key (fallback data source)
 - `SIM_INTERVAL_MS`: Price tick interval in milliseconds (default: 30000 = 30 seconds)
@@ -216,16 +221,28 @@ Returns log entries. Query parameters:
 - Uses randomly generated market data
 - No API keys required
 - Good for testing
+- Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ### Real-time Mode
 - Fetches live market data from Yahoo Finance (primary), Alpha Vantage, or Polygon
 - Requires API keys for fallback sources
 - Respects market hours
+- Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ### Historical Mode
 - Uses real historical data from a specified week (Mon-Fri)
-- Automatically stops after 5 trading days
+- Runs at accelerated speed (configurable via `SIM_MARKET_MINUTES_PER_TICK`)
+- Can be configured to auto-stop after a set number of days via `MAX_SIMULATION_DAYS`, or run indefinitely if not set
 - Requires Yahoo Finance access (no API key needed)
+
+### Hybrid Mode
+- **NEW**: Combines historical and real-time modes
+- Starts at a specified historical date (`HISTORICAL_SIMULATION_START_DATE`)
+- Runs in accelerated mode (like historical) until it catches up to current time
+- Automatically transitions to real-time mode when caught up
+- After transition, uses real-time intervals and market hours
+- Perfect for backtesting from a historical date and then continuing live
+- Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ## Trading Costs
 
