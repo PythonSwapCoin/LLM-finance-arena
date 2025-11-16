@@ -264,8 +264,6 @@ export const getHistoricalSimulationStartDate = (): Date => {
 };
 
 export const isHistoricalSimulationComplete = (simulationDay?: number): boolean => {
-  if (MODE !== 'historical') return false;
-
   // Check if there's a configured max simulation day
   const maxSimulationDay = process.env.MAX_SIMULATION_DAYS
     ? parseInt(process.env.MAX_SIMULATION_DAYS, 10) - 1  // Convert to 0-indexed day

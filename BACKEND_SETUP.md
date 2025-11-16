@@ -44,7 +44,7 @@ MODE=simulated
 # Historical Simulation (only used if MODE=historical or MODE=hybrid)
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
 
-# Optional: Maximum number of simulation days before auto-stop (for historical mode only)
+# Optional: Maximum number of simulation days before auto-stop (works for all modes)
 # If not set, simulation runs indefinitely until manually stopped
 # MAX_SIMULATION_DAYS=5
 
@@ -199,7 +199,7 @@ Returns log entries. Query parameters:
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
 - `MODE`: Simulation mode - `simulated`, `realtime`, `historical`, or `hybrid` (default: `simulated`)
 - `HISTORICAL_SIMULATION_START_DATE`: Start date for historical or hybrid mode (YYYY-MM-DD)
-- `MAX_SIMULATION_DAYS`: Maximum number of simulation days before auto-stop (for historical mode only). If not set or set to a non-numeric value, the simulation runs indefinitely until manually stopped. Default: none (runs forever)
+- `MAX_SIMULATION_DAYS`: Maximum number of simulation days before auto-stop (works for all modes). If not set or set to a non-numeric value, the simulation runs indefinitely until manually stopped. Default: none (runs forever)
 - `ALPHA_VANTAGE_API_KEY`: Alpha Vantage API key (fallback data source)
 - `POLYGON_API_KEY`: Polygon.io API key (fallback data source)
 - `SIM_INTERVAL_MS`: Price tick interval in milliseconds (default: 30000 = 30 seconds)
@@ -221,13 +221,13 @@ Returns log entries. Query parameters:
 - Uses randomly generated market data
 - No API keys required
 - Good for testing
-- Runs indefinitely until manually stopped
+- Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ### Real-time Mode
 - Fetches live market data from Yahoo Finance (primary), Alpha Vantage, or Polygon
 - Requires API keys for fallback sources
 - Respects market hours
-- Runs indefinitely until manually stopped
+- Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ### Historical Mode
 - Uses real historical data from a specified week (Mon-Fri)
@@ -242,7 +242,7 @@ Returns log entries. Query parameters:
 - Automatically transitions to real-time mode when caught up
 - After transition, uses real-time intervals and market hours
 - Perfect for backtesting from a historical date and then continuing live
-- Runs indefinitely until manually stopped (ignores `MAX_SIMULATION_DAYS`)
+- Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ## Trading Costs
 
