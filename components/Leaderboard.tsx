@@ -82,6 +82,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
           <thead className="bg-arena-bg text-arena-text-secondary uppercase tracking-wider">
             <tr>
               <th className="p-3 text-left">Rank</th>
+              <th className="p-3 text-center">Check Individual Trades</th>
               {columns.map(col => (
                 <th key={col.key} className={`p-3 cursor-pointer ${col.className || 'text-left'}`} onClick={() => requestSort(col.key)}>
                   <div className={`flex items-center ${col.className?.includes('right') ? 'justify-end' : 'justify-start'}`}>
@@ -90,7 +91,6 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
                   </div>
                 </th>
               ))}
-               <th className="p-3 text-center">Details</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-arena-border">
@@ -100,11 +100,16 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
               return (
                 <tr key={agent.id} className="hover:bg-arena-border transition-colors duration-150">
                   <td className="p-3 font-bold text-center">{index + 1}</td>
+                  <td className="p-3 text-center">
+                      <button onClick={() => onAgentClick(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
+                          <InformationCircleIcon className="h-6 w-6" />
+                      </button>
+                  </td>
                   <td className="p-3 text-left">
                      <div className="flex items-center space-x-3">
                         {agent.image ? (
-                          <img 
-                            src={agent.image} 
+                          <img
+                            src={agent.image}
                             alt={agent.name}
                             className="w-8 h-8 rounded-full object-cover border border-arena-border"
                             onError={(e) => {
@@ -140,11 +145,6 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
                       </td>
                     );
                   })}
-                  <td className="p-3 text-center">
-                      <button onClick={() => onAgentClick(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
-                          <InformationCircleIcon className="h-6 w-6" />
-                      </button>
-                  </td>
                 </tr>
               );
             })}

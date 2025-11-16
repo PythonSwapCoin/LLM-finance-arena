@@ -114,8 +114,8 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                 {/* Current Positions */}
                 <div>
                     <h3 className="text-lg font-semibold mb-2">Current Positions</h3>
-                    <div className="bg-arena-bg rounded-lg max-h-60 overflow-y-auto">
-                        <table className="w-full text-sm text-left">
+                    <div className="bg-arena-bg rounded-lg max-h-60 overflow-y-auto overflow-x-auto">
+                        <table className="w-full text-sm text-left min-w-[600px]">
                             <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
                                 <tr>
                                     <th className="p-2">Ticker</th>
@@ -159,8 +159,8 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                 {/* Trade History */}
                 <div>
                     <h3 className="text-lg font-semibold mb-2">Recent Trades</h3>
-                     <div className="bg-arena-bg rounded-lg max-h-60 overflow-y-auto">
-                        <table className="w-full text-sm text-left">
+                     <div className="bg-arena-bg rounded-lg max-h-60 overflow-y-auto overflow-x-auto">
+                        <table className="w-full text-sm text-left min-w-[500px]">
                            <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
                                 <tr>
                                     <th className="p-2">When</th>
@@ -212,8 +212,8 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                   return valuationEntries.length > 0 && (
                     <div className="md:col-span-2">
                       <h3 className="text-lg font-semibold mb-2">Valuation Analysis</h3>
-                      <div className="bg-arena-bg rounded-lg">
-                        <table className="w-full text-sm text-left">
+                      <div className="bg-arena-bg rounded-lg overflow-x-auto">
+                        <table className="w-full text-sm text-left min-w-[800px]">
                           <thead className="bg-gray-900 text-arena-text-secondary">
                             <tr>
                               <th className="p-2">When</th>
