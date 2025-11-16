@@ -88,7 +88,26 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
     const { typeId } = request.params;
 
     try {
+      // Clear snapshot from persistence
+      const { clearSnapshot } = await import('../store/persistence.js');
+      await clearSnapshot(typeId).catch(err => {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          `Failed to clear snapshot for ${typeId}`, { error: err });
+      });
+
+      // Reset the simulation
       await simulationManager.resetSimulation(typeId);
+      
+      // Save fresh snapshot
+      const instance = simulationManager.getSimulation(typeId);
+      if (instance) {
+        const { saveSnapshot } = await import('../store/persistence.js');
+        await saveSnapshot(instance.getSnapshot(), typeId).catch(err => {
+          logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+            `Failed to save snapshot for ${typeId}`, { error: err });
+        });
+      }
+
       logger.logSimulationEvent(`Simulation ${typeId} reset successfully`, { typeId });
 
       return {
@@ -107,14 +126,33 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
   // Reset all simulations
   fastify.post('/api/simulations/reset', async (request, reply) => {
     try {
-      // Stop scheduler
-      await stopMultiSimScheduler();
+      const disableScheduler = process.env.DISABLE_SCHEDULER === 'true';
+      
+      // Stop scheduler if it's running
+      if (!disableScheduler) {
+        await stopMultiSimScheduler();
+      }
 
-      // Reset all simulations
-      await simulationManager.resetAll();
+      // Clear all snapshots from persistence
+      const { clearSnapshot } = await import('../store/persistence.js');
+      const enabledTypes = simulationManager.getSimulationTypes();
+      for (const simType of enabledTypes) {
+        await clearSnapshot(simType.id).catch(err => {
+          logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+            `Failed to clear snapshot for ${simType.id}`, { error: err });
+        });
+      }
 
-      // Restart scheduler
-      await startMultiSimScheduler();
+      // Reset all simulations (this will create fresh ones)
+      const { createInitialMarketData } = await import('../services/marketDataService.js');
+      const { S_P500_TICKERS } = await import('../constants.js');
+      const initialMarketData = await createInitialMarketData(S_P500_TICKERS);
+      await simulationManager.initializeAll(initialMarketData);
+
+      // Restart scheduler if it should be running
+      if (!disableScheduler) {
+        await startMultiSimScheduler();
+      }
 
       logger.logSimulationEvent('All simulations reset successfully', {});
 

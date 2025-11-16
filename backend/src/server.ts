@@ -114,9 +114,16 @@ const initializeAllSimulations = async (): Promise<void> => {
     count: simulationManager.getAllSimulations().size,
   });
 
-  // Auto-start multi-simulation scheduler
-  await startMultiSimScheduler();
-  logger.logSimulationEvent('Multi-simulation scheduler started', {});
+  // Check if scheduler should be disabled (for web service when worker is running)
+  const disableScheduler = process.env.DISABLE_SCHEDULER === 'true';
+  
+  if (disableScheduler) {
+    logger.logSimulationEvent('Scheduler disabled (DISABLE_SCHEDULER=true) - web service will only serve API requests', {});
+  } else {
+    // Auto-start multi-simulation scheduler
+    await startMultiSimScheduler();
+    logger.logSimulationEvent('Multi-simulation scheduler started', {});
+  }
 
   // Initialize timer service
   initializeTimer();

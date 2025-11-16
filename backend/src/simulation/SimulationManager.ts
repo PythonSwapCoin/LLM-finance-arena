@@ -4,8 +4,9 @@ import { INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLO
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getSimulationMode } from '../services/marketDataService.js';
 import { cloneChatMessages } from '../utils/chatUtils.js';
-import { logger } from '../services/logger.js';
+import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import type { ChatConfig, ChatMessage } from '../types.js';
+import { loadSnapshot, saveSnapshot } from '../store/persistence.js';
 
 /**
  * SimulationInstance - manages state for a single simulation
@@ -56,7 +57,30 @@ class SimulationInstance {
     };
   }
 
-  async initialize(marketData: MarketData): Promise<void> {
+  loadFromSnapshot(snapshot: SimulationSnapshot): void {
+    // Restore chat state
+    const restoredChat = snapshot.chat ? this.createChatState(snapshot.chat.messages) : this.createChatState();
+    
+    this.snapshot = {
+      ...snapshot,
+      chat: restoredChat,
+    };
+
+    logger.logSimulationEvent('Simulation instance loaded from snapshot', {
+      simulationType: this.simulationType.id,
+      day: snapshot.day,
+      intradayHour: snapshot.intradayHour,
+      agentCount: snapshot.agents.length,
+    });
+  }
+
+  async initialize(marketData: MarketData, snapshot?: SimulationSnapshot | null): Promise<void> {
+    // If snapshot provided, load from it instead of creating fresh
+    if (snapshot) {
+      this.loadFromSnapshot(snapshot);
+      return;
+    }
+
     // Create agents from the simulation type configuration
     const agents = createAgentsFromConfigs(this.simulationType.traderConfigs);
 
@@ -219,6 +243,7 @@ class SimulationManager {
 
   /**
    * Initialize all simulation types with the same market data
+   * Loads snapshots from persistence if RESET_SIMULATION is false
    */
   async initializeAll(initialMarketData: MarketData): Promise<void> {
     this.sharedMarketData = initialMarketData;
@@ -226,18 +251,69 @@ class SimulationManager {
     const enabledTypes = SIMULATION_TYPES;
     const allTypes = getAllSimulationTypes();
     
+    // Check if we should reset (start fresh)
+    const shouldReset = process.env.RESET_SIMULATION === 'true';
+    
     // Log which simulations are enabled/disabled
     logger.logSimulationEvent('Simulation types status', {
       enabled: enabledTypes.map(t => t.id),
       disabled: allTypes.filter(t => !t.enabled).map(t => t.id),
       totalAvailable: allTypes.length,
+      resetSimulation: shouldReset,
     });
 
     // Only initialize enabled simulations
     for (const simType of enabledTypes) {
       const instance = new SimulationInstance(simType);
-      await instance.initialize(initialMarketData);
+      
+      if (shouldReset) {
+        // Start fresh
+        logger.logSimulationEvent('Starting fresh simulation (RESET_SIMULATION=true)', {
+          simulationType: simType.id,
+        });
+        await instance.initialize(initialMarketData);
+      } else {
+        // Try to load from persistence
+        try {
+          const snapshot = await loadSnapshot(simType.id);
+          if (snapshot) {
+            logger.logSimulationEvent('Loaded snapshot from persistence', {
+              simulationType: simType.id,
+              day: snapshot.day,
+              intradayHour: snapshot.intradayHour,
+            });
+            // Use the market data from snapshot if available, otherwise use initial
+            const snapshotMarketData = snapshot.marketData && Object.keys(snapshot.marketData).length > 0
+              ? snapshot.marketData
+              : initialMarketData;
+            await instance.initialize(snapshotMarketData, snapshot);
+          } else {
+            logger.logSimulationEvent('No snapshot found, starting fresh', {
+              simulationType: simType.id,
+            });
+            await instance.initialize(initialMarketData);
+          }
+        } catch (error) {
+          logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+            `Failed to load snapshot for ${simType.id}, starting fresh`, {
+              error: error instanceof Error ? error.message : String(error)
+            });
+          await instance.initialize(initialMarketData);
+        }
+      }
+      
       this.simulations.set(simType.id, instance);
+      
+      // Save initial snapshot if starting fresh (always save after initialization)
+      try {
+        const snapshot = instance.getSnapshot();
+        await saveSnapshot(snapshot, simType.id);
+      } catch (error) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          `Failed to save initial snapshot for ${simType.id}`, {
+            error: error instanceof Error ? error.message : String(error)
+          });
+      }
     }
 
     logger.logSimulationEvent('Simulation instances initialized', {
@@ -245,6 +321,7 @@ class SimulationManager {
       initializedTypes: enabledTypes.map(t => t.id),
       enabledCount: enabledTypes.length,
       totalAvailable: allTypes.length,
+      resetSimulation: shouldReset,
     });
   }
 

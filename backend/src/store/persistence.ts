@@ -235,18 +235,20 @@ class PostgresAdapter {
     }
   }
 
-  async loadSnapshot(): Promise<SimulationSnapshot | null> {
+  async loadSnapshot(customSnapshotId?: string): Promise<SimulationSnapshot | null> {
     await this.ensureInitialized();
     try {
+      const snapshotId = customSnapshotId || this.snapshotId;
       const result = await this.pool.query(
         `SELECT snapshot FROM simulation_snapshots WHERE namespace = $1 AND snapshot_id = $2 LIMIT 1`,
-        [this.namespace, this.snapshotId]
+        [this.namespace, snapshotId]
       ) as { rowCount: number; rows: Array<{ snapshot: SimulationSnapshot }>; };
 
       if (result.rowCount === 0) {
         logger.logSimulationEvent('No existing snapshot found, starting fresh', {
           driver: 'postgres',
           namespace: this.namespace,
+          snapshotId,
         });
         return null;
       }
@@ -255,6 +257,7 @@ class PostgresAdapter {
       logger.logSimulationEvent('Snapshot loaded from persistence', {
         driver: 'postgres',
         namespace: this.namespace,
+        snapshotId,
         day: snapshot.day,
       });
       return snapshot;
@@ -269,9 +272,10 @@ class PostgresAdapter {
     }
   }
 
-  async saveSnapshot(snapshot: SimulationSnapshot): Promise<void> {
+  async saveSnapshot(snapshot: SimulationSnapshot, customSnapshotId?: string): Promise<void> {
     await this.ensureInitialized();
     try {
+      const snapshotId = customSnapshotId || this.snapshotId;
       const intradayKey = PostgresAdapter.toIntradayKey(snapshot.intradayHour);
       await this.pool.query(
         `INSERT INTO simulation_snapshots(namespace, snapshot_id, day, intraday_hour, mode, snapshot, last_updated)
@@ -284,7 +288,7 @@ class PostgresAdapter {
            last_updated = NOW()`
         , [
           this.namespace,
-          this.snapshotId,
+          snapshotId,
           snapshot.day,
           intradayKey,
           snapshot.mode,
@@ -310,6 +314,7 @@ class PostgresAdapter {
       logger.logSimulationEvent('Snapshot saved to persistence', {
         driver: 'postgres',
         namespace: this.namespace,
+        snapshotId,
         day: snapshot.day,
       });
     } catch (error) {
@@ -323,20 +328,25 @@ class PostgresAdapter {
     }
   }
 
-  async clearSnapshot(): Promise<void> {
+  async clearSnapshot(customSnapshotId?: string): Promise<void> {
     await this.ensureInitialized();
     try {
+      const snapshotId = customSnapshotId || this.snapshotId;
       await this.pool.query(
         `DELETE FROM simulation_snapshots WHERE namespace = $1 AND snapshot_id = $2`,
-        [this.namespace, this.snapshotId]
+        [this.namespace, snapshotId]
       );
-      await this.pool.query(
-        `DELETE FROM simulation_snapshot_history WHERE namespace = $1`,
-        [this.namespace]
-      );
+      // Only clear history if clearing default snapshot (for backward compatibility)
+      if (!customSnapshotId) {
+        await this.pool.query(
+          `DELETE FROM simulation_snapshot_history WHERE namespace = $1`,
+          [this.namespace]
+        );
+      }
       logger.logSimulationEvent('Cleared Postgres snapshot data', {
         driver: 'postgres',
         namespace: this.namespace,
+        snapshotId,
       });
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
@@ -383,23 +393,93 @@ export const getPersistenceTargetDescription = (): string => {
   }
 };
 
-export const loadSnapshot = async (): Promise<SimulationSnapshot | null> => {
+export const loadSnapshot = async (snapshotId?: string): Promise<SimulationSnapshot | null> => {
   if (getPersistenceDriver() === 'postgres') {
-    return getPostgresAdapter().loadSnapshot();
+    const adapter = getPostgresAdapter();
+    return adapter.loadSnapshot(snapshotId);
+  }
+  // For file persistence, use snapshotId in filename if provided
+  if (snapshotId) {
+    try {
+      const fullPath = getPersistFilePath();
+      const baseName = fullPath.replace(/\.[^/.]+$/, '');
+      const ext = fullPath.match(/\.[^/.]+$/) || ['.json'];
+      const customPath = `${baseName}_${snapshotId}${ext}`;
+      await ensureDirectoryExists(customPath);
+      const data = await fs.readFile(customPath, 'utf-8');
+      const snapshot = JSON.parse(data) as SimulationSnapshot;
+      logger.logSimulationEvent('Snapshot loaded from persistence', {
+        driver: 'file',
+        path: customPath,
+        day: snapshot.day,
+      });
+      return snapshot;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        logger.logSimulationEvent('No existing snapshot found, starting fresh', { driver: 'file', snapshotId });
+        return null;
+      }
+      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+        'Error loading snapshot', {
+          driver: 'file',
+          snapshotId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      return null;
+    }
   }
   return loadSnapshotFromFile();
 };
 
-export const saveSnapshot = async (snapshot: SimulationSnapshot): Promise<void> => {
+export const saveSnapshot = async (snapshot: SimulationSnapshot, snapshotId?: string): Promise<void> => {
   if (getPersistenceDriver() === 'postgres') {
-    return getPostgresAdapter().saveSnapshot(snapshot);
+    const adapter = getPostgresAdapter();
+    return adapter.saveSnapshot(snapshot, snapshotId);
+  }
+  // For file persistence, use snapshotId in filename if provided
+  if (snapshotId) {
+    const fullPath = getPersistFilePath();
+    const dir = dirname(fullPath);
+    const baseName = fullPath.replace(/\.[^/.]+$/, '');
+    const ext = fullPath.match(/\.[^/.]+$/) || ['.json'];
+    const customPath = `${baseName}_${snapshotId}${ext}`;
+    await ensureDirectoryExists(customPath);
+    await fs.writeFile(customPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+    logger.logSimulationEvent('Snapshot saved to persistence', {
+      driver: 'file',
+      path: customPath,
+      day: snapshot.day,
+    });
+    return;
   }
   return saveSnapshotToFile(snapshot);
 };
 
-export const clearSnapshot = async (): Promise<void> => {
+export const clearSnapshot = async (snapshotId?: string): Promise<void> => {
   if (getPersistenceDriver() === 'postgres') {
-    return getPostgresAdapter().clearSnapshot();
+    const adapter = getPostgresAdapter();
+    return adapter.clearSnapshot(snapshotId);
+  }
+  // For file persistence, delete the snapshot file
+  if (snapshotId) {
+    try {
+      const fullPath = getPersistFilePath();
+      const baseName = fullPath.replace(/\.[^/.]+$/, '');
+      const ext = fullPath.match(/\.[^/.]+$/) || ['.json'];
+      const customPath = `${baseName}_${snapshotId}${ext}`;
+      await fs.unlink(customPath);
+      logger.logSimulationEvent('Cleared file snapshot', { driver: 'file', path: customPath });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+          'Failed to clear file snapshot', {
+            driver: 'file',
+            snapshotId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+      }
+    }
+    return;
   }
   return clearFileSnapshot();
 };

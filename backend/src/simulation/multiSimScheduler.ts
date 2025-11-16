@@ -6,6 +6,7 @@ import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime } from '.
 import type { MarketData } from '../types.js';
 import { updateChatMessagesStatusForSimulation } from '../services/multiSimChatService.js';
 import { updateTimerState } from '../services/timerService.js';
+import { saveSnapshot } from '../store/persistence.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -85,6 +86,17 @@ const stepSimulation = async (simulationTypeId: string, newMarketData: MarketDat
       marketData: result.marketData,
       chat: result.chat,
     });
+
+    // Save snapshot after step
+    try {
+      const snapshot = instance.getSnapshot();
+      await saveSnapshot(snapshot, simulationTypeId);
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        `Failed to save snapshot after step for ${simulationTypeId}`, {
+          error: error instanceof Error ? error.message : String(error)
+        });
+    }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
       `Failed to step simulation ${simulationTypeId}`, { error });
@@ -136,6 +148,17 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
       day: snapshot.day,
       intradayHour: snapshot.intradayHour,
     });
+
+    // Save snapshot after trade window
+    try {
+      const updatedSnapshot = instance.getSnapshot();
+      await saveSnapshot(updatedSnapshot, simulationTypeId);
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        `Failed to save snapshot after trade window for ${simulationTypeId}`, {
+          error: error instanceof Error ? error.message : String(error)
+        });
+    }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
       `Failed to execute trade window for simulation ${simulationTypeId}`, { error });
@@ -179,6 +202,17 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       simulationType: simulationTypeId,
       newDay,
     });
+
+    // Save snapshot after day advancement
+    try {
+      const updatedSnapshot = instance.getSnapshot();
+      await saveSnapshot(updatedSnapshot, simulationTypeId);
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        `Failed to save snapshot after day advancement for ${simulationTypeId}`, {
+          error: error instanceof Error ? error.message : String(error)
+        });
+    }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
       `Failed to advance day for simulation ${simulationTypeId}`, { error });
