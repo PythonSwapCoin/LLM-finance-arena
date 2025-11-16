@@ -159,15 +159,17 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
 
   // Calculate top 3 performers for different periods
   const topOfDay = useMemo(() => {
-    if (day < 1) return [];
-    return calculateTopPerformers(agents, day - 1, day - 1, 3);
+    // Best yesterday: compare end of day before yesterday (day - 2) to end of yesterday (day - 1)
+    if (day < 2) return [];
+    return calculateTopPerformers(agents, day - 2, day - 1, 3);
   }, [agents, day]);
 
   const topOfWeek = useMemo(() => {
     // Calculate previous Monday-Friday week
     const weekRange = getPreviousWeekMondayFriday(day - 1, startDate); // Use day - 1 as current day (yesterday)
     if (!weekRange || weekRange.mondayDay < 0) return [];
-    return calculateTopPerformers(agents, weekRange.mondayDay, weekRange.fridayDay, 3);
+    // Compare end of Sunday (day before Monday) to end of Friday to capture full week performance
+    return calculateTopPerformers(agents, weekRange.mondayDay - 1, weekRange.fridayDay, 3);
   }, [agents, day, startDate]);
 
   // Format dates for display

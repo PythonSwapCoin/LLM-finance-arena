@@ -1,8 +1,8 @@
 import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics, ChatState } from '../types.js';
-import { S_P500_BENCHMARK_ID, INITIAL_CASH, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
+import { S_P500_BENCHMARK_ID, INITIAL_CASH, TRADING_FEE_RATE, MIN_TRADE_FEE, TRADING_DAYS_PER_YEAR, RISK_FREE_RATE } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getTradeDecisions } from '../services/llmService.js';
-import { logger } from '../services/logger.js';
+import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatService.js';
 import { createRoundId } from '../utils/chatUtils.js';
 import { priceLogService } from '../services/priceLogService.js';
@@ -632,10 +632,46 @@ export const step = async (
       // If marketReturn is invalid, keep the same value (don't update)
     }
     // AI Managers Index removed - no longer needed
-    
-    const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, b.performanceHistory, timestamp);
-    newMetrics.intradayHour = intradayHour;
-    
+
+    // For benchmarks, calculate metrics directly using the newTotalValue from market returns
+    // We don't use calculateAllMetrics with a fake portfolio because we want to use the exact
+    // totalValue we calculated from market returns, not recalculate it from a portfolio
+    const dailyReturn = lastPerf.totalValue > 0 ? (newTotalValue / lastPerf.totalValue) - 1 : 0;
+    const totalReturn = (newTotalValue / INITIAL_CASH) - 1;
+
+    // Calculate volatility and other metrics from historical returns
+    const allReturns = [...b.performanceHistory.map(h => h.dailyReturn), dailyReturn];
+    const meanReturn = allReturns.reduce((a, b) => a + b, 0) / allReturns.length;
+    const variance = allReturns.reduce((a, b) => a + Math.pow(b - meanReturn, 2), 0) / allReturns.length;
+    const dailyVolatility = Math.sqrt(variance);
+    const annualizedVolatility = dailyVolatility * Math.sqrt(TRADING_DAYS_PER_YEAR);
+
+    const excessReturns = allReturns.map(r => r - (RISK_FREE_RATE / TRADING_DAYS_PER_YEAR));
+    const avgExcessReturn = excessReturns.reduce((a, b) => a + b, 0) / excessReturns.length;
+    const sharpeRatio = dailyVolatility > 0 ? (avgExcessReturn / dailyVolatility) * Math.sqrt(TRADING_DAYS_PER_YEAR) : 0;
+
+    // Calculate max drawdown
+    const allValues = [...b.performanceHistory.map(h => h.totalValue), newTotalValue];
+    let peak = -Infinity;
+    let maxDrawdown = 0;
+    allValues.forEach(value => {
+      if (value > peak) peak = value;
+      const drawdown = peak > 0 ? (peak - value) / peak : 0;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    });
+
+    const newMetrics: PerformanceMetrics = {
+      totalValue: newTotalValue,
+      totalReturn,
+      dailyReturn,
+      annualizedVolatility,
+      sharpeRatio,
+      maxDrawdown,
+      turnover: 0, // Benchmarks don't trade
+      timestamp,
+      intradayHour,
+    };
+
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
   });
 
