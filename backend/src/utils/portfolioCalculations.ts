@@ -26,13 +26,13 @@ export const calculateAllMetrics = (
   portfolio: Portfolio,
   marketData: MarketData,
   history: PerformanceMetrics[],
-  day: number,
+  timestamp: number,
   dailyTrades: Trade[] = []
 ): PerformanceMetrics => {
   // Calculate total portfolio value using current prices - this is the robust approach
   const totalValue = calculatePortfolioValue(portfolio, marketData);
   const totalReturn = (totalValue / INITIAL_CASH) - 1;
-  
+
   // Calculate daily return: use the previous entry's totalValue (which is based on prices)
   // This is simpler and more robust than trying to find "different day" entries
   // The previous entry's totalValue is always calculated from prices, so this is correct
@@ -87,7 +87,7 @@ export const calculateAllMetrics = (
     sharpeRatio,
     maxDrawdown,
     turnover,
-    timestamp: day,
+    timestamp,
   };
 };
 

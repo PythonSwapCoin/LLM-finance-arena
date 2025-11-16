@@ -308,8 +308,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         const minutesPerTick = getSimulatedMinutesPerTick();
         const newIntradayHour = snapshot.intradayHour + (minutesPerTick / 60);
 
-        // Check if we should advance to next day (after market close at 4pm ET = 16:00)
-        const MARKET_CLOSE_HOUR = 16;
+        // Check if we should advance to next day
+        // Market close is 6.5 hours after market open (9:30 AM + 6.5 hours = 4:00 PM ET)
+        const MARKET_CLOSE_HOUR = 6.5;
         const shouldAdvanceDay = newIntradayHour >= MARKET_CLOSE_HOUR;
 
         if (shouldAdvanceDay) {

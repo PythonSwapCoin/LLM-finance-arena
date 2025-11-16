@@ -535,14 +535,10 @@ export const step = async (
 
   // Update agents with new market data (no trading, just portfolio valuation)
   const updatedAgents = agents.map(agent => {
-    // Pass day number (not timestamp) to calculateAllMetrics for correct day comparison
-    const newMetrics = calculateAllMetrics(agent.portfolio, newMarketData, agent.performanceHistory, day);
+    // Calculate metrics with the correct timestamp (includes intraday hour)
+    const newMetrics = calculateAllMetrics(agent.portfolio, newMarketData, agent.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
-    // Override timestamp if needed (for real-time mode)
-    if (mode === 'realtime' && currentTimestamp !== undefined) {
-      newMetrics.timestamp = timestamp;
-    }
-    
+
     return {
       ...agent,
       performanceHistory: [...agent.performanceHistory, newMetrics],
