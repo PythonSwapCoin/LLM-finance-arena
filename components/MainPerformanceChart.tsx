@@ -670,7 +670,11 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           <span className="ml-2 text-arena-text-tertiary">(Click to deselect)</span>
         </div>
       )}
-      <div style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}>
+      <div 
+        style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}
+        className="focus:outline-none"
+        tabIndex={-1}
+      >
         <ResponsiveContainer width="100%" height={400} minHeight={400}>
       <LineChart
         data={chartData}
@@ -892,13 +896,14 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                   onMouseLeave={() => setHoveredParticipantId(null)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${
                     isSelected
-                      ? 'bg-arena-surface border-2 shadow-md'
+                      ? 'bg-arena-surface shadow-md'
                       : isHovered
-                      ? 'bg-arena-surface/80 border-2 shadow-sm'
-                      : 'bg-arena-surface/40 border border-arena-border hover:bg-arena-surface/60'
+                      ? 'bg-arena-surface/80 shadow-sm'
+                      : 'bg-arena-surface/40 hover:bg-arena-surface/60'
                   }`}
                   style={{
-                    borderColor: isSelected || isHovered ? p.color : undefined,
+                    border: '1px solid',
+                    borderColor: isSelected || isHovered ? p.color : 'rgba(38, 38, 38, 0.5)',
                     opacity: isDimmed ? 0.3 : 1,
                   }}
                 >
@@ -953,13 +958,14 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                     onMouseLeave={() => setHoveredParticipantId(null)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${
                       isSelected
-                        ? 'bg-arena-surface border-2 shadow-md'
+                        ? 'bg-arena-surface shadow-md'
                         : isHovered
-                        ? 'bg-arena-surface/80 border-2 shadow-sm'
-                        : 'bg-arena-surface/40 border border-arena-border hover:bg-arena-surface/60'
+                        ? 'bg-arena-surface/80 shadow-sm'
+                        : 'bg-arena-surface/40 hover:bg-arena-surface/60'
                     }`}
                     style={{
-                      borderColor: isSelected || isHovered ? p.color : undefined,
+                      border: '1px solid',
+                      borderColor: isSelected || isHovered ? p.color : 'rgba(38, 38, 38, 0.5)',
                       opacity: isDimmed ? 0.3 : 1,
                     }}
                   >

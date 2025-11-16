@@ -130,7 +130,14 @@ export function SimulationView() {
       />
 
       {/* Recent Trades Bar */}
-      <RecentTradesBar agents={agents} />
+      <RecentTradesBar 
+        agents={agents}
+        startDate={simState.startDate}
+        currentDate={simState.currentDate}
+        simulationMode={simulationMode}
+        day={simState.day}
+        intradayHour={simState.intradayHour}
+      />
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-6 mt-16">
