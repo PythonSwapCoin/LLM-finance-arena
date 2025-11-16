@@ -103,7 +103,7 @@ export const applyAgentRepliesToChat = (
   replies: AgentReplyInput[],
   roundId?: string,
   allProcessedAgents?: Agent[],
-  mode?: 'simulated' | 'realtime' | 'historical'
+  mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid'
 ): ChatState => {
   if (!chat.config.enabled) {
     return chat;

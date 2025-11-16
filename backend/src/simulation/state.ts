@@ -187,7 +187,7 @@ class SimulationState {
     return [...this.snapshot.benchmarks];
   }
 
-  getMode(): 'simulated' | 'realtime' | 'historical' {
+  getMode(): 'simulated' | 'realtime' | 'historical' | 'hybrid' {
     return this.snapshot.mode;
   }
 

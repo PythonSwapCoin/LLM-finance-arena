@@ -12,7 +12,7 @@ export interface SimulationStateResponse {
     agents: any[];
     benchmarks: any[];
     chat: ChatState;
-    mode: 'simulated' | 'realtime' | 'historical';
+    mode: 'simulated' | 'realtime' | 'historical' | 'hybrid';
     historicalPeriod?: {
       start: string;
       end: string;

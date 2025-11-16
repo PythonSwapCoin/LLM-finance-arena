@@ -64,7 +64,8 @@ LLM Finance Arena is a full-stack benchmarking platform that evaluates large-lan
 ## Simulation Modes
 - **Simulated (default):** High-frequency random ticks—no external APIs required; great for quick demos and component development.
 - **Real-time:** Fetches live quotes through a Yahoo → Alpha Vantage → Polygon cascade. Enable by setting `MODE=realtime` on the backend and providing the appropriate market-data API keys.
-- **Historical week:** Replays a specific trading week end-to-end. Set `MODE=historical` plus `HISTORICAL_SIMULATION_START_DATE` on the backend configuration.
+- **Historical:** Replays from a specific date at accelerated speed. Set `MODE=historical` plus `HISTORICAL_SIMULATION_START_DATE` on the backend configuration. Can be configured to auto-stop after a set number of days via `MAX_SIMULATION_DAYS`.
+- **Hybrid (new):** Starts at a historical date in accelerated mode, then automatically transitions to real-time when caught up. Perfect for backtesting from the past and continuing live. Set `MODE=hybrid` plus `HISTORICAL_SIMULATION_START_DATE`.
 
 Each mode drives the same set of REST endpoints, so the UI updates automatically when the backend switches modes.
 

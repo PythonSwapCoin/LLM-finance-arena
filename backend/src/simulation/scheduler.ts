@@ -1,6 +1,6 @@
 import { simulationState } from './state.js';
 import { step, tradeWindow, advanceDay } from './engine.js';
-import { generateNextIntradayMarketData, generateNextDayMarketData, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult } from '../services/marketDataService.js';
+import { generateNextIntradayMarketData, generateNextDayMarketData, isTradingAllowed, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult, hasHybridModeTransitioned, setHybridModeTransitioned, shouldHybridModeTransition } from '../services/marketDataService.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { saveSnapshot } from '../store/persistence.js';
 import { exportSimulationData } from '../services/exportService.js';
@@ -15,6 +15,13 @@ export const getSimInterval = (): number => {
   if (mode === 'realtime') {
     return parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10); // 10 minutes default for real-time
   }
+  if (mode === 'hybrid') {
+    // In hybrid mode, use realtime interval if transitioned, otherwise use simulated interval
+    if (hasHybridModeTransitioned()) {
+      return parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10); // 10 minutes for real-time phase
+    }
+    return parseInt(process.env.SIM_INTERVAL_MS || '30000', 10); // 30 seconds for accelerated phase
+  }
   return parseInt(process.env.SIM_INTERVAL_MS || '30000', 10); // 30 seconds default for simulated/historical
 };
 
@@ -22,6 +29,13 @@ export const getTradeInterval = (): number => {
   const mode = getSimulationMode();
   if (mode === 'realtime') {
     return parseInt(process.env.REALTIME_TRADE_INTERVAL_MS || '1800000', 10); // 30 minutes default for real-time
+  }
+  if (mode === 'hybrid') {
+    // In hybrid mode, use realtime interval if transitioned, otherwise use simulated interval
+    if (hasHybridModeTransitioned()) {
+      return parseInt(process.env.REALTIME_TRADE_INTERVAL_MS || '1800000', 10); // 30 minutes for real-time phase
+    }
+    return parseInt(process.env.TRADE_INTERVAL_MS || '7200000', 10); // 2 hours for accelerated phase
   }
   return parseInt(process.env.TRADE_INTERVAL_MS || '7200000', 10); // 2 hours default for simulated/historical
 };
@@ -88,18 +102,18 @@ export const startScheduler = async (): Promise<void> => {
       
       // Check if historical simulation is complete
       if (isHistoricalSimulationComplete(snapshot.day)) {
-        logger.logSimulationEvent('Historical simulation complete, stopping scheduler', { 
-          totalDays: snapshot.day + 1, 
-          finalDay: snapshot.day 
+        logger.logSimulationEvent('Historical simulation complete, stopping scheduler', {
+          totalDays: snapshot.day + 1,
+          finalDay: snapshot.day
         });
         // Export final data and logs
         await Promise.all([
           exportSimulationData(simulationState.getSnapshot()).catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to export simulation data on completion', { error: err });
           }),
           exportLogs().catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to export logs on completion', { error: err });
           })
         ]);
@@ -108,6 +122,25 @@ export const startScheduler = async (): Promise<void> => {
       }
 
       const mode = getSimulationMode();
+
+      // Check if hybrid mode should transition to realtime
+      if (mode === 'hybrid' && !hasHybridModeTransitioned()) {
+        const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
+        if (shouldHybridModeTransition(currentDate, snapshot.day, snapshot.intradayHour)) {
+          logger.logSimulationEvent('Hybrid mode transitioning from accelerated to realtime', {
+            currentDay: snapshot.day,
+            intradayHour: snapshot.intradayHour,
+            currentDate: currentDate,
+            realtime: new Date().toISOString()
+          });
+          setHybridModeTransitioned(true);
+
+          // Note: Intervals will be updated on next tick via getSimInterval/getTradeInterval
+          // The scheduler loop will need to be restarted to pick up new intervals
+          // For now, we'll just log and continue - the intervals will adjust dynamically
+          logger.logSimulationEvent('Hybrid mode now in realtime phase - intervals will adjust on next restart', {});
+        }
+      }
       const now = new Date();
       const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
       const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
@@ -116,10 +149,13 @@ export const startScheduler = async (): Promise<void> => {
         : now;
       const realtimeMarketOpen = isMarketOpen(now);
       const marketOpen = isMarketOpen(effectiveTime);
-      
+
       // Real-time mode: process when market is open OR when using delayed data
       // (delayed data mode should work even if market hours check fails due to timezone issues)
-      if (mode === 'realtime') {
+      // Hybrid mode after transition: behaves like realtime
+      const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+
+      if (isRealtimeMode) {
         // Get ET time for logging and calculations
         // Convert current time to ET timezone
         const utc = new Date(effectiveTime.toISOString());
@@ -335,8 +371,9 @@ export const startScheduler = async (): Promise<void> => {
           });
         return;
       }
-      
+
       // Simulated/Historical mode: use existing logic
+      // Hybrid mode before transition: also uses accelerated logic
       const currentHour = snapshot.intradayHour;
       const minutesPerTick = getSimulatedMinutesPerTick();
       const nextHour = currentHour + (minutesPerTick / 60);
@@ -357,11 +394,11 @@ export const startScheduler = async (): Promise<void> => {
         // Update currentDate for the new day
         firstTradeExecuted = false;
         let newCurrentDate: string;
-        if (snapshot.mode === 'historical' && snapshot.startDate) {
+        if ((snapshot.mode === 'historical' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
           const start = new Date(snapshot.startDate);
           start.setDate(start.getDate() + updatedSnapshot.day);
           newCurrentDate = start.toISOString();
-        } else if (snapshot.mode === 'realtime') {
+        } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
           // For real-time mode, update currentDate
           const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
           const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
@@ -426,11 +463,11 @@ export const startScheduler = async (): Promise<void> => {
         let newCurrentDate: string = currentSnapshot.currentDate || currentSnapshot.startDate || new Date().toISOString();
         if (currentSnapshot.startDate) {
           const start = new Date(currentSnapshot.startDate);
-          if (currentSnapshot.mode === 'realtime') {
-            // For real-time, calculate the data time
+          if (currentSnapshot.mode === 'realtime' || (currentSnapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
+            // For real-time or hybrid (post-transition), calculate the data time
             const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
             const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
-            
+
             if (USE_DELAYED_DATA) {
               // For delayed data: use (current time - delay) as the data time
               // The data we just fetched is from (now - delay), so that's what we display
@@ -446,7 +483,7 @@ export const startScheduler = async (): Promise<void> => {
               newCurrentDate = now.toISOString();
             }
           } else {
-            // For simulated/historical, calculate from start date
+            // For simulated/historical or hybrid (pre-transition), calculate from start date
             start.setDate(start.getDate() + currentSnapshot.day);
             const hours = Math.floor(nextHour);
             const minutes = Math.round((nextHour - hours) * 60);
