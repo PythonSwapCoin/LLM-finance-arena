@@ -105,14 +105,18 @@ class SimulationInstance {
         name: 'S&P 500',
         color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID],
         performanceHistory: [initialBenchmarkMetrics]
-      },
-      {
+      }
+    ];
+
+    // Only include AI Managers Index for Wall Street Arena (multi-model) mode
+    if (this.simulationType.id === 'multi-model') {
+      benchmarks.push({
         id: AI_MANAGERS_INDEX_ID,
         name: 'AI Managers Index',
         color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID],
         performanceHistory: [initialBenchmarkMetrics]
-      }
-    ];
+      });
+    }
 
     const mode = getSimulationMode();
     const now = new Date();

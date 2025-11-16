@@ -719,26 +719,8 @@ export const tradeWindow = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // S&P 500 benchmark updates based on market data changes
-      const tickers = Object.keys(marketData);
-      let totalReturn = 0;
-      let validReturns = 0;
-      
-      tickers.forEach(ticker => {
-        const currentStock = marketData[ticker];
-        const prevStock = currentSnapshot.marketData[ticker];
-        
-        if (prevStock && prevStock.price > 0 && currentStock.price > 0) {
-          const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
-          totalReturn += stockReturn;
-          validReturns++;
-        }
-      });
-      
-      if (validReturns > 0) {
-        const avgReturn = totalReturn / validReturns;
-        newTotalValue = lastPerf.totalValue * (1 + avgReturn);
-      }
+      // S&P 500 doesn't change during trade windows (market data unchanged)
+      newTotalValue = lastPerf.totalValue;
     } else if (b.id === AI_MANAGERS_INDEX_ID) {
       const avgAgentReturn = updatedAgents.reduce((acc, agent) => {
         const lastMetric = agent.performanceHistory[agent.performanceHistory.length - 1];
@@ -751,10 +733,10 @@ export const tradeWindow = async (
       }, 0) / updatedAgents.length;
       newTotalValue *= (1 + avgAgentReturn);
     }
-    
+
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, marketData, b.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
-    
+
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
   });
 
@@ -804,15 +786,34 @@ export const advanceDay = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      newTotalValue = lastPerf.totalValue;
+      // S&P 500 benchmark updates based on market data changes from previous day to new day
+      const tickers = Object.keys(newMarketData);
+      let totalReturn = 0;
+      let validReturns = 0;
+
+      tickers.forEach(ticker => {
+        const currentStock = newMarketData[ticker];
+        const prevStock = currentSnapshot.marketData[ticker];
+
+        if (prevStock && prevStock.price > 0 && currentStock.price > 0) {
+          const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
+          totalReturn += stockReturn;
+          validReturns++;
+        }
+      });
+
+      if (validReturns > 0) {
+        const avgReturn = totalReturn / validReturns;
+        newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+      }
     } else if (b.id === AI_MANAGERS_INDEX_ID) {
       const avgAgentReturn = updatedAgents.reduce((acc, agent) => acc + (agent.performanceHistory.slice(-1)[0]?.dailyReturn ?? 0), 0) / updatedAgents.length;
       newTotalValue *= (1 + avgAgentReturn);
     }
-    
+
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, b.performanceHistory, nextDay);
     newMetrics.intradayHour = 0;
-    
+
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
   });
 
