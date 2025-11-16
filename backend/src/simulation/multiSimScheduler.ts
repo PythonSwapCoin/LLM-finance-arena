@@ -189,9 +189,35 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       newMarketData
     );
 
+    // Calculate new currentDate for the advanced day
+    let newCurrentDate: string;
+    if ((snapshot.mode === 'historical' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
+      const start = new Date(snapshot.startDate);
+      start.setDate(start.getDate() + newDay);
+      newCurrentDate = start.toISOString();
+    } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
+      // For real-time mode, update currentDate to account for data delay
+      const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
+      const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+
+      if (USE_DELAYED_DATA) {
+        const now = new Date();
+        const dataTime = new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000));
+        newCurrentDate = dataTime.toISOString();
+      } else {
+        newCurrentDate = new Date().toISOString();
+      }
+    } else {
+      // Simulated mode
+      const start = snapshot.startDate ? new Date(snapshot.startDate) : new Date();
+      start.setDate(start.getDate() + newDay);
+      newCurrentDate = start.toISOString();
+    }
+
     instance.updateSnapshot({
       day: newDay,
       intradayHour: 0,
+      currentDate: newCurrentDate,
       agents: result.agents,
       benchmarks: result.benchmarks,
       marketData: result.marketData,
@@ -201,6 +227,7 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
     logger.logSimulationEvent(`Advanced to day ${newDay} for simulation ${simulationTypeId}`, {
       simulationType: simulationTypeId,
       newDay,
+      currentDate: newCurrentDate,
     });
 
     // Save snapshot after day advancement
