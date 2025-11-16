@@ -27,7 +27,16 @@ export function SimulationSelector() {
           throw new Error('Failed to fetch competition types');
         }
         const data = await response.json();
-        setTypes(data.types);
+        // Sort types to put disabled modes at the bottom
+        const sortedTypes = [...data.types].sort((a, b) => {
+          const aEnabled = a.enabled !== false;
+          const bEnabled = b.enabled !== false;
+          // Enabled items come first
+          if (aEnabled && !bEnabled) return -1;
+          if (!aEnabled && bEnabled) return 1;
+          return 0;
+        });
+        setTypes(sortedTypes);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load competition types');
       } finally {

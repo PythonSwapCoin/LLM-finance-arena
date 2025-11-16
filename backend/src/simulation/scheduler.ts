@@ -135,10 +135,24 @@ export const startScheduler = async (): Promise<void> => {
           });
           setHybridModeTransitioned(true);
 
-          // Note: Intervals will be updated on next tick via getSimInterval/getTradeInterval
-          // The scheduler loop will need to be restarted to pick up new intervals
-          // For now, we'll just log and continue - the intervals will adjust dynamically
-          logger.logSimulationEvent('Hybrid mode now in realtime phase - intervals will adjust on next restart', {});
+          // Restart scheduler to pick up new realtime intervals
+          logger.logSimulationEvent('Restarting scheduler with realtime intervals', {
+            oldSimInterval: getSimInterval(),
+            newTradeInterval: getTradeInterval()
+          });
+
+          // Stop current scheduler
+          stopScheduler();
+
+          // Restart with new intervals after a brief delay to ensure clean shutdown
+          setTimeout(() => {
+            startScheduler().catch(err => {
+              logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+                'Failed to restart scheduler after hybrid transition', { error: err });
+            });
+          }, 1000);
+
+          return; // Exit current tick to allow scheduler restart
         }
       }
       const now = new Date();
