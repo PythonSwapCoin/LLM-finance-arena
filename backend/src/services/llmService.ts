@@ -7,6 +7,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const ENABLE_LLM = (process.env.ENABLE_LLM ?? 'true').toLowerCase() === 'true';
 const USE_UNIFIED_MODEL = (process.env.USE_UNIFIED_MODEL ?? 'false').toLowerCase() === 'true';
 const UNIFIED_MODEL = process.env.UNIFIED_MODEL || 'google/gemini-2.5-flash-lite';
+const SIMPLE_BOT_PROMPTS = (process.env.SIMPLE_BOT_PROMPTS ?? 'false').toLowerCase() === 'true';
 
 if (!OPENROUTER_API_KEY && ENABLE_LLM) {
   console.warn('OPENROUTER_API_KEY is not set. LLM agents will not be able to make trading decisions.');
@@ -19,6 +20,10 @@ if (!ENABLE_LLM) {
 if (USE_UNIFIED_MODEL) {
   console.log(`⚠️ Unified model mode ENABLED. All agents will use: ${UNIFIED_MODEL}`);
   console.log('   (Frontend will still show original model names for display purposes)');
+}
+
+if (SIMPLE_BOT_PROMPTS) {
+  console.log('⚠️ Simple bot prompts ENABLED. Using JSON format with ticker and price only to reduce token usage.');
 }
 
 const getAgentPrompt = (agent: Agent): string => {
@@ -349,7 +354,98 @@ You may provide a reply (optional). If you choose to reply, it must be one sente
 `
     : '';
 
-  const prompt = `
+  // Build market data based on SIMPLE_BOT_PROMPTS setting
+  const marketDataForPrompt = SIMPLE_BOT_PROMPTS
+    ? Object.values(marketData).map(d => ({
+        ticker: d.ticker,
+        price: parseFloat(d.price.toFixed(2))
+      }))
+    : Object.values(marketData).map(d => ({
+        ticker: d.ticker,
+        longName: d.longName || d.ticker,
+        price: parseFloat(d.price.toFixed(2)),
+        trailingPE: d.trailingPE ? parseFloat(d.trailingPE.toFixed(2)) : null,
+        priceToBook: d.priceToBook ? parseFloat(d.priceToBook.toFixed(2)) : null,
+        marketCap: d.marketCap ? parseFloat((d.marketCap / 1e9).toFixed(1)) : null,
+        beta: d.beta ? parseFloat(d.beta.toFixed(2)) : null,
+        dividendYield: d.dividendYield ? parseFloat((d.dividendYield * 100).toFixed(2)) : null,
+        sector: d.sector || null,
+        dailyChangePercent: parseFloat((d.dailyChangePercent * 100).toFixed(2))
+      }));
+
+  const prompt = SIMPLE_BOT_PROMPTS
+    ? `You are a portfolio manager making trading decisions for Day ${day}.
+
+Below is your trading context in JSON format:
+
+${JSON.stringify({
+  marketData: marketDataForPrompt,
+  portfolio: {
+    availableCash: parseFloat(availableCash.toFixed(2)),
+    totalValue: parseFloat(portfolioValue.toFixed(2)),
+    positions: currentPositions.map(p => ({
+      ticker: p.ticker,
+      quantity: p.quantity,
+      avgCost: parseFloat(p.avgCost.toFixed(2)),
+      currentPrice: p.currentPrice,
+      positionValue: parseFloat(p.positionValue.toFixed(2)),
+      positionPercent: parseFloat(p.positionPercent),
+      unrealizedGain: parseFloat(p.unrealizedGain.toFixed(2)),
+      unrealizedGainPercent: parseFloat(p.unrealizedGainPercent)
+    }))
+  },
+  ...(previousFailedTrades && previousFailedTrades.length > 0 ? {
+    failedTrades: previousFailedTrades.map(ft => ({
+      action: ft.action,
+      ticker: ft.ticker,
+      quantity: ft.quantity,
+      reason: ft.reason
+    }))
+  } : {}),
+  ...(chatContext?.enabled && communityMessages.length > 0 ? {
+    communityMessages: communityMessages.map(m => ({
+      sender: m.sender,
+      content: m.content
+    }))
+  } : {}),
+  tradingRules: {
+    maxPositionSizePercent: MAX_POSITION_SIZE_PERCENT * 100,
+    tradingFee: tradingCostLine,
+    noMargin: true,
+    noShortSelling: true,
+    allowAllCash: allowAllCash
+  }
+}, null, 2)}
+
+Return a JSON object with:
+- "rationale": A 1-2 sentence explanation of your strategy
+- "trades": Array of trades with: ticker, action ("buy" or "sell"), quantity (integer), fairValue, topOfBox, bottomOfBox, justification${communityMessages.length > 0 ? `
+- "reply": Optional short message to community (max ${chatContext?.maxReplyLength ?? 140} chars, no links)` : ''}
+
+Example response:
+{
+  "rationale": "Buying AAPL due to momentum, selling MSFT to rebalance.",
+  "trades": [
+    {
+      "ticker": "AAPL",
+      "action": "buy",
+      "quantity": 10,
+      "fairValue": 185.50,
+      "topOfBox": 192.00,
+      "bottomOfBox": 178.00,
+      "justification": "AAPL undervalued with strong fundamentals."
+    }
+  ]${communityMessages.length > 0 ? `,
+  "reply": "Thanks for the support—staying nimble today."` : ''}
+}
+
+IMPORTANT:
+- Return ONLY valid JSON, no markdown or code blocks
+- Only include trades to execute (no "hold" actions)
+- Ensure you have enough cash for buys and shares for sells${allowAllCash ? '' : `
+- You must invest available cash—holding 100% cash is not acceptable`}
+- Return empty trades array if no action: {"rationale": "...", "trades": []}`
+    : `
 You are a portfolio manager making trading decisions for Day ${day}.
 
 === MARKET DATA ===
