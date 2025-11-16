@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSimulationState } from '../hooks/useSimulationState';
 import { Header } from './Header';
-import { TickerBar } from './TickerBar';
+import { RecentTradesBar } from './RecentTradesBar';
 import { MainPerformanceChart } from './MainPerformanceChart';
 import { InfoPanel } from './InfoPanel';
 import { Leaderboard } from './Leaderboard';
@@ -129,8 +129,8 @@ export function SimulationView() {
         simulationTypeName={simulationType.name}
       />
 
-      {/* Ticker Bar */}
-      <TickerBar marketData={marketData} />
+      {/* Recent Trades Bar */}
+      <RecentTradesBar agents={agents} />
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-6 mt-16">

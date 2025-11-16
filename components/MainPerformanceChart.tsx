@@ -681,7 +681,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             setSelectedParticipantId(null);
           }
         }}
-        style={{ cursor: hoveredParticipantId ? 'pointer' : 'default' }}
+        style={{ cursor: hoveredParticipantId ? 'pointer' : 'default', outline: 'none' }}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
         {/* Day boundary reference lines (dotted vertical lines) */}
@@ -912,7 +912,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                       })
                     }}
                   />
-                  <span className={`text-sm ${isHovered || isSelected ? 'font-semibold' : 'font-medium'}`} style={{ color: p.color }}>
+                  <span className="text-sm font-semibold" style={{ color: p.color }}>
                     {p.name}
                   </span>
                   {p.performanceHistory && p.performanceHistory.length > 0 && (
@@ -972,7 +972,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                       />
                     )}
                     <div className="w-6 h-0.5 rounded-full" style={{ backgroundColor: p.color }} />
-                    <span className={`text-sm ${isHovered || isSelected ? 'font-semibold' : 'font-medium'}`} style={{ color: p.color }}>
+                    <span className="text-sm font-semibold" style={{ color: p.color }}>
                       {p.name}
                     </span>
                     {p.performanceHistory && p.performanceHistory.length > 0 && (
