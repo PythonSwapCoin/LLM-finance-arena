@@ -29,15 +29,27 @@ export const calculateAllMetrics = (
   day: number,
   dailyTrades: Trade[] = []
 ): PerformanceMetrics => {
+  // Calculate total portfolio value using current prices - this is the robust approach
   const totalValue = calculatePortfolioValue(portfolio, marketData);
   const totalReturn = (totalValue / INITIAL_CASH) - 1;
   
-  const prevValue = history.length > 0 ? history[history.length - 1].totalValue : INITIAL_CASH;
-  const currentDayId = getDayIdentifier(day);
-  const hasPreviousDay = history.some(entry => getDayIdentifier(entry.timestamp) !== currentDayId);
-  const dailyReturn = hasPreviousDay && prevValue !== 0
-    ? (totalValue / prevValue) - 1
-    : totalReturn;
+  // Calculate daily return: use the previous entry's totalValue (which is based on prices)
+  // This is simpler and more robust than trying to find "different day" entries
+  // The previous entry's totalValue is always calculated from prices, so this is correct
+  let dailyReturn: number;
+  if (history.length === 0) {
+    // First entry: no daily return yet
+    dailyReturn = 0;
+  } else {
+    const prevValue = history[history.length - 1].totalValue;
+    if (prevValue > 0) {
+      // Calculate return from previous entry's value (which was calculated from prices)
+      dailyReturn = (totalValue / prevValue) - 1;
+    } else {
+      // Edge case: prevValue is 0 or invalid
+      dailyReturn = 0;
+    }
+  }
 
   const dailyReturns = [...history.map(h => h.dailyReturn), dailyReturn];
 

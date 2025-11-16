@@ -244,9 +244,10 @@ function setCachedMarketData(ticker: string, data: TickerData): void {
 }
 
 const setToMarketOpen = (date: Date): Date => {
-  const marketOpen = new Date(date);
-  marketOpen.setHours(9, 30, 0, 0);
-  return marketOpen;
+  // Use the ET-aware function from marketHours
+  // Import it dynamically to avoid circular dependencies
+  const { setDateToMarketOpenET } = require('../simulation/marketHours.js');
+  return setDateToMarketOpenET(date);
 };
 
 export const getHistoricalSimulationStartDate = (): Date => {
@@ -300,23 +301,89 @@ export const setHybridModeTransitioned = (transitioned: boolean): void => {
   hybridModeHasTransitioned = transitioned;
 };
 
-export const shouldHybridModeTransition = (currentDate: string, currentDay: number, intradayHour: number): boolean => {
+export const shouldHybridModeTransition = (currentDate: string, currentDay: number, intradayHour: number, minutesPerTick?: number): boolean => {
   if (MODE !== 'hybrid' || hybridModeHasTransitioned) {
     return false;
   }
 
   const now = new Date();
+  
+  // Account for delayed data: if USE_DELAYED_DATA is enabled, compare against effective time
+  // (current time minus delay) instead of actual current time
+  const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
+  const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+  const effectiveTime = USE_DELAYED_DATA
+    ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000))
+    : now;
+  
   const simulationDate = new Date(currentDate);
 
-  // Add intraday hours to simulation date (assuming market opens at 9:30 AM)
+  // Add intraday hours to simulation date (assuming market opens at 9:30 AM ET)
   const marketOpenHour = 9;
   const marketOpenMinute = 30;
   simulationDate.setHours(marketOpenHour + Math.floor(intradayHour), marketOpenMinute + Math.round((intradayHour % 1) * 60), 0, 0);
 
-  // Check if simulation has caught up to current time (within a threshold)
-  // Use a threshold of the tick interval to avoid overshooting
-  const catchUpThresholdMs = 15 * 60 * 1000; // 15 minutes threshold
-  const timeDifference = now.getTime() - simulationDate.getTime();
+  // Check if simulation has already passed effective time (simulation is in the future)
+  const timeDifference = effectiveTime.getTime() - simulationDate.getTime();
+  
+  // If simulation is already in the future relative to effective time, transition immediately
+  if (timeDifference < 0) {
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      'Hybrid mode transition: simulation is already past effective time', {
+        currentDate,
+        currentDay,
+        intradayHour,
+        simulationDateTime: simulationDate.toISOString(),
+        currentDateTime: now.toISOString(),
+        effectiveDateTime: effectiveTime.toISOString(),
+        useDelayedData: USE_DELAYED_DATA,
+        dataDelayMinutes: USE_DELAYED_DATA ? DATA_DELAY_MINUTES : 0,
+        timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
+      });
+    return true;
+  }
+
+  // Check if the NEXT tick would overshoot effective time
+  if (minutesPerTick !== undefined && minutesPerTick > 0) {
+    const nextIntradayHour = intradayHour + (minutesPerTick / 60);
+    const nextSimulationDate = new Date(currentDate);
+    
+    // Handle day advancement if next hour exceeds market close
+    if (nextIntradayHour >= 6.5) {
+      // Would advance to next day
+      nextSimulationDate.setDate(nextSimulationDate.getDate() + 1);
+      nextSimulationDate.setHours(marketOpenHour, marketOpenMinute, 0, 0);
+    } else {
+      nextSimulationDate.setHours(marketOpenHour + Math.floor(nextIntradayHour), marketOpenMinute + Math.round((nextIntradayHour % 1) * 60), 0, 0);
+    }
+    
+    const nextTimeDifference = effectiveTime.getTime() - nextSimulationDate.getTime();
+    
+    // If next tick would overshoot (go past effective time), transition now
+    if (nextTimeDifference < 0) {
+      logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+        'Hybrid mode transition: next tick would overshoot effective time', {
+          currentDate,
+          currentDay,
+          intradayHour,
+          nextIntradayHour,
+          simulationDateTime: simulationDate.toISOString(),
+          nextSimulationDateTime: nextSimulationDate.toISOString(),
+          currentDateTime: now.toISOString(),
+          effectiveDateTime: effectiveTime.toISOString(),
+          useDelayedData: USE_DELAYED_DATA,
+          dataDelayMinutes: USE_DELAYED_DATA ? DATA_DELAY_MINUTES : 0,
+          timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
+          nextTimeDifferenceMinutes: (nextTimeDifference / 60000).toFixed(2),
+        });
+      return true;
+    }
+  }
+
+  // Check if simulation has caught up to effective time (within a threshold)
+  // Use a threshold based on the tick interval to avoid overshooting
+  const catchUpThresholdMs = minutesPerTick ? Math.min(minutesPerTick * 60 * 1000, 30 * 60 * 1000) : 15 * 60 * 1000; // Max 30 minutes threshold
+  const shouldTransition = timeDifference >= 0 && timeDifference <= catchUpThresholdMs;
 
   logger.log(LogLevel.INFO, LogCategory.SIMULATION,
     'Checking hybrid mode transition', {
@@ -325,13 +392,15 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
       intradayHour,
       simulationDateTime: simulationDate.toISOString(),
       currentDateTime: now.toISOString(),
+      effectiveDateTime: effectiveTime.toISOString(),
+      useDelayedData: USE_DELAYED_DATA,
+      dataDelayMinutes: USE_DELAYED_DATA ? DATA_DELAY_MINUTES : 0,
       timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
       threshold: catchUpThresholdMs / 60000,
-      shouldTransition: timeDifference >= -catchUpThresholdMs && timeDifference <= catchUpThresholdMs
+      shouldTransition
     });
 
-  // Transition when simulation time is within threshold of current time
-  return timeDifference >= -catchUpThresholdMs && timeDifference <= catchUpThresholdMs;
+  return shouldTransition;
 };
 
 const getNextPrice = (currentPrice: number): number => {
@@ -933,6 +1002,7 @@ const fetchYahooFinanceDetailedInfo = async (ticker: string, baseData: TickerDat
       baseData.sector = detailedInfo.sector;
       baseData.industry = detailedInfo.industry;
       baseData.longName = detailedInfo.longName;
+      baseData.shortName = detailedInfo.shortName;
       
       // Update cache with enriched data
       setCachedMarketData(ticker, baseData);
@@ -949,15 +1019,18 @@ const fetchYahooFinanceDetailedInfo = async (ticker: string, baseData: TickerDat
 };
 
 export const createInitialMarketData = async (tickers: string[]): Promise<MarketData> => {
+  // Always include SPY for S&P 500 benchmark tracking
+  const tickersWithSpy = [...new Set([...tickers, 'SPY'])];
+  
   if (MODE === 'historical') {
     console.log('📊 ✅ Historical Simulation Mode ENABLED');
-    logger.logSimulationEvent('Historical Simulation Mode ENABLED', { tickers: tickers.length });
+    logger.logSimulationEvent('Historical Simulation Mode ENABLED', { tickers: tickersWithSpy.length });
     historicalDataCache = {};
     currentHistoricalDay = 0;
-    historicalDataCache = await fetchHistoricalWeekData(tickers);
+    historicalDataCache = await fetchHistoricalWeekData(tickersWithSpy);
     
     const marketData: MarketData = {};
-    tickers.forEach(ticker => {
+    tickersWithSpy.forEach(ticker => {
       const dayData = historicalDataCache[ticker]?.[0];
       if (dayData) {
         marketData[ticker] = {
@@ -982,16 +1055,16 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
     if (USE_DELAYED_DATA) {
       console.log(`⏰ Using ${DATA_DELAY_MINUTES}-minute delayed data`);
       logger.logSimulationEvent('Real-Time Market Data Mode ENABLED (Delayed)', { 
-        tickers: tickers.length, 
+        tickers: tickersWithSpy.length, 
         delayMinutes: DATA_DELAY_MINUTES 
       });
     } else {
-      logger.logSimulationEvent('Real-Time Market Data Mode ENABLED', { tickers: tickers.length });
+      logger.logSimulationEvent('Real-Time Market Data Mode ENABLED', { tickers: tickersWithSpy.length });
     }
     
     // For initial load, disable cache to ensure fresh data
     // If using delayed data, fetchYahooFinanceData will automatically use delayed endpoints
-    const marketData = await fetchRealMarketDataWithCascade(tickers, false);
+    const marketData = await fetchRealMarketDataWithCascade(tickersWithSpy, false);
 
     if (ENABLE_YAHOO_DETAILED_INFO && !USE_DELAYED_DATA) {
       logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
@@ -1009,8 +1082,8 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
     return marketData;
   }
   console.log('📊 ✅ Simulated Market Data Mode (Default)');
-  logger.logSimulationEvent('Simulated Market Data Mode ENABLED', { tickers: tickers.length });
-  return createSimulatedMarketData(tickers);
+  logger.logSimulationEvent('Simulated Market Data Mode ENABLED', { tickers: tickersWithSpy.length });
+  return createSimulatedMarketData(tickersWithSpy);
 };
 
 const getIntradayPrice = (basePrice: number, dailyChangePercent: number, intradayHour: number): number => {
@@ -1027,12 +1100,13 @@ export const generateNextIntradayMarketData = async (
   options?: { prefetchedData?: MarketData; missingTickers?: string[] }
 ): Promise<MarketData> => {
   if (MODE === 'historical') {
-    let tickers = Object.keys(previousMarketData);
+    // Always include SPY for S&P 500 benchmark tracking
+    let tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
     if (tickers.length === 0) {
-      tickers = Object.keys(historicalDataCache);
+      tickers = [...new Set([...Object.keys(historicalDataCache), 'SPY'])];
     }
     if (tickers.length === 0) {
-      tickers = S_P500_TICKERS;
+      tickers = [...new Set([...S_P500_TICKERS, 'SPY'])];
     }
     
     if (tickers.length === 0) {
@@ -1077,7 +1151,8 @@ export const generateNextIntradayMarketData = async (
     
     return marketData;
   } else if (MODE === 'realtime') {
-    const tickers = Object.keys(previousMarketData);
+    // Always include SPY for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
     let fetchedData: MarketData = {};
     let usedPrefetch = false;
 
@@ -1140,7 +1215,8 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
 
   if (MODE === 'historical') {
     currentHistoricalDay++;
-    const tickers = Object.keys(previousMarketData);
+    // Always include SPY for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
     const marketData: MarketData = {};
     
     tickers.forEach(ticker => {
@@ -1179,7 +1255,8 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     
     return marketData;
   } else if (MODE === 'realtime') {
-    const tickers = Object.keys(previousMarketData);
+    // Always include SPY for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
     return await fetchRealMarketDataWithCascade(tickers);
   }
   

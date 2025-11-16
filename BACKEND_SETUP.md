@@ -94,8 +94,22 @@ SNAPSHOT_AUTOSAVE_INTERVAL_MS=900000
 # POSTGRES_NAMESPACE=default
 # POSTGRES_SNAPSHOT_ID=current
 
+# Trading Universe Configuration
+# Control how many S&P 500 companies are included in the simulation
+# This limits both: (1) the number of companies we fetch data for from yfinance, and (2) the number of companies sent to agents in prompts
+# Default: uses all available tickers (from S_P500_TICKERS or DEFAULT_TICKERS)
+# Example: ARENA_TICKER_COUNT=20  # Only use the first 20 companies
+ARENA_TICKER_COUNT=  # Optional: limit number of tickers (reduces API calls and prompt size)
+
+# Custom Ticker List (optional)
+# If you want to use a custom list of tickers instead of the default S&P 500 list:
+# S_P500_TICKERS=AAPL,MSFT,GOOGL,AMZN,TSLA  # Comma-separated list of ticker symbols
+
 # Simulation Control
 RESET_SIMULATION=false  # Set to 'true' to reset simulation on startup (deletes snapshot and starts from day 0)
+
+# Worker Heartbeat (optional)
+HEARTBEAT_INTERVAL_MS=300000  # Heartbeat log interval in milliseconds (default: 300000 = 5 minutes)
 
 # Logging
 LOG_LEVEL=INFO

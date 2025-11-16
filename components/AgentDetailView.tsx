@@ -49,17 +49,18 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
         .sort((a, b) => b.timestamp - a.timestamp)[0];
       const rationale = recentTrade?.justification || '-';
       
-      // Get stock name from market data - check for longName in TickerData
+      // Get stock name from market data - check for longName or shortName in TickerData
       let stockName = pos.ticker; // Default to ticker
       if (tickerData) {
-        // Try to get longName from TickerData - check multiple possible properties
+        // Try to get longName first (full company name), then shortName as fallback
         const longName = (tickerData as any).longName;
-        // Debug: log to see what we're getting
-        if (pos.ticker === 'AAPL') {
-          console.log('AAPL tickerData:', tickerData, 'longName:', longName);
-        }
+        const shortName = (tickerData as any).shortName;
+        
+        // Prefer longName (e.g., "Microsoft Corporation"), fallback to shortName (e.g., "Microsoft")
         if (longName && typeof longName === 'string' && longName.trim() !== '') {
           stockName = longName;
+        } else if (shortName && typeof shortName === 'string' && shortName.trim() !== '') {
+          stockName = shortName;
         }
       }
       

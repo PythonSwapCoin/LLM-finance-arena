@@ -533,6 +533,13 @@ const limitedTickerCount = Math.min(requestedTickerCount, resolvedTickers.length
 
 export const S_P500_TICKERS: string[] = resolvedTickers.slice(0, limitedTickerCount);
 
+// Log the ticker configuration on module load
+if (limitedTickerCount < resolvedTickers.length) {
+  console.log(`📊 Ticker limit active: Using ${limitedTickerCount} of ${resolvedTickers.length} available tickers (controlled by ARENA_TICKER_COUNT=${process.env.ARENA_TICKER_COUNT})`);
+} else {
+  console.log(`📊 Using all ${resolvedTickers.length} available tickers (set ARENA_TICKER_COUNT to limit)`);
+}
+
 export const INITIAL_CASH = 1000000;
 export const RISK_FREE_RATE = 0.02;
 export const TRADING_DAYS_PER_YEAR = 252;

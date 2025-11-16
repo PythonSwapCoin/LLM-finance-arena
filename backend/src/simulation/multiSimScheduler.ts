@@ -1,6 +1,6 @@
 import { simulationManager } from './SimulationManager.js';
 import { step, tradeWindow, advanceDay } from './engine.js';
-import { generateNextIntradayMarketData, generateNextDayMarketData, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult } from '../services/marketDataService.js';
+import { generateNextIntradayMarketData, generateNextDayMarketData, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult, hasHybridModeTransitioned, shouldHybridModeTransition, setHybridModeTransitioned } from '../services/marketDataService.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
 import type { MarketData } from '../types.js';
@@ -278,8 +278,33 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         return;
       }
 
+      // Check if hybrid mode should transition to realtime
+      // This check must happen BEFORE advancing time to prevent overshooting
+      if (mode === 'hybrid' && !hasHybridModeTransitioned()) {
+        const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
+        const minutesPerTick = getSimulatedMinutesPerTick();
+        
+        // Check if we should transition (including checking if next tick would overshoot)
+        if (shouldHybridModeTransition(currentDate, snapshot.day, snapshot.intradayHour, minutesPerTick)) {
+          logger.logSimulationEvent('Hybrid mode transitioning from accelerated to realtime (multi-sim)', {
+            currentDay: snapshot.day,
+            intradayHour: snapshot.intradayHour,
+            currentDate: currentDate,
+            realtime: new Date().toISOString(),
+            minutesPerTick: minutesPerTick
+          });
+          setHybridModeTransitioned(true);
+          
+          // Note: Multi-sim scheduler will automatically use realtime intervals after transition
+          // because the mode check below will treat hybrid (transitioned) as realtime
+        }
+      }
+
       // Update intraday hour for simulated/historical mode
-      if (mode !== 'realtime') {
+      // Hybrid mode before transition: uses accelerated logic
+      // Hybrid mode after transition: behaves like realtime (skips this block)
+      const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+      if (!isRealtimeMode) {
         const minutesPerTick = getSimulatedMinutesPerTick();
         const newIntradayHour = snapshot.intradayHour + (minutesPerTick / 60);
 
@@ -338,6 +363,21 @@ export const startMultiSimScheduler = async (): Promise<void> => {
   // Trade window handler
   const tradeWindowHandler = async () => {
     try {
+      // Check market status for realtime mode and hybrid mode (after transition)
+      const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+      if (isRealtimeMode) {
+        const now = getETTime();
+        const isOpen = checkMarketOpen(now);
+        if (!isOpen) {
+          logger.logSimulationEvent('Skipping trade window - market is closed', {
+            etTime: now.toISOString(),
+            mode,
+            hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
+          });
+          return;
+        }
+      }
+
       // Check if we've had enough price ticks (yfinance rounds) before first trade
       if (!firstTradeExecuted) {
         if (priceTickCount < REQUIRED_PRICE_TICKS_BEFORE_FIRST_TRADE) {
@@ -467,6 +507,17 @@ export const stopMultiSimScheduler = async (): Promise<void> => {
   if (realtimePriceLoopPromise) {
     await realtimePriceLoopPromise;
     realtimePriceLoopPromise = null;
+  }
+
+  // Export price logs when stopping
+  try {
+    const { priceLogService } = await import('../services/priceLogService.js');
+    await priceLogService.exportLogs().catch(err => {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        'Failed to export price logs when stopping multi-sim scheduler', { error: err });
+    });
+  } catch (err) {
+    // Silently fail if price log service not available
   }
 
   logger.logSimulationEvent('Multi-simulation scheduler stopped', {});

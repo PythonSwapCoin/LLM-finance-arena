@@ -239,4 +239,6 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
       nextTradeWindowISO: new Date(timerState.nextTradeWindowTimestamp).toISOString(),
     };
   });
+
+  // Note: Price log export endpoints are in routes.ts to avoid duplication
 };

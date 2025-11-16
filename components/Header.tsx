@@ -42,7 +42,16 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
         const response = await fetch(`${API_BASE_URL}/api/simulations/types`);
         if (response.ok) {
           const data = await response.json();
-          setCompetitions(data.types || []);
+          // Sort competitions: enabled first, then disabled (coming soon) at the end
+          const sortedCompetitions = [...(data.types || [])].sort((a, b) => {
+            const aEnabled = a.enabled !== false;
+            const bEnabled = b.enabled !== false;
+            // Enabled items come first
+            if (aEnabled && !bEnabled) return -1;
+            if (!aEnabled && bEnabled) return 1;
+            return 0;
+          });
+          setCompetitions(sortedCompetitions);
         }
       } catch (err) {
         console.error('Failed to fetch competitions:', err);

@@ -59,12 +59,13 @@ const startWorker = async (): Promise<void> => {
 
     // Keep the process alive
     // The scheduler runs in intervals, so we just need to keep the process running
+    const HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS || '300000', 10); // Default 5 minutes
     setInterval(() => {
-      // Heartbeat log every 5 minutes to show worker is alive
+      // Heartbeat log to show worker is alive
       logger.log(LogLevel.INFO, LogCategory.SYSTEM, 'Worker heartbeat', {
         timestamp: new Date().toISOString(),
       });
-    }, 5 * 60 * 1000);
+    }, HEARTBEAT_INTERVAL_MS);
 
   } catch (err) {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,

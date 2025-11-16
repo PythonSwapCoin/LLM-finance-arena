@@ -1,10 +1,11 @@
 import type { Agent, Benchmark, MarketData, Trade, PerformanceMetrics, ChatState } from '../types.js';
-import { S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, INITIAL_CASH, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
+import { S_P500_BENCHMARK_ID, INITIAL_CASH, TRADING_FEE_RATE, MIN_TRADE_FEE } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getTradeDecisions } from '../services/llmService.js';
 import { logger } from '../services/logger.js';
 import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatService.js';
 import { createRoundId } from '../utils/chatUtils.js';
+import { priceLogService } from '../services/priceLogService.js';
 
 const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
   if (value === undefined) {
@@ -177,7 +178,14 @@ const handleTradeWindowAgent = async (
     const newTradeHistory = [...agent.tradeHistory];
     const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
 
-    decidedTrades.forEach(trade => {
+    // Sort trades: execute sells first, then buys (so agents can sell to free up cash for buys)
+    const sortedTrades = [...decidedTrades].sort((a, b) => {
+      if (a.action === 'sell' && b.action === 'buy') return -1;
+      if (a.action === 'buy' && b.action === 'sell') return 1;
+      return 0; // Keep original order for same action type
+    });
+
+    sortedTrades.forEach(trade => {
       const tradePrice = marketData[trade.ticker]?.price;
       if (!tradePrice) {
         console.warn(`[${agent.name}] Skipping trade for ${trade.ticker} - price not available`);
@@ -363,7 +371,14 @@ const handleAdvanceDayAgent = async (
     const newTradeHistory = [...agent.tradeHistory];
     const newPortfolio = { ...agent.portfolio, positions: { ...agent.portfolio.positions } };
 
-    decidedTrades.forEach(trade => {
+    // Sort trades: execute sells first, then buys (so agents can sell to free up cash for buys)
+    const sortedTrades = [...decidedTrades].sort((a, b) => {
+      if (a.action === 'sell' && b.action === 'buy') return -1;
+      if (a.action === 'buy' && b.action === 'sell') return 1;
+      return 0; // Keep original order for same action type
+    });
+
+    sortedTrades.forEach(trade => {
       const tradePrice = marketData[trade.ticker]?.price;
       if (!tradePrice) {
         console.warn(`[${agent.name}] Skipping trade for ${trade.ticker} - price not available`);
@@ -520,8 +535,13 @@ export const step = async (
 
   // Update agents with new market data (no trading, just portfolio valuation)
   const updatedAgents = agents.map(agent => {
-    const newMetrics = calculateAllMetrics(agent.portfolio, newMarketData, agent.performanceHistory, timestamp);
+    // Pass day number (not timestamp) to calculateAllMetrics for correct day comparison
+    const newMetrics = calculateAllMetrics(agent.portfolio, newMarketData, agent.performanceHistory, day);
     newMetrics.intradayHour = intradayHour;
+    // Override timestamp if needed (for real-time mode)
+    if (mode === 'realtime' && currentTimestamp !== undefined) {
+      newMetrics.timestamp = timestamp;
+    }
     
     return {
       ...agent,
@@ -529,48 +549,93 @@ export const step = async (
     };
   });
 
+  // Log prices and portfolio values for debugging
+  try {
+    if (newMarketData && Object.keys(newMarketData).length > 0 && updatedAgents.length > 0) {
+      priceLogService.logPricesAndPortfolios(newMarketData, updatedAgents, day, intradayHour, timestamp);
+    }
+  } catch (error) {
+    // Log error but don't break the simulation
+    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+      'Failed to log prices and portfolios', {
+        error: error instanceof Error ? error.message : String(error),
+        day,
+        intradayHour,
+        marketDataKeys: Object.keys(newMarketData).length,
+        agentsCount: updatedAgents.length
+      });
+  }
+
   // Update benchmarks
   const updatedBenchmarks = benchmarks.map(b => {
     const lastPerf = b.performanceHistory[b.performanceHistory.length - 1];
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      const tickers = Object.keys(newMarketData);
-      let totalReturn = 0;
-      let validReturns = 0;
+      // Use SPY (S&P 500 ETF) price directly from market data
+      // Always use price changes between snapshots - this is the most robust approach
+      const spyTicker = 'SPY';
+      const currentSpy = newMarketData[spyTicker];
+      const prevSpy = currentSnapshot.marketData[spyTicker];
       
-      tickers.forEach(ticker => {
-        const currentStock = newMarketData[ticker];
-        const prevStock = currentSnapshot.marketData[ticker];
-        
-        if (prevStock && prevStock.price > 0 && currentStock.price > 0) {
-          const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
-          totalReturn += stockReturn;
-          validReturns++;
-        }
-      });
+      let marketReturn = 0;
+      let hasValidReturn = false;
       
-      if (validReturns > 0) {
-        const marketReturn = totalReturn / validReturns;
-        newTotalValue *= (1 + marketReturn);
+      if (currentSpy && prevSpy && prevSpy.price > 0 && currentSpy.price > 0) {
+        // Calculate return from SPY price change - this is the correct and robust method
+        marketReturn = (currentSpy.price - prevSpy.price) / prevSpy.price;
+        hasValidReturn = true;
       } else {
-        const marketReturn = Object.values(newMarketData).reduce((acc, stock) => {
-          return acc + (stock.dailyChangePercent || 0);
-        }, 0) / Object.values(newMarketData).length;
-        newTotalValue *= (1 + marketReturn);
-      }
-    } else if (b.id === AI_MANAGERS_INDEX_ID) {
-      const avgAgentReturn = updatedAgents.reduce((acc, agent) => {
-        const lastMetric = agent.performanceHistory[agent.performanceHistory.length - 1];
-        const prevMetric = agent.performanceHistory[agent.performanceHistory.length - 2];
-        if (prevMetric) {
-          const intradayReturn = (lastMetric.totalValue / prevMetric.totalValue) - 1;
-          return acc + intradayReturn;
+        // SPY not available, fallback to calculating from all stocks
+        const tickers = Object.keys(newMarketData);
+        
+        if (tickers.length === 0) {
+          // No market data available, keep current value
+          return { ...b, performanceHistory: [...b.performanceHistory, lastPerf] };
         }
-        return acc;
-      }, 0) / updatedAgents.length;
-      newTotalValue *= (1 + avgAgentReturn);
+
+        // Calculate return from actual price changes between snapshots
+        // Only use stocks that have both previous and current prices
+        let totalReturn = 0;
+        let validReturns = 0;
+        let totalWeight = 0;
+        
+        tickers.forEach(ticker => {
+          const currentStock = newMarketData[ticker];
+          const prevStock = currentSnapshot.marketData[ticker];
+          
+          if (prevStock && prevStock.price > 0 && currentStock && currentStock.price > 0) {
+            const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
+            
+            // Use market cap for weighting if available, otherwise equal weight
+            const weight = currentStock.marketCap || 1;
+            totalReturn += stockReturn * weight;
+            totalWeight += weight;
+            validReturns++;
+          }
+        });
+        
+        if (validReturns > 0) {
+          if (totalWeight > 0) {
+            // Weighted average return (market-cap weighted if available, otherwise equal weight)
+            marketReturn = totalReturn / totalWeight;
+            hasValidReturn = true;
+          } else {
+            // Edge case: all stocks have marketCap = 0, use equal weighting
+            marketReturn = totalReturn / validReturns;
+            hasValidReturn = true;
+          }
+        }
+      }
+      
+      // Apply the market return only if it's valid
+      // If we can't calculate a return from prices, keep the same value (don't update)
+      if (hasValidReturn && !isNaN(marketReturn) && isFinite(marketReturn)) {
+        newTotalValue = lastPerf.totalValue * (1 + marketReturn);
+      }
+      // If marketReturn is invalid, keep the same value (don't update)
     }
+    // AI Managers Index removed - no longer needed
     
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, b.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
@@ -721,18 +786,8 @@ export const tradeWindow = async (
     if (b.id === S_P500_BENCHMARK_ID) {
       // S&P 500 doesn't change during trade windows (market data unchanged)
       newTotalValue = lastPerf.totalValue;
-    } else if (b.id === AI_MANAGERS_INDEX_ID) {
-      const avgAgentReturn = updatedAgents.reduce((acc, agent) => {
-        const lastMetric = agent.performanceHistory[agent.performanceHistory.length - 1];
-        const prevMetric = agent.performanceHistory[agent.performanceHistory.length - 2];
-        if (prevMetric) {
-          const intradayReturn = (lastMetric.totalValue / prevMetric.totalValue) - 1;
-          return acc + intradayReturn;
-        }
-        return acc;
-      }, 0) / updatedAgents.length;
-      newTotalValue *= (1 + avgAgentReturn);
     }
+    // AI Managers Index removed - no longer needed
 
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, marketData, b.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
@@ -786,36 +841,78 @@ export const advanceDay = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // S&P 500 benchmark updates based on market data changes from previous day to new day
-      const tickers = Object.keys(newMarketData);
-      let totalReturn = 0;
-      let validReturns = 0;
-
-      tickers.forEach(ticker => {
-        const currentStock = newMarketData[ticker];
-        const prevStock = currentSnapshot.marketData[ticker];
-
-        if (prevStock && prevStock.price > 0 && currentStock.price > 0) {
-          const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
-          totalReturn += stockReturn;
-          validReturns++;
-        }
-      });
-
-      if (validReturns > 0) {
-        const avgReturn = totalReturn / validReturns;
-        newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+      // Use SPY (S&P 500 ETF) price directly from market data
+      // Always use price changes between snapshots - this is the most robust approach
+      const spyTicker = 'SPY';
+      const currentSpy = newMarketData[spyTicker];
+      const prevSpy = currentSnapshot.marketData[spyTicker];
+      
+      let marketReturn = 0;
+      let hasValidReturn = false;
+      
+      if (currentSpy && prevSpy && prevSpy.price > 0 && currentSpy.price > 0) {
+        // Calculate return from SPY price change - this is the correct and robust method
+        marketReturn = (currentSpy.price - prevSpy.price) / prevSpy.price;
+        hasValidReturn = true;
       } else {
-        // Fallback: use dailyChangePercent if available
-        const marketReturn = Object.values(newMarketData).reduce((acc, stock) => {
-          return acc + (stock.dailyChangePercent || 0);
-        }, 0) / Object.values(newMarketData).length;
+        // SPY not available, fallback to calculating from all stocks
+        const tickers = Object.keys(newMarketData);
+        
+        if (tickers.length === 0) {
+          // No market data available, keep current value
+          return { ...b, performanceHistory: [...b.performanceHistory, lastPerf] };
+        }
+
+        // Calculate return from actual price changes between days
+        // Only use stocks that have both previous and current prices
+        let totalReturn = 0;
+        let validReturns = 0;
+        let totalWeight = 0;
+
+        tickers.forEach(ticker => {
+          const currentStock = newMarketData[ticker];
+          const prevStock = currentSnapshot.marketData[ticker];
+
+          if (prevStock && prevStock.price > 0 && currentStock && currentStock.price > 0) {
+            const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
+            
+            // Use market cap for weighting if available, otherwise equal weight
+            const weight = currentStock.marketCap || 1;
+            totalReturn += stockReturn * weight;
+            totalWeight += weight;
+            validReturns++;
+          }
+        });
+
+        if (validReturns > 0) {
+          if (totalWeight > 0) {
+            // Weighted average return (market-cap weighted if available, otherwise equal weight)
+            marketReturn = totalReturn / totalWeight;
+            hasValidReturn = true;
+          } else {
+            // Edge case: all stocks have marketCap = 0, use equal weighting
+            marketReturn = totalReturn / validReturns;
+            hasValidReturn = true;
+          }
+        }
+        
+        // If we can't calculate return from prices, log a warning but keep the same value
+        if (!hasValidReturn) {
+          logger.logSimulationEvent('Warning: Cannot calculate market return - no valid price comparison', {
+            tickerCount: Object.keys(newMarketData).length,
+            prevTickerCount: Object.keys(currentSnapshot.marketData).length
+          });
+        }
+      }
+
+      // Apply the market return only if it's valid
+      // If we can't calculate a return from prices, keep the same value (don't update)
+      if (hasValidReturn && !isNaN(marketReturn) && isFinite(marketReturn)) {
         newTotalValue = lastPerf.totalValue * (1 + marketReturn);
       }
-    } else if (b.id === AI_MANAGERS_INDEX_ID) {
-      const avgAgentReturn = updatedAgents.reduce((acc, agent) => acc + (agent.performanceHistory.slice(-1)[0]?.dailyReturn ?? 0), 0) / updatedAgents.length;
-      newTotalValue *= (1 + avgAgentReturn);
+      // If marketReturn is invalid, keep the same value (don't update)
     }
+    // AI Managers Index removed - no longer needed
 
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, b.performanceHistory, nextDay);
     newMetrics.intradayHour = 0;

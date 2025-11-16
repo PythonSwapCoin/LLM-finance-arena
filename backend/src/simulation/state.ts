@@ -1,5 +1,5 @@
 import type { SimulationSnapshot, Agent, Benchmark, MarketData, ChatState, ChatConfig, ChatMessage } from '../types.js';
-import { INITIAL_AGENTS, INITIAL_CASH, S_P500_BENCHMARK_ID, AI_MANAGERS_INDEX_ID, BENCHMARK_COLORS } from '../constants.js';
+import { INITIAL_AGENTS, INITIAL_CASH, S_P500_BENCHMARK_ID, BENCHMARK_COLORS } from '../constants.js';
 import { calculateAllMetrics } from '../utils/portfolioCalculations.js';
 import { getSimulationMode } from '../services/marketDataService.js';
 import { cloneChatMessages } from '../utils/chatUtils.js';
@@ -67,12 +67,6 @@ class SimulationState {
         name: 'S&P 500', 
         color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID], 
         performanceHistory: [initialBenchmarkMetrics] 
-      },
-      { 
-        id: AI_MANAGERS_INDEX_ID, 
-        name: 'AI Managers Index', 
-        color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID], 
-        performanceHistory: [initialBenchmarkMetrics] 
       }
     ];
 
@@ -81,19 +75,18 @@ class SimulationState {
     let startDate: string;
     let currentDate: string;
 
-    const getMarketOpenDate = (source: Date): string => {
-      const marketOpen = new Date(source);
-      marketOpen.setHours(9, 30, 0, 0);
+    const getMarketOpenDate = async (source: Date): Promise<string> => {
+      const { setDateToMarketOpenET, getNextMarketOpen, isMarketOpen } = await import('./marketHours.js');
+      // If the source date is a weekend or market is closed, get the next market open
+      if (!isMarketOpen(source)) {
+        const nextOpen = getNextMarketOpen(source);
+        return nextOpen.toISOString();
+      }
+      const marketOpen = setDateToMarketOpenET(source);
       return marketOpen.toISOString();
     };
 
-    if (mode === 'historical') {
-      // Use historical period start date
-      const { getHistoricalSimulationStartDate } = await import('../services/marketDataService.js');
-      const histStart = getHistoricalSimulationStartDate();
-      startDate = histStart.toISOString();
-      currentDate = startDate;
-    } else if (mode === 'realtime') {
+    if (mode === 'realtime') {
       // Use current date/time for real-time start
       startDate = now.toISOString();
       
@@ -110,9 +103,30 @@ class SimulationState {
         currentDate = now.toISOString();
       }
     } else {
-      // Simulated: begin at the market open of the current day
-      startDate = getMarketOpenDate(now);
-      currentDate = startDate;
+      // For all non-realtime modes (historical, simulated, hybrid): begin at market open
+      if (mode === 'historical') {
+        // Use historical period start date (already set to market open)
+        const { getHistoricalSimulationStartDate } = await import('../services/marketDataService.js');
+        const histStart = getHistoricalSimulationStartDate();
+        startDate = histStart.toISOString();
+        currentDate = startDate;
+      } else {
+        // Simulated or hybrid: begin at the market open of the current day (or specified date)
+        const SIMULATED_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE || process.env.SIMULATED_START_DATE;
+        if (SIMULATED_START_DATE) {
+          const date = new Date(SIMULATED_START_DATE);
+          if (!isNaN(date.getTime())) {
+            startDate = await getMarketOpenDate(date);
+            currentDate = startDate;
+          } else {
+            startDate = await getMarketOpenDate(now);
+            currentDate = startDate;
+          }
+        } else {
+          startDate = await getMarketOpenDate(now);
+          currentDate = startDate;
+        }
+      }
     }
 
     // For real-time mode, also set currentTimestamp
