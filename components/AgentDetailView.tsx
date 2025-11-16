@@ -2,12 +2,11 @@ import React from 'react';
 import type { Agent, Position } from '../types';
 import { PerformanceChart } from './PerformanceChart';
 import { XMarkIcon } from './icons/Icons';
-import { formatTradeTimestamp } from '../utils/timeFormatting';
 
 interface AgentDetailViewProps {
   agent: Agent;
   onClose: () => void;
-  marketData?: { [ticker: string]: { price: number } }; // Optional market data for current prices
+  marketData?: { [ticker: string]: { price: number; longName?: string } } | { [ticker: string]: import('../types').TickerData }; // Optional market data for current prices
   startDate?: string;
   currentDate?: string;
   simulationMode?: 'simulated' | 'realtime' | 'historical';
@@ -29,13 +28,41 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
     const cashValue = agent.portfolio.cash;
     
     // Calculate position values with current market prices if available
+    // Also find the most recent trade justification for each position
     const positionsWithValues = positions.map((pos: Position) => {
       const avgCost = pos.averageCost ?? 0;
-      const currentPrice = marketData[pos.ticker]?.price ?? avgCost; // Fallback to avg cost if no market data
+      const tickerData = marketData[pos.ticker];
+      
+      // Get price - handle both TickerData object and simple price object
+      const currentPrice = tickerData 
+        ? ('price' in tickerData ? tickerData.price : (tickerData as any).price ?? avgCost)
+        : avgCost;
+      
       const positionValue = pos.quantity * currentPrice;
       const positionPercent = portfolioValue > 0 ? (positionValue / portfolioValue) * 100 : 0;
       const totalGain = (currentPrice - avgCost) * pos.quantity;
       const totalGainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
+      
+      // Find the most recent trade justification for this ticker
+      const recentTrade = [...agent.tradeHistory]
+        .filter(t => t.ticker === pos.ticker)
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+      const rationale = recentTrade?.justification || '-';
+      
+      // Get stock name from market data - check for longName in TickerData
+      let stockName = pos.ticker; // Default to ticker
+      if (tickerData) {
+        // Try to get longName from TickerData - check multiple possible properties
+        const longName = (tickerData as any).longName;
+        // Debug: log to see what we're getting
+        if (pos.ticker === 'AAPL') {
+          console.log('AAPL tickerData:', tickerData, 'longName:', longName);
+        }
+        if (longName && typeof longName === 'string' && longName.trim() !== '') {
+          stockName = longName;
+        }
+      }
+      
       return {
         ...pos,
         currentPrice,
@@ -44,8 +71,10 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
         totalGain,
         totalGainPercent,
         averageCost: avgCost,
+        rationale,
+        stockName,
       };
-    });
+    }).sort((a, b) => b.positionPercent - a.positionPercent); // Sort by % of portfolio descending
     
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4" onClick={onClose}>
@@ -112,137 +141,57 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
 
 
                 {/* Current Positions */}
-                <div>
+                <div className="md:col-span-2">
                     <h3 className="text-lg font-semibold mb-2">Current Positions</h3>
-                    <div className="bg-arena-bg rounded-lg max-h-60 overflow-y-auto overflow-x-auto">
-                        <table className="w-full text-sm text-left min-w-[600px]">
-                            <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
+                    <div className="bg-arena-bg rounded-lg overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-900 text-arena-text-secondary">
                                 <tr>
-                                    <th className="p-2">Ticker</th>
-                                    <th className="p-2 text-right">Quantity</th>
-                                    <th className="p-2 text-right">Avg. Cost</th>
-                                    <th className="p-2 text-right">Current Price</th>
-                                    <th className="p-2 text-right">% of Portfolio</th>
-                                    <th className="p-2 text-right">Total Gain</th>
+                                    <th className="p-3">Ticker</th>
+                                    <th className="p-3">Name</th>
+                                    <th className="p-3 text-right">Quantity</th>
+                                    <th className="p-3 text-right">Avg. Cost</th>
+                                    <th className="p-3 text-right">Current Price</th>
+                                    <th className="p-3 text-right">% of Portfolio</th>
+                                    <th className="p-3 text-right">Total Gain</th>
+                                    <th className="p-3">Rationale</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-arena-border">
-                                {/* Cash row */}
+                                {/* Cash row - always show at top */}
                                 <tr className="bg-gray-800/50">
-                                    <td className="p-2 font-mono font-semibold">CASH</td>
-                                    <td className="p-2 font-mono text-right">-</td>
-                                    <td className="p-2 font-mono text-right">-</td>
-                                    <td className="p-2 font-mono text-right">-</td>
-                                    <td className="p-2 font-mono text-right">{portfolioValue > 0 ? ((cashValue / portfolioValue) * 100).toFixed(2) : '0.00'}%</td>
-                                    <td className="p-2 font-mono text-right">${cashValue.toFixed(2)}</td>
+                                    <td className="p-3 font-mono font-semibold">CASH</td>
+                                    <td className="p-3 text-arena-text-secondary">-</td>
+                                    <td className="p-3 font-mono text-right">-</td>
+                                    <td className="p-3 font-mono text-right">-</td>
+                                    <td className="p-3 font-mono text-right">-</td>
+                                    <td className="p-3 font-mono text-right">{portfolioValue > 0 ? ((cashValue / portfolioValue) * 100).toFixed(2) : '0.00'}%</td>
+                                    <td className="p-3 font-mono text-right">$0.00 (0.00%)</td>
+                                    <td className="p-3 text-arena-text-secondary">-</td>
                                 </tr>
                                 {positionsWithValues.length > 0 ? positionsWithValues.map((pos: any) => (
                                     <tr key={pos.ticker}>
-                                        <td className="p-2 font-mono">{pos.ticker}</td>
-                                        <td className="p-2 font-mono text-right">{pos.quantity}</td>
-                                        <td className="p-2 font-mono text-right">${(pos.averageCost ?? 0).toFixed(2)}</td>
-                                        <td className="p-2 font-mono text-right">${(pos.currentPrice ?? 0).toFixed(2)}</td>
-                                        <td className="p-2 font-mono text-right">{(pos.positionPercent ?? 0).toFixed(2)}%</td>
-                                        <td className={`p-2 font-mono text-right ${(pos.totalGain ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        <td className="p-3 font-mono">{pos.ticker}</td>
+                                        <td className="p-3 text-arena-text-secondary">{pos.stockName}</td>
+                                        <td className="p-3 font-mono text-right">{pos.quantity}</td>
+                                        <td className="p-3 font-mono text-right">${(pos.averageCost ?? 0).toFixed(2)}</td>
+                                        <td className="p-3 font-mono text-right">${(pos.currentPrice ?? 0).toFixed(2)}</td>
+                                        <td className="p-3 font-mono text-right">{(pos.positionPercent ?? 0).toFixed(2)}%</td>
+                                        <td className={`p-3 font-mono text-right ${(pos.totalGain ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                             ${(pos.totalGain ?? 0).toFixed(2)} ({(pos.totalGainPercent ?? 0) >= 0 ? '+' : ''}{(pos.totalGainPercent ?? 0).toFixed(2)}%)
+                                        </td>
+                                        <td className="p-3 text-arena-text-secondary text-xs leading-relaxed" style={{ maxWidth: '300px' }}>
+                                            <div className="line-clamp-2">{pos.rationale}</div>
                                         </td>
                                     </tr>
                                 )) : null}
                                 {positionsWithValues.length === 0 && (
-                                    <tr><td colSpan={6} className="p-4 text-center text-arena-text-secondary">No open positions.</td></tr>
+                                    <tr><td colSpan={8} className="p-4 text-center text-arena-text-secondary">No open positions.</td></tr>
                                 )}
                             </tbody>
                         </table>
                     </div>
                 </div>
-
-                {/* Trade History */}
-                <div>
-                    <h3 className="text-lg font-semibold mb-2">Recent Trades</h3>
-                     <div className="bg-arena-bg rounded-lg max-h-60 overflow-y-auto overflow-x-auto">
-                        <table className="w-full text-sm text-left min-w-[500px]">
-                           <thead className="sticky top-0 bg-gray-900 text-arena-text-secondary">
-                                <tr>
-                                    <th className="p-2">When</th>
-                                    <th className="p-2">Action</th>
-                                    <th className="p-2">Ticker</th>
-                                    <th className="p-2 text-right">Qty</th>
-                                    <th className="p-2 text-right">Price</th>
-                                    <th className="p-2 text-right">Fees</th>
-                                </tr>
-                            </thead>
-                             <tbody className="divide-y divide-arena-border">
-                                {agent.tradeHistory.length > 0 ? [...agent.tradeHistory].reverse().slice(0, 20).map(trade => (
-                                    <tr key={`${trade.timestamp}-${trade.ticker}-${trade.action}-${Math.random()}`}>
-                                        <td className="p-2 font-mono text-center">{formatTradeTimestamp(trade.timestamp, startDate, currentDate, simulationMode)}</td>
-                                        <td className={`p-2 font-mono uppercase font-bold ${trade.action === 'buy' ? 'text-brand-positive' : 'text-brand-negative'}`}>{trade.action}</td>
-                                        <td className="p-2 font-mono">{trade.ticker}</td>
-                                        <td className="p-2 font-mono text-right">{trade.quantity}</td>
-                                        <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
-                                        <td className="p-2 font-mono text-right">{trade.fees !== undefined ? `$${trade.fees.toFixed(2)}` : '-'}</td>
-                                    </tr>
-                                )) : <tr><td colSpan={6} className="p-4 text-center text-arena-text-secondary">No trades executed yet.</td></tr>}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                {/* Valuation Analysis */}
-                {(() => {
-                  // Get currently owned tickers
-                  const ownedTickers = new Set(positions.map((p: Position) => p.ticker));
-                  
-                  // Find the most recent trade with valuation data for each owned ticker
-                  const valuationData = new Map<string, typeof agent.tradeHistory[0]>();
-                  
-                  // Sort trades by timestamp descending to get most recent first
-                  const sortedTrades = [...agent.tradeHistory].sort((a, b) => b.timestamp - a.timestamp);
-                  
-                  for (const trade of sortedTrades) {
-                    if (ownedTickers.has(trade.ticker) && 
-                        (trade.fairValue !== undefined || trade.topOfBox !== undefined || trade.bottomOfBox !== undefined || trade.justification)) {
-                      if (!valuationData.has(trade.ticker)) {
-                        valuationData.set(trade.ticker, trade);
-                      }
-                    }
-                  }
-                  
-                  const valuationEntries = Array.from(valuationData.values());
-                  
-                  return valuationEntries.length > 0 && (
-                    <div className="md:col-span-2">
-                      <h3 className="text-lg font-semibold mb-2">Valuation Analysis</h3>
-                      <div className="bg-arena-bg rounded-lg overflow-x-auto">
-                        <table className="w-full text-sm text-left min-w-[800px]">
-                          <thead className="bg-gray-900 text-arena-text-secondary">
-                            <tr>
-                              <th className="p-2">When</th>
-                              <th className="p-2">Ticker</th>
-                              <th className="p-2 text-right">Price</th>
-                              <th className="p-2 text-right">Fair Value</th>
-                              <th className="p-2 text-right">Top of Box</th>
-                              <th className="p-2 text-right">Bottom of Box</th>
-                              <th className="p-2">Justification</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-arena-border">
-                            {valuationEntries.map(trade => (
-                              <tr key={`valuation-${trade.timestamp}-${trade.ticker}-${Math.random()}`}>
-                                <td className="p-2 font-mono text-center">{formatTradeTimestamp(trade.timestamp, startDate, currentDate, simulationMode)}</td>
-                                <td className="p-2 font-mono">{trade.ticker}</td>
-                                <td className="p-2 font-mono text-right">${(trade.price ?? 0).toFixed(2)}</td>
-                                <td className="p-2 font-mono text-right">{trade.fairValue != null ? `$${(trade.fairValue ?? 0).toFixed(2)}` : '-'}</td>
-                                <td className="p-2 font-mono text-right">{trade.topOfBox != null ? `$${(trade.topOfBox ?? 0).toFixed(2)}` : '-'}</td>
-                                <td className="p-2 font-mono text-right">{trade.bottomOfBox != null ? `$${(trade.bottomOfBox ?? 0).toFixed(2)}` : '-'}</td>
-                                <td className="p-2 text-arena-text-secondary text-xs">{trade.justification || '-'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })()}
 
             </div>
         </div>

@@ -298,7 +298,7 @@ const ALL_SIMULATION_TYPES: SimulationType[] = [
   {
     id: 'multi-model',
     name: 'Wall Street Arena',
-    description: 'Five AI models compete',
+    description: 'Discover which leading AI models excel at trading using real market prices',
     traderConfigs: MULTI_MODEL_CONFIGS,
     chatEnabled: false,
     showModelNames: true,

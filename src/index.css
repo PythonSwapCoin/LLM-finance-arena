@@ -2,3 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Prevent focus outline on chart SVG elements */
+.recharts-wrapper,
+.recharts-wrapper svg,
+.recharts-wrapper svg:focus {
+  outline: none !important;
+}
+
+/* Prevent focus outline on chart container */
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
