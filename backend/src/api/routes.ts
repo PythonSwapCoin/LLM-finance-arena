@@ -7,6 +7,7 @@ import {
   createInitialMarketData,
   isHistoricalSimulationComplete,
   getMarketDataTelemetry,
+  hasHybridModeTransitioned,
 } from '../services/marketDataService.js';
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
@@ -29,6 +30,7 @@ import type {
   ChatMessageResponse,
 } from './dto.js';
 import { addUserMessageToChat } from '../services/chatService.js';
+import { isMarketOpen } from '../simulation/marketHours.js';
 
 export const registerRoutes = async (fastify: FastifyInstance): Promise<void> => {
   // Health check
@@ -40,6 +42,12 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
   fastify.get('/api/status', async () => {
     const snapshot = simulationState.getSnapshot();
     const telemetry = getMarketDataTelemetry();
+    const mode = snapshot.mode || 'simulated';
+
+    // Check market status for realtime and hybrid modes
+    const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+    const marketOpenStatus = isRealtimeMode ? isMarketOpen() : null;
+
     return {
       status: 'connected',
       backend: 'online',
@@ -53,6 +61,7 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
         lastUpdated: snapshot.lastUpdated,
         simIntervalMs: getSimInterval(),
         tradeIntervalMs: getTradeInterval(),
+        isMarketOpen: marketOpenStatus, // null for non-realtime modes, boolean for realtime/hybrid
       },
       marketData: {
         tickersCount: Object.keys(snapshot.marketData).length,

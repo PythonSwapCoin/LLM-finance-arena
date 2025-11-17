@@ -824,7 +824,17 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
           const fees = estimateTradeFee(notional);
           const totalCost = notional + fees;
           if (totalCost > agent.portfolio.cash) {
-            console.warn(`Cannot buy ${t.quantity} shares of ${t.ticker} - need $${totalCost.toFixed(2)} including fees but only have $${agent.portfolio.cash.toFixed(2)}`);
+            // Log as INFO, not ERROR, since this is normal portfolio constraint (not a system error)
+            logger.log(LogLevel.INFO, LogCategory.TRADE,
+              `[${agent.name}] Cannot buy ${t.quantity} shares of ${t.ticker} - insufficient cash`, {
+                agentName: agent.name,
+                ticker: t.ticker,
+                quantity: t.quantity,
+                price: price.toFixed(2),
+                needed: totalCost.toFixed(2),
+                available: agent.portfolio.cash.toFixed(2),
+                shortfall: (totalCost - agent.portfolio.cash).toFixed(2)
+              });
             return false;
           }
         }

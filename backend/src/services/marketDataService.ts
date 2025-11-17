@@ -41,6 +41,34 @@ const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true'; // Use 15-30 m
 const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '15', 10); // Default 15 minutes delay
 const ENABLE_YAHOO_DETAILED_INFO = process.env.ENABLE_YAHOO_DETAILED_INFO === 'true';
 
+// Helper function to convert a date to ET timezone
+const toET = (date: Date): { hour: number; minute: number; dayOfWeek: number; dateObj: Date } => {
+  const utc = new Date(date.toISOString());
+  const year = utc.getUTCFullYear();
+  const month = utc.getUTCMonth();
+  const day = utc.getUTCDate();
+
+  // DST calculation
+  const march1 = new Date(Date.UTC(year, 2, 1));
+  const march1Day = march1.getUTCDay();
+  const dstStart = new Date(Date.UTC(year, 2, (8 - march1Day) % 7 + 8));
+  const nov1 = new Date(Date.UTC(year, 10, 1));
+  const nov1Day = nov1.getUTCDay();
+  const dstEnd = new Date(Date.UTC(year, 10, (8 - nov1Day) % 7 + 1));
+  const isDST = utc >= dstStart && utc < dstEnd;
+  const etOffsetHours = isDST ? -4 : -5;
+
+  // Convert to ET
+  const etTime = new Date(utc.getTime() + (etOffsetHours * 60 * 60 * 1000));
+
+  return {
+    hour: etTime.getUTCHours(),
+    minute: etTime.getUTCMinutes(),
+    dayOfWeek: etTime.getUTCDay(),
+    dateObj: etTime,
+  };
+};
+
 // Historical data cache
 let historicalDataCache: { [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] } = {};
 let historicalWeekStart: Date | null = null;
@@ -306,25 +334,49 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
   }
 
   const now = new Date();
-  
+
   // Account for delayed data: if USE_DELAYED_DATA is enabled, compare against effective time
   // (current time minus delay) instead of actual current time
-  const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
-  const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
   const effectiveTime = USE_DELAYED_DATA
     ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000))
     : now;
-  
-  const simulationDate = new Date(currentDate);
 
-  // Add intraday hours to simulation date (assuming market opens at 9:30 AM ET)
-  const marketOpenHour = 9;
+  // Parse simulation date and convert to ET time with intraday hours
+  // Market opens at 9:30 AM ET, so intraday hours are relative to that
+  const simDateParsed = new Date(currentDate);
+  const year = simDateParsed.getUTCFullYear();
+  const month = simDateParsed.getUTCMonth();
+  const day = simDateParsed.getUTCDate();
+
+  // Calculate DST for this date
+  const march1 = new Date(Date.UTC(year, 2, 1));
+  const march1Day = march1.getUTCDay();
+  const dstStart = new Date(Date.UTC(year, 2, (8 - march1Day) % 7 + 8));
+  const nov1 = new Date(Date.UTC(year, 10, 1));
+  const nov1Day = nov1.getUTCDay();
+  const dstEnd = new Date(Date.UTC(year, 10, (8 - nov1Day) % 7 + 1));
+  const checkDate = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const isDST = checkDate >= dstStart && checkDate < dstEnd;
+  const etOffsetHours = isDST ? 4 : 5; // EDT is UTC-4, EST is UTC-5
+
+  // Market open is 9:30 AM ET = 13:30 UTC (EDT) or 14:30 UTC (EST)
+  const marketOpenHourUTC = 9 + etOffsetHours;
   const marketOpenMinute = 30;
-  simulationDate.setHours(marketOpenHour + Math.floor(intradayHour), marketOpenMinute + Math.round((intradayHour % 1) * 60), 0, 0);
+
+  // Add intraday hours to get the current simulation time in UTC
+  const hours = Math.floor(intradayHour);
+  const minutes = Math.round((intradayHour - hours) * 60);
+  const simulationDate = new Date(Date.UTC(year, month, day, marketOpenHourUTC + hours, marketOpenMinute + minutes, 0, 0));
 
   // Check if simulation has already passed effective time (simulation is in the future)
   const timeDifference = effectiveTime.getTime() - simulationDate.getTime();
-  
+
+  // Convert times to ET for logging
+  const simET = toET(simulationDate);
+  const effectiveET = toET(effectiveTime);
+  const simETString = `${simET.hour.toString().padStart(2, '0')}:${simET.minute.toString().padStart(2, '0')} ET`;
+  const effectiveETString = `${effectiveET.hour.toString().padStart(2, '0')}:${effectiveET.minute.toString().padStart(2, '0')} ET`;
+
   // If simulation is already in the future relative to effective time, transition immediately
   if (timeDifference < 0) {
     logger.log(LogLevel.INFO, LogCategory.SIMULATION,
@@ -333,10 +385,14 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
         currentDay,
         intradayHour,
         simulationDateTime: simulationDate.toISOString(),
+        simulationTimeET: simETString,
+        simulationDayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][simET.dayOfWeek],
         currentDateTime: now.toISOString(),
         effectiveDateTime: effectiveTime.toISOString(),
+        effectiveTimeET: effectiveETString,
+        effectiveDayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][effectiveET.dayOfWeek],
         useDelayedData: USE_DELAYED_DATA,
-        dataDelayMinutes: USE_DELAYED_DATA ? DATA_DELAY_MINUTES : 0,
+        dataDelayMinutes: DATA_DELAY_MINUTES,
         timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
       });
     return true;
@@ -345,21 +401,27 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
   // Check if the NEXT tick would overshoot effective time
   if (minutesPerTick !== undefined && minutesPerTick > 0) {
     const nextIntradayHour = intradayHour + (minutesPerTick / 60);
-    const nextSimulationDate = new Date(currentDate);
-    
-    // Handle day advancement if next hour exceeds market close
+    let nextSimulationDate: Date;
+
+    // Handle day advancement if next hour exceeds market close (6.5 hours = 4:00 PM ET)
     if (nextIntradayHour >= 6.5) {
-      // Would advance to next day
-      nextSimulationDate.setDate(nextSimulationDate.getDate() + 1);
-      nextSimulationDate.setHours(marketOpenHour, marketOpenMinute, 0, 0);
+      // Would advance to next day - create new date for next day at market open
+      const nextDay = day + 1;
+      nextSimulationDate = new Date(Date.UTC(year, month, nextDay, marketOpenHourUTC, marketOpenMinute, 0, 0));
     } else {
-      nextSimulationDate.setHours(marketOpenHour + Math.floor(nextIntradayHour), marketOpenMinute + Math.round((nextIntradayHour % 1) * 60), 0, 0);
+      // Same day, just advance intraday hour
+      const nextHours = Math.floor(nextIntradayHour);
+      const nextMinutes = Math.round((nextIntradayHour - nextHours) * 60);
+      nextSimulationDate = new Date(Date.UTC(year, month, day, marketOpenHourUTC + nextHours, marketOpenMinute + nextMinutes, 0, 0));
     }
-    
+
     const nextTimeDifference = effectiveTime.getTime() - nextSimulationDate.getTime();
-    
+
     // If next tick would overshoot (go past effective time), transition now
     if (nextTimeDifference < 0) {
+      const nextET = toET(nextSimulationDate);
+      const nextETString = `${nextET.hour.toString().padStart(2, '0')}:${nextET.minute.toString().padStart(2, '0')} ET`;
+
       logger.log(LogLevel.INFO, LogCategory.SIMULATION,
         'Hybrid mode transition: next tick would overshoot effective time', {
           currentDate,
@@ -367,11 +429,14 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
           intradayHour,
           nextIntradayHour,
           simulationDateTime: simulationDate.toISOString(),
+          simulationTimeET: simETString,
           nextSimulationDateTime: nextSimulationDate.toISOString(),
+          nextSimulationTimeET: nextETString,
           currentDateTime: now.toISOString(),
           effectiveDateTime: effectiveTime.toISOString(),
+          effectiveTimeET: effectiveETString,
           useDelayedData: USE_DELAYED_DATA,
-          dataDelayMinutes: USE_DELAYED_DATA ? DATA_DELAY_MINUTES : 0,
+          dataDelayMinutes: DATA_DELAY_MINUTES,
           timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
           nextTimeDifferenceMinutes: (nextTimeDifference / 60000).toFixed(2),
         });
@@ -390,12 +455,16 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
       currentDay,
       intradayHour,
       simulationDateTime: simulationDate.toISOString(),
+      simulationTimeET: simETString,
+      simulationDayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][simET.dayOfWeek],
       currentDateTime: now.toISOString(),
       effectiveDateTime: effectiveTime.toISOString(),
+      effectiveTimeET: effectiveETString,
+      effectiveDayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][effectiveET.dayOfWeek],
       useDelayedData: USE_DELAYED_DATA,
-      dataDelayMinutes: USE_DELAYED_DATA ? DATA_DELAY_MINUTES : 0,
+      dataDelayMinutes: DATA_DELAY_MINUTES,
       timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
-      threshold: catchUpThresholdMs / 60000,
+      thresholdMinutes: catchUpThresholdMs / 60000,
       shouldTransition
     });
 
