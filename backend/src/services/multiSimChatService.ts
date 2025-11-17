@@ -156,6 +156,10 @@ export const updateChatMessagesStatusForSimulation = (
   const { chat } = snapshot;
   const currentRoundId = `${day}-${intradayHour.toFixed(3)}`;
 
+  // Collect debugging info about pending messages
+  const pendingMessages = chat.messages.filter(m => m.status === 'pending');
+  const messagesForCurrentRound = chat.messages.filter(m => m.roundId === currentRoundId);
+
   let updated = false;
   const updatedMessages = chat.messages.map(message => {
     if (message.roundId === currentRoundId && message.status === 'pending') {
@@ -172,11 +176,29 @@ export const updateChatMessagesStatusForSimulation = (
     };
     instance.updateSnapshot({ chat: updatedChat });
 
-    logger.log(LogLevel.INFO, LogCategory.SIMULATION, 'Chat messages marked as delivered', {
-      simulationType: simulationTypeId,
-      roundId: currentRoundId,
-      count: updatedMessages.filter(m => m.roundId === currentRoundId && m.status === 'delivered').length,
-    });
+    const deliveredCount = updatedMessages.filter(m => m.roundId === currentRoundId && m.status === 'delivered').length;
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      `💬 Chat: ${deliveredCount} message(s) delivered for round ${currentRoundId}`, {
+        simulationType: simulationTypeId,
+        roundId: currentRoundId,
+        deliveredCount,
+      });
+  } else if (pendingMessages.length > 0) {
+    // Debug: why are messages still pending?
+    const pendingDebug = pendingMessages.map(m => ({
+      roundId: m.roundId,
+      sender: m.sender,
+      createdAt: m.createdAt,
+      expectedRound: currentRoundId,
+      matches: m.roundId === currentRoundId
+    }));
+
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      `💬 Chat: ${pendingMessages.length} message(s) still pending (current round: ${currentRoundId})`, {
+        simulationType: simulationTypeId,
+        currentRoundId,
+        pendingMessages: pendingDebug.slice(0, 5), // Show first 5
+      });
   }
 };
 

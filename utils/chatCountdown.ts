@@ -28,13 +28,15 @@ export function calculateNextChatDelivery(
   let minutesPerTick: number;
 
   if (simulationMode === 'realtime') {
-    // Real-time mode: trade every 30 minutes, sim tick every 10 minutes
-    tradeIntervalHours = 0.5; // 30 minutes = 0.5 hours
+    // Real-time mode: defaults for 30-minute trade intervals
+    // Note: Actual intervals come from server env REALTIME_TRADE_INTERVAL_MS
+    tradeIntervalHours = 0.5; // 30 minutes = 0.5 hours (default)
     simIntervalMs = 600000; // 10 minutes
     minutesPerTick = 10; // Each tick represents 10 minutes of market time
   } else {
-    // Simulated/historical mode: trade every 2 hours, sim tick every 30 seconds (represents 30 min)
-    tradeIntervalHours = 2.0; // 2 hours
+    // Simulated/historical mode: defaults for 2-hour trade intervals
+    // Note: Actual intervals come from server env TRADE_INTERVAL_MS
+    tradeIntervalHours = 2.0; // 2 hours (default)
     simIntervalMs = 30000; // 30 seconds
     minutesPerTick = 30; // Each tick represents 30 minutes of market time
   }

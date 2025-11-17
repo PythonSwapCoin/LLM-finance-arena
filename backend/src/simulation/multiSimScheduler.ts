@@ -7,6 +7,7 @@ import type { MarketData } from '../types.js';
 import { updateChatMessagesStatusForSimulation } from '../services/multiSimChatService.js';
 import { updateTimerState } from '../services/timerService.js';
 import { saveSnapshot } from '../store/persistence.js';
+import { priceLogService } from '../services/priceLogService.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -120,11 +121,7 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
     snapshot = instance.getSnapshot();
   }
 
-  logger.logSimulationEvent(`Trade window starting for ${simType.name}`, {
-    simulationType: simulationTypeId,
-    day: snapshot.day,
-    intradayHour: snapshot.intradayHour,
-  });
+  // Removed verbose "Trade window starting" log - only errors will be logged
 
   try {
     const result = await tradeWindow({
@@ -145,11 +142,7 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
       marketData: result.marketData,
     });
 
-    logger.logSimulationEvent(`Trade window completed for ${simType.name}`, {
-      simulationType: simulationTypeId,
-      day: snapshot.day,
-      intradayHour: snapshot.intradayHour,
-    });
+    // Removed verbose "Trade window completed" log - only errors will be logged
 
     // Save snapshot after trade window
     try {
@@ -226,11 +219,33 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       chat: result.chat,
     });
 
-    logger.logSimulationEvent(`Advanced to day ${newDay} for simulation ${simulationTypeId}`, {
-      simulationType: simulationTypeId,
-      newDay,
-      currentDate: newCurrentDate,
-    });
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      `📅 Day ${newDay} started`, {
+        simulationType: simulationTypeId,
+        day: newDay,
+        currentDate: newCurrentDate,
+      });
+
+    // Log prices and portfolio values at start of new day to ensure previousValue is correct
+    try {
+      const updatedSnapshot = instance.getSnapshot();
+      if (updatedSnapshot.marketData && Object.keys(updatedSnapshot.marketData).length > 0 && updatedSnapshot.agents.length > 0) {
+        const timestamp = newDay + (0 / 6.5); // Day + intradayHour fraction
+        priceLogService.logPricesAndPortfolios(
+          updatedSnapshot.marketData,
+          updatedSnapshot.agents,
+          newDay,
+          0, // intradayHour
+          timestamp
+        );
+      }
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        'Failed to log prices after day advancement', {
+          simulationType: simulationTypeId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+    }
 
     // Save snapshot after day advancement
     try {
