@@ -36,7 +36,10 @@ export const validatePortfolioCalculations = (
 
     // Track value changes for next validation
     const agentKey = `${agent.id}_${day}_${intradayHour}`;
-    previousPortfolioValues.set(agentKey, agent.portfolioValue);
+    const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
+    if (latestPerf) {
+      previousPortfolioValues.set(agentKey, latestPerf.totalValue);
+    }
   }
 
   // Only log if there are issues
@@ -64,33 +67,43 @@ const validateSinglePortfolio = (
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  // Get latest performance metrics
+  const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
+  if (!latestPerf) {
+    return { isValid: true, errors: [], warnings: [] }; // No performance history yet
+  }
+
+  const portfolioValue = latestPerf.totalValue;
+  const cash = agent.portfolio.cash;
+  const positions = Object.values(agent.portfolio.positions);
+
   // 1. Check if portfolio value = cash + sum of positions
-  const positionsValue = agent.portfolio.reduce((sum, pos) => {
+  const positionsValue = positions.reduce((sum, pos) => {
     const currentPrice = marketData[pos.ticker]?.price || 0;
     return sum + (pos.quantity * currentPrice);
   }, 0);
 
-  const calculatedValue = agent.cash + positionsValue;
-  const valueDifference = Math.abs(calculatedValue - agent.portfolioValue);
-  const valueDifferencePercent = (valueDifference / agent.portfolioValue) * 100;
+  const calculatedValue = cash + positionsValue;
+  const valueDifference = Math.abs(calculatedValue - portfolioValue);
+  const valueDifferencePercent = (valueDifference / portfolioValue) * 100;
 
   if (valueDifferencePercent > 0.01) { // More than 0.01% difference
     errors.push(
-      `Portfolio value mismatch: reported $${agent.portfolioValue.toFixed(2)}, ` +
-      `calculated $${calculatedValue.toFixed(2)} (cash: $${agent.cash.toFixed(2)} + ` +
+      `Portfolio value mismatch: reported $${portfolioValue.toFixed(2)}, ` +
+      `calculated $${calculatedValue.toFixed(2)} (cash: $${cash.toFixed(2)} + ` +
       `positions: $${positionsValue.toFixed(2)}), diff: ${valueDifferencePercent.toFixed(4)}%`
     );
   }
 
   // 2. Check if position percentages add up to reasonable amount
-  const totalPositionPercent = agent.portfolio.reduce((sum, pos) => {
+  const totalPositionPercent = positions.reduce((sum, pos) => {
     const currentPrice = marketData[pos.ticker]?.price || 0;
     const positionValue = pos.quantity * currentPrice;
-    const positionPercent = (positionValue / agent.portfolioValue) * 100;
+    const positionPercent = (positionValue / portfolioValue) * 100;
     return sum + positionPercent;
   }, 0);
 
-  const cashPercent = (agent.cash / agent.portfolioValue) * 100;
+  const cashPercent = (cash / portfolioValue) * 100;
   const totalPercent = totalPositionPercent + cashPercent;
 
   if (Math.abs(totalPercent - 100) > 0.1) { // More than 0.1% off from 100%
@@ -103,19 +116,19 @@ const validateSinglePortfolio = (
   // 3. Check for large unexplained value changes
   const previousValue = previousPortfolioValues.get(agent.id);
   if (previousValue !== undefined) {
-    const valueChange = agent.portfolioValue - previousValue;
+    const valueChange = portfolioValue - previousValue;
     const valueChangePercent = (valueChange / previousValue) * 100;
 
     // If value changed by more than 5%, check if it's explained by price movements
     if (Math.abs(valueChangePercent) > 5) {
       // Calculate what the portfolio would be worth if no trades happened
       const expectedValue = calculateExpectedValue(agent, previousValue, marketData);
-      const unexplainedChange = Math.abs((agent.portfolioValue - expectedValue) / previousValue * 100);
+      const unexplainedChange = Math.abs((portfolioValue - expectedValue) / previousValue * 100);
 
       if (unexplainedChange > 2) { // More than 2% unexplained
         warnings.push(
           `Large value change: ${valueChangePercent.toFixed(2)}% ` +
-          `($${previousValue.toFixed(2)} → $${agent.portfolioValue.toFixed(2)}). ` +
+          `($${previousValue.toFixed(2)} → $${portfolioValue.toFixed(2)}). ` +
           `${unexplainedChange.toFixed(2)}% is unexplained by market movements.`
         );
       }
@@ -123,7 +136,7 @@ const validateSinglePortfolio = (
   }
 
   // 4. Check for invalid positions
-  for (const position of agent.portfolio) {
+  for (const position of positions) {
     if (position.quantity < 0) {
       errors.push(`Negative position quantity for ${position.ticker}: ${position.quantity}`);
     }
@@ -152,12 +165,13 @@ const calculateExpectedValue = (
 ): number => {
   // This is a simplified calculation - we don't have previous prices stored
   // So we assume the portfolio composition is the same and just apply current prices
-  const positionsValue = agent.portfolio.reduce((sum, pos) => {
+  const positions = Object.values(agent.portfolio.positions);
+  const positionsValue = positions.reduce((sum, pos) => {
     const currentPrice = currentMarketData[pos.ticker]?.price || 0;
     return sum + (pos.quantity * currentPrice);
   }, 0);
 
-  return agent.cash + positionsValue;
+  return agent.portfolio.cash + positionsValue;
 };
 
 /**
