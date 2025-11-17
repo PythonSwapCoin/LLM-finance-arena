@@ -161,31 +161,36 @@ export const setDateToMarketOpenET = (date: Date, config: MarketHoursConfig = {}
 
 export const getNextMarketOpen = (date: Date = new Date(), config: MarketHoursConfig = {}): Date => {
   const cfg = { ...DEFAULT_CONFIG, ...config };
-  const next = new Date(date);
-  
-  // If it's a weekend, move to Monday
-  const dayOfWeek = next.getDay();
-  if (dayOfWeek === 0) {
-    next.setDate(next.getDate() + 1);
-  } else if (dayOfWeek === 6) {
-    next.setDate(next.getDate() + 2);
-  }
-  
-  // Set to market open time
-  next.setHours(cfg.openHour, 0, 0, 0);
-  
-  // If already past market open today, move to next day
-  const etTime = toET(next);
-  if (date.getHours() >= cfg.closeHour || isHoliday(etTime)) {
-    next.setDate(next.getDate() + 1);
-    // Skip weekends and holidays
-    let nextEtTime = toET(next);
-    while (isHoliday(nextEtTime) || nextEtTime.dayOfWeek === 0 || nextEtTime.dayOfWeek === 6) {
-      next.setDate(next.getDate() + 1);
-      nextEtTime = toET(next);
+
+  // Get current ET time to properly check market status
+  const currentET = toET(date);
+  const currentTimeMinutes = currentET.hour * 60 + currentET.minute;
+  const closeTimeMinutes = cfg.closeHour * 60 + cfg.closeMinute;
+
+  // Start with current date
+  let nextDate = new Date(date);
+
+  // If market is currently open or hasn't opened yet today
+  if (!isHoliday(currentET) && currentTimeMinutes < closeTimeMinutes) {
+    // If before market open, use today
+    const openTimeMinutes = cfg.openHour * 60 + cfg.openMinute;
+    if (currentTimeMinutes < openTimeMinutes) {
+      return setDateToMarketOpenET(nextDate, config);
     }
+    // Otherwise move to next day (market already closed for today)
   }
-  
-  return next;
+
+  // Move to next day
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+  // Skip weekends and holidays
+  let nextET = toET(nextDate);
+  while (isHoliday(nextET)) {
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+    nextET = toET(nextDate);
+  }
+
+  // Set to market open time for the next valid trading day
+  return setDateToMarketOpenET(nextDate, config);
 };
 

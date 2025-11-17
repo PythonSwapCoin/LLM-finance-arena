@@ -321,7 +321,10 @@ export const startMultiSimScheduler = async (): Promise<void> => {
             minutesPerTick: minutesPerTick
           });
           setHybridModeTransitioned(true);
-          
+
+          // Update timer to reflect new realtime intervals
+          updateTimerState();
+
           // Note: Multi-sim scheduler will automatically use realtime intervals after transition
           // because the mode check below will treat hybrid (transitioned) as realtime
         }

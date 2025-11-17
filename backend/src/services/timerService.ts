@@ -5,8 +5,10 @@
  */
 
 import { getSimInterval, getTradeInterval } from '../simulation/multiSimScheduler.js';
-import { getSimulationMode } from './marketDataService.js';
+import { getSimulationMode, hasHybridModeTransitioned } from './marketDataService.js';
 import { simulationManager } from '../simulation/SimulationManager.js';
+import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime } from '../simulation/marketHours.js';
+import { logger, LogLevel, LogCategory } from './logger.js';
 
 interface TimerState {
   nextTradeWindowTimestamp: number; // Unix timestamp in milliseconds
@@ -34,6 +36,50 @@ export const calculateNextTradeWindowTimestamp = (): number => {
   const tradeInterval = getTradeInterval();
   const simInterval = getSimInterval();
 
+  // Check if we're in realtime mode (including hybrid mode after transition)
+  const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+
+  // For realtime mode, check market hours
+  if (isRealtimeMode) {
+    const now = new Date();
+    const etTime = getETTime(now);
+    const isOpen = checkMarketOpen(etTime);
+
+    if (!isOpen) {
+      // Market is closed - return next market open time
+      const nextOpen = getNextMarketOpen(now);
+
+      logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+        'Timer: Market closed, next trade window at market open', {
+          mode,
+          hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
+          currentTime: now.toISOString(),
+          currentET: etTime.toISOString(),
+          nextOpen: nextOpen.toISOString(),
+          secondsUntilOpen: Math.floor((nextOpen.getTime() - now.getTime()) / 1000),
+        });
+
+      return nextOpen.getTime();
+    }
+
+    // Market is open - next trade window is one interval away
+    const nextTimestamp = Date.now() + tradeInterval;
+
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      'Timer: Market open, next trade window in interval', {
+        mode,
+        hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
+        currentTime: now.toISOString(),
+        currentET: etTime.toISOString(),
+        tradeIntervalMs: tradeInterval,
+        nextTradeWindow: new Date(nextTimestamp).toISOString(),
+        secondsUntilNext: Math.floor(tradeInterval / 1000),
+      });
+
+    return nextTimestamp;
+  }
+
+  // For simulated/historical mode (and hybrid before transition)
   // Calculate next trade window hour
   let tradeIntervalHours: number;
   let minutesPerTick: number;
@@ -48,10 +94,10 @@ export const calculateNextTradeWindowTimestamp = (): number => {
 
   const currentIntradayHour = snapshot.intradayHour;
   const nextTradeWindowHour = Math.ceil(currentIntradayHour / tradeIntervalHours) * tradeIntervalHours;
-  
+
   // If we're exactly at a trade window, the next one is tradeIntervalHours away
-  const hoursUntilNext = currentIntradayHour % tradeIntervalHours === 0 
-    ? tradeIntervalHours 
+  const hoursUntilNext = currentIntradayHour % tradeIntervalHours === 0
+    ? tradeIntervalHours
     : nextTradeWindowHour - currentIntradayHour;
 
   // Convert simulation hours to simulation minutes
@@ -63,8 +109,24 @@ export const calculateNextTradeWindowTimestamp = (): number => {
   // Convert ticks to real-world milliseconds
   const realWorldMsUntilNext = ticksNeeded * simInterval;
 
+  const nextTimestamp = Date.now() + realWorldMsUntilNext;
+
+  logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+    'Timer: Simulated mode, calculating based on intraday progress', {
+      mode,
+      hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
+      currentIntradayHour: currentIntradayHour,
+      nextTradeWindowHour: nextTradeWindowHour,
+      hoursUntilNext: hoursUntilNext,
+      ticksNeeded: ticksNeeded,
+      simIntervalMs: simInterval,
+      realWorldMsUntilNext: realWorldMsUntilNext,
+      nextTradeWindow: new Date(nextTimestamp).toISOString(),
+      secondsUntilNext: Math.floor(realWorldMsUntilNext / 1000),
+    });
+
   // Return timestamp
-  return Date.now() + realWorldMsUntilNext;
+  return nextTimestamp;
 };
 
 /**
