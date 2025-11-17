@@ -964,6 +964,22 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     
     const data = [];
     const boundaries: number[] = [];
+
+    // HARDCODED: Add Nov 17 boundary for hybrid->realtime transition
+    // Calculate Unix timestamp for Nov 17, 2025 at 9:30 AM ET
+    const nov17_2025 = new Date('2025-11-17T09:30:00-05:00').getTime() / 1000;
+
+    // Check if we're in hybrid mode and have realtime data
+    const hasRealtimeData = sortedTimestamps.some(ts => ts > 1000000000);
+
+    if (simulationMode === 'hybrid' && hasRealtimeData) {
+      console.log('Adding hardcoded Nov 17 boundaries at:', nov17_2025);
+      // Add Saturday line (visual marker for end of Friday)
+      boundaries.push(nov17_2025 - 86400 * 2); // 2 days before (Saturday)
+      // Add Monday Nov 17 line
+      boundaries.push(nov17_2025);
+    }
+
     let minValue = Infinity;
     let maxValue = -Infinity;
     let lastDayKey: string | null = null; // Store "YYYY-MM-DD" for day comparison
@@ -1364,6 +1380,24 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           const dayBoundaryTimestamps: number[] = [];
           
           if (timePeriod === '24h') {
+            // HARDCODED: Add Nov 17 boundary for hybrid->realtime transition
+            // Calculate Unix timestamp for Nov 17, 2025 at 9:30 AM ET
+            const nov17_2025 = new Date('2025-11-17T09:30:00-05:00').getTime() / 1000;
+
+            // Check if we're in hybrid mode and have realtime data
+            const hasRealtimeData = chartData.some(d => {
+              const ts = d.timestamp as number;
+              return ts > 1000000000; // Unix timestamp
+            });
+
+            if (simulationMode === 'hybrid' && hasRealtimeData) {
+              console.log('Adding hardcoded Nov 17 boundaries at:', nov17_2025);
+              // Add Saturday line (visual marker for end of Friday)
+              dayBoundaryTimestamps.push(nov17_2025 - 86400 * 2); // 2 days before (Saturday)
+              // Add Monday Nov 17 line
+              dayBoundaryTimestamps.push(nov17_2025);
+            }
+
             // For 24h period, find all day boundaries (start of each day)
             let lastDayKey: string | null = null;
             chartData.forEach((d, idx) => {
