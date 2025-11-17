@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import type { Agent, PerformanceMetrics } from '../types';
+import { getAgentDisplayName } from '../utils/modelNameFormatter';
 import { InformationCircleIcon } from './icons/Icons';
 
 interface LeaderboardProps {
   agents: Agent[];
   onAgentClick: (agent: Agent) => void;
   showModelNames?: boolean;
+  simulationTypeName?: string;
 }
 
 type SortKey = keyof PerformanceMetrics | 'name';
@@ -33,7 +35,7 @@ const columns: { key: SortKey; label: string; format: (val: any) => string; clas
   { key: 'annualizedVolatility', label: 'Volatility (Ann.)', format: formatPercent, className: 'text-right' },
 ];
 
-export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, showModelNames = true }) => {
+export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, showModelNames = true, simulationTypeName }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'totalReturn', direction: 'desc' });
   
   const sortedAgents = useMemo(() => {
@@ -98,7 +100,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
               const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
               if (!latestPerf) return null;
               return (
-                <tr key={agent.id} className="hover:bg-arena-border transition-colors duration-150">
+                <tr key={`agent-${agent.id}-${index}`} className="hover:bg-arena-border transition-colors duration-150">
                   <td className="p-3 font-bold text-center">{index + 1}</td>
                   <td className="p-3 text-center">
                       <button onClick={() => onAgentClick(agent)} className="text-arena-text-secondary hover:text-arena-text-primary">
@@ -110,7 +112,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
                         {agent.image ? (
                           <img
                             src={agent.image}
-                            alt={agent.name}
+                            alt={getAgentDisplayName(agent, simulationTypeName)}
                             className="w-8 h-8 rounded-full object-cover border border-arena-border"
                             onError={(e) => {
                               // Fallback to color dot if image fails to load
@@ -126,8 +128,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ agents, onAgentClick, 
                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: agent.color }}></div>
                         )}
                         <div>
-                            <div className="font-semibold text-arena-text-primary">{agent.name}</div>
-                            {showModelNames && <div className="text-xs text-arena-text-secondary">{agent.model}</div>}
+                            <div className="font-semibold text-arena-text-primary">{getAgentDisplayName(agent, simulationTypeName)}</div>
                         </div>
                     </div>
                   </td>

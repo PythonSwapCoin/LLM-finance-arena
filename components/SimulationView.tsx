@@ -137,6 +137,7 @@ export function SimulationView() {
         simulationMode={simulationMode}
         day={simState.day}
         intradayHour={simState.intradayHour}
+        simulationTypeName={simulationType?.name}
       />
 
       {/* Main Content */}
@@ -150,6 +151,7 @@ export function SimulationView() {
             simulationMode={simulationMode}
             day={simState.day}
             intradayHour={simState.intradayHour}
+            simulationTypeName={simulationType?.name}
           />
         </div>
 
@@ -169,16 +171,17 @@ export function SimulationView() {
             currentDate={simState.currentDate}
           />
 
-          {/* Chat - only show if enabled for this competition */}
+          {/* Chat - disabled, showing "coming soon" message */}
           {chat.config.enabled && (
-            <LiveChat
-              chat={chat}
-              agents={agents}
-              currentRoundId={`${simState.day}-${simState.intradayHour.toFixed(3)}`}
-              onSendMessage={sendChatMessage}
-              simulationMode={simulationMode}
-              intradayHour={simState.intradayHour}
-            />
+            <div className="bg-arena-surface rounded-lg shadow-lg p-6 flex flex-col items-center justify-center space-y-4 opacity-60">
+              <div className="text-arena-text-secondary text-center">
+                <h3 className="text-lg font-bold text-arena-text-primary mb-2">Live Chat</h3>
+                <p className="text-sm">Coming Soon</p>
+                <p className="text-xs mt-2 text-arena-text-tertiary">
+                  Chat functionality will be available in a future update
+                </p>
+              </div>
+            </div>
           )}
         </div>
 
@@ -188,6 +191,7 @@ export function SimulationView() {
             agents={agents}
             onAgentClick={handleAgentClick}
             showModelNames={simulationType.showModelNames}
+            simulationTypeName={simulationType?.name}
           />
         </div>
       </div>
@@ -202,6 +206,7 @@ export function SimulationView() {
           startDate={simState.startDate}
           currentDate={simState.currentDate}
           simulationMode={simulationMode}
+          simulationTypeName={simulationType?.name}
         />
       )}
 

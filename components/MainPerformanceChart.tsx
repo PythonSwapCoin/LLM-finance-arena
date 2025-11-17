@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import type { Agent, Benchmark } from '../types';
 import { INITIAL_CASH } from '../constants';
 import { formatTimestampToDate } from '../utils/timeFormatting';
+import { getAgentDisplayName } from '../utils/modelNameFormatter';
 
 type Participant = Agent | Benchmark;
 
@@ -13,6 +14,7 @@ interface MainPerformanceChartProps {
   simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   day?: number;
   intradayHour?: number;
+  simulationTypeName?: string;
 }
 
 const CustomTooltip = ({
@@ -24,7 +26,9 @@ const CustomTooltip = ({
   currentDate,
   simulationMode,
   day,
-  intradayHour
+  intradayHour,
+  simulationTypeName,
+  participants
 }: any) => {
   if (active && payload && payload.length) {
     const timeLabel = formatTimestampToDate(label, startDate, currentDate, simulationMode, day, intradayHour);
@@ -38,12 +42,19 @@ const CustomTooltip = ({
       <div className="bg-arena-surface p-4 rounded-md border border-arena-border shadow-lg">
         <p className="label text-arena-text-primary font-semibold">{timeLabel}</p>
         <div className="mt-2 space-y-1">
-          {filteredPayload.sort((a: any, b: any) => b.value - a.value).map((pld: any) => (
-            <div key={pld.dataKey} style={{ color: pld.color }} className="text-sm flex justify-between space-x-4">
-              <span>{pld.name}:</span>
-              <span className="font-mono font-semibold">${pld.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-            </div>
-          ))}
+          {filteredPayload.sort((a: any, b: any) => b.value - a.value).map((pld: any, idx: number) => {
+            // Get the participant to check if it's an agent or benchmark
+            const participant = participants?.find((p: any) => p.id === pld.dataKey);
+            const displayName = participant && 'model' in participant
+              ? getAgentDisplayName(participant as Agent, simulationTypeName)
+              : pld.name;
+            return (
+              <div key={`tooltip-${pld.dataKey}-${idx}`} style={{ color: pld.color }} className="text-sm flex justify-between space-x-4">
+                <span>{displayName}:</span>
+                <span className="font-mono font-semibold">${pld.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -131,7 +142,7 @@ const isWithinMarketHours = (
   try {
     let date: Date;
     
-    if (simulationMode === 'realtime' && timestamp > 1000000000) {
+    if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
       // Unix timestamp (seconds) - this should already be in UTC
       // The timestamp represents the actual time the data was collected
       // For delayed data, it's 30 minutes ago, but still within market hours
@@ -169,14 +180,56 @@ const isWithinMarketHours = (
   }
 };
 
+// Helper function to check if a date is a weekend (Saturday = 6, Sunday = 0)
+const isWeekend = (date: Date, timeZone?: string): boolean => {
+  try {
+    if (timeZone) {
+      // Get day of week in the specified timezone by formatting and parsing
+      // Use a formatter to get the weekday name, then check if it's Saturday or Sunday
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        weekday: 'long'
+      });
+      const weekday = formatter.format(date).toLowerCase();
+      return weekday === 'saturday' || weekday === 'sunday';
+    } else {
+      // Use UTC day of week (0 = Sunday, 6 = Saturday)
+      const dayOfWeek = date.getUTCDay();
+      return dayOfWeek === 0 || dayOfWeek === 6;
+    }
+  } catch {
+    // Fallback: use UTC
+    const dayOfWeek = date.getUTCDay();
+    return dayOfWeek === 0 || dayOfWeek === 6;
+  }
+};
+
+// Helper function to get the next trading day (skip weekends)
+const getNextTradingDay = (date: Date, timeZone?: string): Date => {
+  const nextDay = new Date(date);
+  let daysToAdd = 1;
+  
+  // Keep adding days until we find a weekday
+  while (true) {
+    nextDay.setTime(date.getTime() + (daysToAdd * 24 * 60 * 60 * 1000));
+    if (!isWeekend(nextDay, timeZone)) {
+      break;
+    }
+    daysToAdd++;
+  }
+  
+  return nextDay;
+};
+
 // Helper function to get date from timestamp
 const getDateFromTimestamp = (
   timestamp: number,
   startDate?: string,
-  simulationMode?: 'simulated' | 'realtime' | 'historical'
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid'
 ): Date | null => {
   try {
-    if (simulationMode === 'realtime' && timestamp > 1000000000) {
+    // Handle realtime and hybrid mode (after transition) with Unix timestamps
+    if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
       return new Date(timestamp * 1000);
     } else if (startDate) {
       const start = new Date(startDate);
@@ -221,7 +274,9 @@ const formatXAxisLabel = (
   // For 24h period, always show hours
   const showHoursOnly = timePeriod === '24h' || (!shouldShowDays && timeSpan <= 24 * 60 * 60);
   // For real-time mode with Unix timestamps, we need to format in ET timezone
-  if (simulationMode === 'realtime' && timestamp > 1000000000) {
+  // Also handle hybrid mode after transition (when timestamps become Unix timestamps)
+  const isRealtimeTimestamp = timestamp > 1000000000;
+  if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && isRealtimeTimestamp) {
     const date = new Date(timestamp * 1000);
     
     // Check if this is the first data point of a new day in ET timezone
@@ -345,7 +400,13 @@ const formatXAxisLabel = (
       // Show date label at the beginning of each day (new day + market open time)
       if (isNewDay && isMarketOpenTime) {
         try {
-          const dateStr = date.toLocaleDateString('en-US', { 
+          // If it's a weekend, show the next trading day's date instead
+          let displayDate = date;
+          if (isWeekend(date, 'America/New_York')) {
+            displayDate = getNextTradingDay(date, 'America/New_York');
+          }
+          
+          const dateStr = displayDate.toLocaleDateString('en-US', { 
             month: 'short', 
             day: 'numeric',
             timeZone: 'America/New_York'
@@ -358,7 +419,13 @@ const formatXAxisLabel = (
           });
           return `${dateStr} ${timeStr}`;
         } catch {
-          const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          // Fallback: check weekend using UTC
+          let displayDate = date;
+          if (isWeekend(date)) {
+            displayDate = getNextTradingDay(date);
+          }
+          
+          const dateStr = displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
           return `${dateStr} ${timeStr}`;
         }
@@ -406,7 +473,7 @@ const formatXAxisLabel = (
         const firstTimestamp = allTimestamps[0];
         const lastTimestamp = allTimestamps[allTimestamps.length - 1];
         
-        if (simulationMode === 'realtime' && firstTimestamp > 1000000000 && lastTimestamp > 1000000000) {
+        if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && firstTimestamp > 1000000000 && lastTimestamp > 1000000000) {
           const firstDate = new Date(firstTimestamp * 1000);
           const lastDate = new Date(lastTimestamp * 1000);
           const diffTime = Math.abs(lastDate.getTime() - firstDate.getTime());
@@ -426,7 +493,7 @@ const formatXAxisLabel = (
       if (isNewDay && isMarketOpen) {
         // Calculate day number to determine if we should show this label
         const dayNumber = (() => {
-          if (simulationMode === 'realtime' && timestamp > 1000000000) {
+          if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
             // For realtime, calculate day number from start
             if (startDate) {
               const start = new Date(startDate);
@@ -443,13 +510,25 @@ const formatXAxisLabel = (
         // Show label if it's a day we want to show, or if it's first/last point
         if (dayNumber % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
           try {
-            return date.toLocaleDateString('en-US', { 
+            // If it's a weekend, show the next trading day's date instead
+            let displayDate = date;
+            if (isWeekend(date, 'America/New_York')) {
+              displayDate = getNextTradingDay(date, 'America/New_York');
+            }
+            
+            return displayDate.toLocaleDateString('en-US', { 
               month: 'short', 
               day: 'numeric',
               timeZone: 'America/New_York'
             });
           } catch {
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            // Fallback: check weekend using UTC
+            let displayDate = date;
+            if (isWeekend(date)) {
+              displayDate = getNextTradingDay(date);
+            }
+            
+            return displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           }
         }
       }
@@ -460,42 +539,27 @@ const formatXAxisLabel = (
     
     // Show day label only at the start of a new day at market open
     if (isNewDay && isMarketOpenTime) {
-      // For historical mode, use startDate to show the actual historical date
-      if (simulationMode === 'historical' && startDate) {
-        const start = new Date(startDate);
-        // Calculate days difference from start
-        const startDateStr = start.toLocaleDateString('en-US', { 
-          timeZone: 'America/New_York',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit'
-        });
-        const currentDateStr = date.toLocaleDateString('en-US', { 
-          timeZone: 'America/New_York',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit'
-        });
-        // Calculate days difference (simplified - assumes consecutive trading days)
-        const startParts = startDateStr.split('/');
-        const currentParts = currentDateStr.split('/');
-        const startDateObj = new Date(parseInt(startParts[2]), parseInt(startParts[0]) - 1, parseInt(startParts[1]));
-        const currentDateObj = new Date(parseInt(currentParts[2]), parseInt(currentParts[0]) - 1, parseInt(currentParts[1]));
-        const daysDiff = Math.floor((currentDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24));
-        const histDate = new Date(start);
-        histDate.setDate(start.getDate() + daysDiff);
-        return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
       // Format as "Nov 10" - use ET timezone for date
+      // If it's a weekend, show the next trading day's date instead
       try {
-        return date.toLocaleDateString('en-US', { 
+        let displayDate = date;
+        if (isWeekend(date, 'America/New_York')) {
+          displayDate = getNextTradingDay(date, 'America/New_York');
+        }
+        
+        return displayDate.toLocaleDateString('en-US', { 
           month: 'short', 
           day: 'numeric',
           timeZone: 'America/New_York' // Use ET timezone
         });
       } catch {
-        // Fallback if timezone is not supported
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        // Fallback: check weekend using UTC
+        let displayDate = date;
+        if (isWeekend(date)) {
+          displayDate = getNextTradingDay(date);
+        }
+        
+        return displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       }
     }
     
@@ -805,7 +869,8 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
   currentDate,
   simulationMode,
   day,
-  intradayHour
+  intradayHour,
+  simulationTypeName
 }) => {
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [hoveredParticipantId, setHoveredParticipantId] = useState<string | null>(null);
@@ -905,8 +970,10 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
 
     // For realtime mode: filter out flat periods between market close and next day open
     // This creates gaps in the chart similar to Yahoo Finance
+    // Also handle hybrid mode after transition
     let filteredTimestamps = timeFilteredTimestamps;
-    if (simulationMode === 'realtime') {
+    const isRealtimeMode = simulationMode === 'realtime' || (simulationMode === 'hybrid' && timeFilteredTimestamps.length > 0 && timeFilteredTimestamps[0] > 1000000000);
+    if (isRealtimeMode) {
       filteredTimestamps = [];
       let lastTimestamp: number | null = null;
       
@@ -964,7 +1031,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
       
       // Check for day boundaries
       let currentDayKey: string | null = null;
-      if (simulationMode === 'realtime' && timestamp > 1000000000) {
+      if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
         // Real-time: use Unix timestamp to get date in ET timezone
         const date = new Date(timestamp * 1000);
         
@@ -986,33 +1053,41 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         
         // Check if this is a new day and market open time (9:30 AM ET)
         // Include first data point (index === 0) as a day boundary
+        // Skip weekends - don't show boundaries for Saturday/Sunday
         const isNewDay = lastDayKey === null || currentDayKey !== lastDayKey;
         if (isNewDay) {
-          // This is the first data point of a new day (or the very first data point)
-          // Check if it's around market open (within first hour of market)
-          // Get hour in ET timezone
-          try {
-            const etHour = parseInt(date.toLocaleTimeString('en-US', { 
-              timeZone: 'America/New_York',
-              hour: '2-digit',
-              hour12: false
-            }).split(':')[0]);
-            const etMinute = parseInt(date.toLocaleTimeString('en-US', { 
-              timeZone: 'America/New_York',
-              minute: '2-digit'
-            }).split(':')[1]);
-            const etMinutes = etHour * 60 + etMinute;
-            // Market open is 9:30 AM ET (570 minutes)
-            if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
-              boundaries.push(timestamp);
-            }
-          } catch {
-            // Fallback: use UTC approximation
-            const utcHour = date.getUTCHours();
-            const utcMinute = date.getUTCMinutes();
-            const utcMinutes = utcHour * 60 + utcMinute;
-            if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
-              boundaries.push(timestamp);
+          // Skip weekend days - don't show boundaries for them
+          if (isWeekend(date, 'America/New_York')) {
+            // Don't add boundary for weekend, but still update lastDayKey to track the day
+            lastDayKey = currentDayKey;
+            // Continue to next iteration - don't process this day further
+          } else {
+            // This is the first data point of a new day (or the very first data point)
+            // Check if it's around market open (within first hour of market)
+            // Get hour in ET timezone
+            try {
+              const etHour = parseInt(date.toLocaleTimeString('en-US', { 
+                timeZone: 'America/New_York',
+                hour: '2-digit',
+                hour12: false
+              }).split(':')[0]);
+              const etMinute = parseInt(date.toLocaleTimeString('en-US', { 
+                timeZone: 'America/New_York',
+                minute: '2-digit'
+              }).split(':')[1]);
+              const etMinutes = etHour * 60 + etMinute;
+              // Market open is 9:30 AM ET (570 minutes)
+              if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
+                boundaries.push(timestamp);
+              }
+            } catch {
+              // Fallback: use UTC approximation
+              const utcHour = date.getUTCHours();
+              const utcMinute = date.getUTCMinutes();
+              const utcMinutes = utcHour * 60 + utcMinute;
+              if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
+                boundaries.push(timestamp);
+              }
             }
           }
         }
@@ -1203,12 +1278,18 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         </div>
       </div>
       
-      {selectedParticipantId && (
-        <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
-          Showing: {participants.find(p => p.id === selectedParticipantId)?.name || 'Selected'}
-          <span className="ml-2 text-arena-text-tertiary">(Click to deselect)</span>
-        </div>
-      )}
+      {selectedParticipantId && (() => {
+        const selected = participants.find(p => p.id === selectedParticipantId);
+        const displayName = selected && 'model' in selected
+          ? getAgentDisplayName(selected as Agent, simulationTypeName)
+          : selected?.name || 'Selected';
+        return (
+          <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
+            Showing: {displayName}
+            <span className="ml-2 text-arena-text-tertiary">(Click to deselect)</span>
+          </div>
+        );
+      })()}
       <div 
         style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}
         className="focus:outline-none"
@@ -1227,6 +1308,21 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         style={{ cursor: hoveredParticipantId ? 'pointer' : 'default', outline: 'none' }}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
+        <Tooltip
+          content={(props) => (
+            <CustomTooltip
+              {...props}
+              selectedParticipantId={selectedParticipantId}
+              startDate={startDate}
+              currentDate={currentDate}
+              simulationMode={simulationMode}
+              day={day}
+              intradayHour={intradayHour}
+              simulationTypeName={simulationTypeName}
+              participants={participants}
+            />
+          )}
+        />
         {/* Day boundary reference lines (dotted vertical lines) - show at beginning of each day */}
         {(() => {
           // For 24h period, show day boundaries at the start of each day
@@ -1240,7 +1336,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
               const timestamp = d.timestamp as number;
               let currentDayKey: string | null = null;
               
-              if (simulationMode === 'realtime' && timestamp > 1000000000) {
+              if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
                 // Real-time: use Unix timestamp to get date in ET timezone
                 const date = new Date(timestamp * 1000);
                 try {
@@ -1253,29 +1349,33 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                   currentDayKey = etDateStr;
                   
                   // Check if this is a new day and around market open (9:30 AM ET)
+                  // Skip weekends - don't show boundaries for Saturday/Sunday
                   const isNewDay = lastDayKey === null || currentDayKey !== lastDayKey;
                   if (isNewDay) {
-                    try {
-                      const etHour = parseInt(date.toLocaleTimeString('en-US', { 
-                        timeZone: 'America/New_York',
-                        hour: '2-digit',
-                        hour12: false
-                      }).split(':')[0]);
-                      const etMinute = parseInt(date.toLocaleTimeString('en-US', { 
-                        timeZone: 'America/New_York',
-                        minute: '2-digit'
-                      }).split(':')[1]);
-                      const etMinutes = etHour * 60 + etMinute;
-                      // Market open is 9:30 AM ET (570 minutes), check within first hour
-                      if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
-                        dayBoundaryTimestamps.push(timestamp);
-                      }
-                    } catch {
-                      const utcHour = date.getUTCHours();
-                      const utcMinute = date.getUTCMinutes();
-                      const utcMinutes = utcHour * 60 + utcMinute;
-                      if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
-                        dayBoundaryTimestamps.push(timestamp);
+                    // Skip weekend days - don't show boundaries for them
+                    if (!isWeekend(date, 'America/New_York')) {
+                      try {
+                        const etHour = parseInt(date.toLocaleTimeString('en-US', { 
+                          timeZone: 'America/New_York',
+                          hour: '2-digit',
+                          hour12: false
+                        }).split(':')[0]);
+                        const etMinute = parseInt(date.toLocaleTimeString('en-US', { 
+                          timeZone: 'America/New_York',
+                          minute: '2-digit'
+                        }).split(':')[1]);
+                        const etMinutes = etHour * 60 + etMinute;
+                        // Market open is 9:30 AM ET (570 minutes), check within first hour
+                        if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
+                          dayBoundaryTimestamps.push(timestamp);
+                        }
+                      } catch {
+                        const utcHour = date.getUTCHours();
+                        const utcMinute = date.getUTCMinutes();
+                        const utcMinutes = utcHour * 60 + utcMinute;
+                        if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
+                          dayBoundaryTimestamps.push(timestamp);
+                        }
                       }
                     }
                   }
@@ -1339,6 +1439,8 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         })()}
         <XAxis 
           dataKey="timestamp" 
+          type="number"
+          scale="linear"
           stroke="#A3A3A3"
           ticks={visibleTickTimestamps}
           tick={(props: any) => {
@@ -1449,7 +1551,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         {participants
           .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
           .filter(p => (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500")
-          .map(p => {
+          .map((p, index) => {
             const isHovered = hoveredParticipantId === p.id;
             const isSelected = selectedParticipantId === p.id;
             const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
@@ -1458,7 +1560,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
               : ((p as Benchmark).name === "AI Managers Index" ? 3 : 2.5);
 
             return (
-              <React.Fragment key={p.id}>
+              <React.Fragment key={`benchmark-${p.id}-${index}`}>
                 {/* Invisible thicker line for better hover/click detection */}
                 <Line
                   type="linear"
@@ -1519,14 +1621,16 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
         {participants
           .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
           .filter(p => (p as Benchmark).name !== "AI Managers Index" && (p as Benchmark).name !== "S&P 500")
-          .map(p => {
+          .map((p, index) => {
             const isHovered = hoveredParticipantId === p.id;
             const isSelected = selectedParticipantId === p.id;
             const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
             const strokeWidth = isHovered || isSelected ? 4 : 2.5;
+            // Get display name for agents (formatted model name for Wall Street Arena)
+            const displayName = getAgentDisplayName(p as Agent, simulationTypeName);
 
             return (
-              <React.Fragment key={p.id}>
+              <React.Fragment key={`agent-${p.id}-${index}`}>
                 {/* Invisible thicker line for better hover/click detection */}
                 <Line
                   type="linear"
@@ -1568,7 +1672,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                   }}
                   isAnimationActive={false}
                   connectNulls={false}
-                  name={p.name}
+                  name={displayName}
                   opacity={opacity}
                   style={{ pointerEvents: 'none' }}
                   label={
@@ -1576,7 +1680,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                       <EndOfLineLabel
                         data={p.performanceHistory}
                         color={p.color}
-                        name={p.name}
+                        name={displayName}
                         isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
                       />
                     ) : undefined
@@ -1595,14 +1699,14 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           {/* Benchmarks section */}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs text-arena-text-tertiary uppercase tracking-wider mr-1">Benchmarks:</span>
-            {benchmarks.map(p => {
+            {benchmarks.map((p, index) => {
               const isHovered = hoveredParticipantId === p.id;
               const isSelected = selectedParticipantId === p.id;
               const isDimmed = (hoveredParticipantId && !isHovered) || (selectedParticipantId && !isSelected);
 
               return (
                 <button
-                  key={p.id}
+                  key={`benchmark-legend-${p.id}-${index}`}
                   onClick={() => {
                     if (selectedParticipantId === p.id) {
                       setSelectedParticipantId(null);
@@ -1657,14 +1761,16 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           {agents.length > 0 && (
             <div className="flex flex-wrap gap-2 items-center">
               <span className="text-xs text-arena-text-tertiary uppercase tracking-wider mr-1">Agents:</span>
-              {agents.map(p => {
+              {agents.map((p, index) => {
                 const isHovered = hoveredParticipantId === p.id;
                 const isSelected = selectedParticipantId === p.id;
                 const isDimmed = (hoveredParticipantId && !isHovered) || (selectedParticipantId && !isSelected);
+                // Get display name for agents (formatted model name for Wall Street Arena)
+                const displayName = getAgentDisplayName(p as Agent, simulationTypeName);
 
                 return (
                   <button
-                    key={p.id}
+                    key={`agent-legend-${p.id}-${index}`}
                     onClick={() => {
                       if (selectedParticipantId === p.id) {
                         setSelectedParticipantId(null);
@@ -1690,14 +1796,14 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                     {(p as Agent).image && (
                       <img
                         src={(p as Agent).image}
-                        alt={p.name}
+                        alt={displayName}
                         className="w-5 h-5 rounded-full object-cover"
                         style={{ boxShadow: `0 0 0 1px ${p.color}` }}
                       />
                     )}
                     <div className="w-6 h-0.5 rounded-full" style={{ backgroundColor: p.color }} />
                     <span className="text-sm font-semibold" style={{ color: p.color }}>
-                      {p.name}
+                      {displayName}
                     </span>
                     {p.performanceHistory && p.performanceHistory.length > 0 && (
                       <span className="text-xs text-arena-text-secondary font-mono">

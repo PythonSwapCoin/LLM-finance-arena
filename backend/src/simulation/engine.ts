@@ -6,7 +6,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatService.js';
 import { createRoundId } from '../utils/chatUtils.js';
 import { priceLogService } from '../services/priceLogService.js';
-import { validatePortfolioCalculations } from '../utils/portfolioValidator.js';
+import { validatePortfolioCalculations, validatePriceMovements } from '../utils/portfolioValidator.js';
 
 const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
   if (value === undefined) {
@@ -52,6 +52,37 @@ const getMaxConcurrentRequests = (agentCount: number): number => {
 const calculateExecutionFee = (notional: number): number => {
   const variableFee = notional * TRADING_FEE_RATE;
   return Math.max(variableFee, MIN_TRADE_FEE);
+};
+
+// Calculate the maximum quantity of shares that can be bought with available cash
+// Accounts for execution fees (percentage-based with minimum)
+const calculateMaxAffordableQuantity = (price: number, availableCash: number): number => {
+  if (price <= 0 || availableCash <= 0) {
+    return 0;
+  }
+  
+  // If the minimum fee alone exceeds available cash, can't buy any shares
+  if (MIN_TRADE_FEE >= availableCash) {
+    return 0;
+  }
+  
+  // Try percentage-based fee calculation first
+  // cash >= quantity * price * (1 + TRADING_FEE_RATE)
+  const maxQuantityWithPercentageFee = Math.floor(availableCash / (price * (1 + TRADING_FEE_RATE)));
+  
+  // Check if this quantity would trigger the minimum fee
+  const notionalForPercentage = maxQuantityWithPercentageFee * price;
+  const feeForPercentage = notionalForPercentage * TRADING_FEE_RATE;
+  
+  if (feeForPercentage >= MIN_TRADE_FEE) {
+    // Percentage fee applies, return this quantity
+    return Math.max(0, maxQuantityWithPercentageFee);
+  } else {
+    // Minimum fee applies, need to account for it
+    // cash >= quantity * price + MIN_TRADE_FEE
+    const maxQuantityWithMinFee = Math.floor((availableCash - MIN_TRADE_FEE) / price);
+    return Math.max(0, maxQuantityWithMinFee);
+  }
 };
 
 const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -199,6 +230,7 @@ const handleTradeWindowAgent = async (
         const totalCost = notional + fees;
 
         if (newPortfolio.cash >= totalCost) {
+          // Can afford the full quantity
           newPortfolio.cash -= totalCost;
           const existingPosition = newPortfolio.positions[trade.ticker];
           if (existingPosition) {
@@ -232,15 +264,60 @@ const handleTradeWindowAgent = async (
           });
           logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
         } else {
-          const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
-          // Log failed trade - logger.logTrade will handle this as ERROR
-          logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
-          failedTrades.push({
-            ticker: trade.ticker,
-            action: 'buy',
-            quantity: trade.quantity,
-            reason: errorMsg,
-          });
+          // Cannot afford full quantity - buy as much as possible
+          const maxAffordableQuantity = calculateMaxAffordableQuantity(tradePrice, newPortfolio.cash);
+          
+          if (maxAffordableQuantity > 0) {
+            // Execute partial trade
+            const adjustedNotional = maxAffordableQuantity * tradePrice;
+            const adjustedFees = calculateExecutionFee(adjustedNotional);
+            const adjustedTotalCost = adjustedNotional + adjustedFees;
+            
+            newPortfolio.cash -= adjustedTotalCost;
+            const existingPosition = newPortfolio.positions[trade.ticker];
+            if (existingPosition) {
+              const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + adjustedNotional;
+              existingPosition.quantity += maxAffordableQuantity;
+              existingPosition.averageCost = aggregateCost / existingPosition.quantity;
+              if (trade.fairValue !== undefined) {
+                existingPosition.lastFairValue = trade.fairValue;
+                existingPosition.lastTopOfBox = trade.topOfBox;
+                existingPosition.lastBottomOfBox = trade.bottomOfBox;
+              }
+            } else {
+              newPortfolio.positions[trade.ticker] = {
+                ticker: trade.ticker,
+                quantity: maxAffordableQuantity,
+                averageCost: tradePrice,
+                lastFairValue: trade.fairValue,
+                lastTopOfBox: trade.topOfBox,
+                lastBottomOfBox: trade.bottomOfBox,
+              };
+            }
+            newTradeHistory.push({
+              ...trade,
+              quantity: maxAffordableQuantity,
+              price: tradePrice,
+              timestamp,
+              fairValue: trade.fairValue,
+              topOfBox: trade.topOfBox,
+              bottomOfBox: trade.bottomOfBox,
+              justification: trade.justification,
+              fees: adjustedFees,
+            });
+            logger.logTrade(agent.name, trade.ticker, 'buy', maxAffordableQuantity, tradePrice, true, 
+              `Partial execution: requested ${trade.quantity}, bought ${maxAffordableQuantity}`, adjustedFees);
+          } else {
+            // Cannot afford even 1 share
+            const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
+            logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
+            failedTrades.push({
+              ticker: trade.ticker,
+              action: 'buy',
+              quantity: trade.quantity,
+              reason: errorMsg,
+            });
+          }
         }
       } else if (trade.action === 'sell') {
         const existingPosition = newPortfolio.positions[trade.ticker];
@@ -392,6 +469,7 @@ const handleAdvanceDayAgent = async (
         const totalCost = notional + fees;
 
         if (newPortfolio.cash >= totalCost) {
+          // Can afford the full quantity
           newPortfolio.cash -= totalCost;
           const existingPosition = newPortfolio.positions[trade.ticker];
           if (existingPosition) {
@@ -425,8 +503,54 @@ const handleAdvanceDayAgent = async (
           });
           logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
         } else {
-          const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
-          logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
+          // Cannot afford full quantity - buy as much as possible
+          const maxAffordableQuantity = calculateMaxAffordableQuantity(tradePrice, newPortfolio.cash);
+          
+          if (maxAffordableQuantity > 0) {
+            // Execute partial trade
+            const adjustedNotional = maxAffordableQuantity * tradePrice;
+            const adjustedFees = calculateExecutionFee(adjustedNotional);
+            const adjustedTotalCost = adjustedNotional + adjustedFees;
+            
+            newPortfolio.cash -= adjustedTotalCost;
+            const existingPosition = newPortfolio.positions[trade.ticker];
+            if (existingPosition) {
+              const aggregateCost = (existingPosition.averageCost * existingPosition.quantity) + adjustedNotional;
+              existingPosition.quantity += maxAffordableQuantity;
+              existingPosition.averageCost = aggregateCost / existingPosition.quantity;
+              if (trade.fairValue !== undefined) {
+                existingPosition.lastFairValue = trade.fairValue;
+                existingPosition.lastTopOfBox = trade.topOfBox;
+                existingPosition.lastBottomOfBox = trade.bottomOfBox;
+              }
+            } else {
+              newPortfolio.positions[trade.ticker] = {
+                ticker: trade.ticker,
+                quantity: maxAffordableQuantity,
+                averageCost: tradePrice,
+                lastFairValue: trade.fairValue,
+                lastTopOfBox: trade.topOfBox,
+                lastBottomOfBox: trade.bottomOfBox,
+              };
+            }
+            newTradeHistory.push({
+              ...trade,
+              quantity: maxAffordableQuantity,
+              price: tradePrice,
+              timestamp: nextDay,
+              fairValue: trade.fairValue,
+              topOfBox: trade.topOfBox,
+              bottomOfBox: trade.bottomOfBox,
+              justification: trade.justification,
+              fees: adjustedFees,
+            });
+            logger.logTrade(agent.name, trade.ticker, 'buy', maxAffordableQuantity, tradePrice, true, 
+              `Partial execution: requested ${trade.quantity}, bought ${maxAffordableQuantity}`, adjustedFees);
+          } else {
+            // Cannot afford even 1 share
+            const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
+            logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
+          }
         }
       } else if (trade.action === 'sell') {
         const existingPosition = newPortfolio.positions[trade.ticker];
@@ -839,8 +963,11 @@ export const tradeWindow = async (
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
 
-  // Validate portfolio calculations (only logs if issues found)
+  // Validate portfolio calculations and run tests
   validatePortfolioCalculations(updatedAgents, marketData, day, intradayHour);
+  
+  // Validate price movements for anomalies
+  validatePriceMovements(currentSnapshot.marketData, marketData, day, intradayHour);
 
   return {
     day,
@@ -940,8 +1067,11 @@ export const advanceDay = async (
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
 
-  // Validate portfolio calculations (only logs if issues found)
+  // Validate portfolio calculations and run tests
   validatePortfolioCalculations(updatedAgents, newMarketData, nextDay, 0);
+  
+  // Validate price movements for anomalies (day transition)
+  validatePriceMovements(currentSnapshot.marketData, newMarketData, nextDay, 0);
 
   return {
     day: nextDay,

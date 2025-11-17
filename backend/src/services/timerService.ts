@@ -42,39 +42,41 @@ export const calculateNextTradeWindowTimestamp = (): number => {
   // For realtime mode, check market hours
   if (isRealtimeMode) {
     const now = new Date();
-    const etTime = getETTime(now);
-    const isOpen = checkMarketOpen(etTime);
+    const etTime = getETTime(now); // For logging only
+    const isOpen = checkMarketOpen(now); // Pass UTC date, not ET-converted date
 
     if (!isOpen) {
       // Market is closed - return next market open time
       const nextOpen = getNextMarketOpen(now);
-
-      logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-        'Timer: Market closed, next trade window at market open', {
-          mode,
-          hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
-          currentTime: now.toISOString(),
-          currentET: etTime.toISOString(),
-          nextOpen: nextOpen.toISOString(),
-          secondsUntilOpen: Math.floor((nextOpen.getTime() - now.getTime()) / 1000),
-        });
+      
+      // Only log market status changes (not every timer update)
+      const lastMarketStatus = (global as any).lastMarketStatus;
+      if (lastMarketStatus !== 'closed') {
+        logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+          '[MARKET STATUS] MARKET CLOSED', {
+            currentET: etTime.toISOString(),
+            nextOpen: nextOpen.toISOString(),
+            secondsUntilOpen: Math.floor((nextOpen.getTime() - now.getTime()) / 1000),
+          });
+        (global as any).lastMarketStatus = 'closed';
+      }
 
       return nextOpen.getTime();
     }
 
     // Market is open - next trade window is one interval away
     const nextTimestamp = Date.now() + tradeInterval;
-
-    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-      'Timer: Market open, next trade window in interval', {
-        mode,
-        hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
-        currentTime: now.toISOString(),
-        currentET: etTime.toISOString(),
-        tradeIntervalMs: tradeInterval,
-        nextTradeWindow: new Date(nextTimestamp).toISOString(),
-        secondsUntilNext: Math.floor(tradeInterval / 1000),
-      });
+    
+    // Only log market status changes (not every timer update)
+    const lastMarketStatus = (global as any).lastMarketStatus;
+    if (lastMarketStatus !== 'open') {
+      logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+        '[MARKET STATUS] MARKET OPEN', {
+          currentET: etTime.toISOString(),
+          nextTradeWindow: new Date(nextTimestamp).toISOString(),
+        });
+      (global as any).lastMarketStatus = 'open';
+    }
 
     return nextTimestamp;
   }
@@ -108,19 +110,8 @@ export const calculateNextTradeWindowTimestamp = (): number => {
 
   const nextTimestamp = Date.now() + realWorldMsUntilNext;
 
-  logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-    'Timer: Simulated mode, calculating based on intraday progress', {
-      mode,
-      hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
-      currentIntradayHour: currentIntradayHour,
-      nextTradeWindowHour: nextTradeWindowHour,
-      hoursUntilNext: hoursUntilNext,
-      ticksNeeded: ticksNeeded,
-      simIntervalMs: simInterval,
-      realWorldMsUntilNext: realWorldMsUntilNext,
-      nextTradeWindow: new Date(nextTimestamp).toISOString(),
-      secondsUntilNext: Math.floor(realWorldMsUntilNext / 1000),
-    });
+  // Reduced logging for simulated mode - only log significant events
+  // (Timer logs removed to reduce noise)
 
   // Return timestamp
   return nextTimestamp;

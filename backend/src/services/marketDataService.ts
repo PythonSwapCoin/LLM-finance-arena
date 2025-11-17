@@ -484,15 +484,36 @@ const getNextPrice = (currentPrice: number): number => {
   return Math.max(newPrice, 1);
 };
 
-const validateMarketData = (data: TickerData): boolean => {
+const validateMarketData = (data: TickerData, previousPrice?: number): boolean => {
   if (!data.price || data.price <= 0 || data.price > 100000) {
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+      `Invalid price for ${data.ticker}: ${data.price}`, 
+      { ticker: data.ticker, price: data.price });
     return false;
   }
+  
+  // Check for suspicious daily change percentage
   if (Math.abs(data.dailyChangePercent) > 0.5) {
     logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
       `Suspicious daily change for ${data.ticker}: ${(data.dailyChangePercent * 100).toFixed(2)}%`, 
       { ticker: data.ticker, changePercent: data.dailyChangePercent });
   }
+  
+  // Check for sudden price jumps between ticks (more than 5% change)
+  if (previousPrice && previousPrice > 0) {
+    const priceChangePercent = Math.abs((data.price - previousPrice) / previousPrice);
+    if (priceChangePercent > 0.05) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[PRICE JUMP] ${data.ticker}: ${previousPrice.toFixed(2)} → ${data.price.toFixed(2)} (${(priceChangePercent * 100).toFixed(2)}% change)`,
+        { 
+          ticker: data.ticker, 
+          previousPrice, 
+          currentPrice: data.price, 
+          changePercent: priceChangePercent 
+        });
+    }
+  }
+  
   return true;
 };
 
@@ -793,7 +814,8 @@ const fetchTickerWithCascade = async (ticker: string, useCache: boolean): Promis
       `All data sources failed for ${ticker}, using simulated data`, { ticker, fallbackPrice });
   }
 
-  logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+  // Log at DEBUG level to reduce log noise (can be enabled if needed)
+  logger.log(LogLevel.DEBUG, LogCategory.MARKET_DATA,
     `Market data fetched for ${ticker} using ${sourceUsed}`, {
       ticker,
       price: tickerData.price,
@@ -1022,17 +1044,111 @@ const fetchHistoricalWeekData = async (tickers: string[]): Promise<{ [ticker: st
   return historicalData;
 };
 
-const createSimulatedMarketData = (tickers: string[]): MarketData => {
+const createSimulatedMarketData = async (tickers: string[]): Promise<MarketData> => {
   const marketData: MarketData = {};
-  tickers.forEach(ticker => {
-    const initialPrice = 50 + Math.random() * 250;
+  
+  // Check for duplicates
+  const uniqueTickers = [...new Set(tickers)];
+  if (uniqueTickers.length !== tickers.length) {
+    logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+      `[TICKER WARNING] Duplicate tickers detected in list`, {
+        originalCount: tickers.length,
+        uniqueCount: uniqueTickers.length,
+        duplicates: tickers.filter((t, i) => tickers.indexOf(t) !== i)
+      });
+  }
+  
+  // Benchmark tickers that should always use real prices from yfinance
+  const BENCHMARK_TICKERS = ['^GSPC'];
+  const benchmarkTickers = uniqueTickers.filter(t => BENCHMARK_TICKERS.includes(t));
+  const regularTickers = uniqueTickers.filter(t => !BENCHMARK_TICKERS.includes(t));
+  
+  // Fetch real prices for benchmark tickers (^GSPC) from yfinance
+  if (benchmarkTickers.length > 0) {
+    try {
+      const realBenchmarkData = await fetchRealMarketDataWithCascade(benchmarkTickers, false);
+      Object.assign(marketData, realBenchmarkData);
+      logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+        `[BENCHMARK DATA] Fetched real prices for benchmark tickers: ${benchmarkTickers.join(', ')}`, {
+          tickers: benchmarkTickers,
+          prices: benchmarkTickers.reduce((acc, ticker) => {
+            if (realBenchmarkData[ticker]) {
+              acc[ticker] = realBenchmarkData[ticker].price.toFixed(2);
+            }
+            return acc;
+          }, {} as Record<string, string>)
+        });
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[BENCHMARK DATA] Failed to fetch real prices for benchmark tickers, using fallback`, {
+          tickers: benchmarkTickers,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      // Fallback to random prices if fetch fails
+      benchmarkTickers.forEach(ticker => {
+        marketData[ticker] = {
+          ticker,
+          price: ticker === '^GSPC' ? 5000 + Math.random() * 1000 : 250 + Math.random() * 100,
+          dailyChange: 0,
+          dailyChangePercent: 0,
+        };
+      });
+    }
+  }
+  
+  // Expected price ranges for major tickers (for validation)
+  const EXPECTED_PRICE_RANGES: Record<string, { min: number; max: number; name: string }> = {
+    'GOOGL': { min: 100, max: 300, name: 'Alphabet Class A' },
+    'GOOG': { min: 100, max: 300, name: 'Alphabet Class C' },
+    'NVDA': { min: 100, max: 200, name: 'NVIDIA' },
+    'AAPL': { min: 150, max: 250, name: 'Apple' },
+    'MSFT': { min: 300, max: 500, name: 'Microsoft' },
+    'AMZN': { min: 100, max: 200, name: 'Amazon' },
+    'META': { min: 200, max: 500, name: 'Meta' },
+    'TSLA': { min: 100, max: 400, name: 'Tesla' },
+  };
+  
+  // Generate random prices for regular trading tickers
+  regularTickers.forEach(ticker => {
+    const expectedRange = EXPECTED_PRICE_RANGES[ticker];
+    let initialPrice: number;
+    
+    if (expectedRange) {
+      // Use expected range if available
+      initialPrice = expectedRange.min + Math.random() * (expectedRange.max - expectedRange.min);
+    } else {
+      // Default random range for other tickers
+      initialPrice = 50 + Math.random() * 250;
+    }
+    
     marketData[ticker] = {
       ticker,
       price: initialPrice,
       dailyChange: 0,
       dailyChangePercent: 0,
     };
+    
+    // Log if price seems unusual (outside expected range)
+    if (expectedRange && (initialPrice < expectedRange.min * 0.7 || initialPrice > expectedRange.max * 1.3)) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[PRICE INIT] ${ticker} (${expectedRange.name}) initialized at unusual price: $${initialPrice.toFixed(2)} (expected: $${expectedRange.min}-$${expectedRange.max})`, {
+          ticker,
+          price: initialPrice.toFixed(2),
+          expectedRange: `${expectedRange.min}-${expectedRange.max}`
+        });
+    }
   });
+  
+  // Log if both GOOGL and GOOG are present (they're different share classes)
+  if (regularTickers.includes('GOOGL') && regularTickers.includes('GOOG')) {
+    logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+      `[TICKER INFO] Both GOOGL (Class A) and GOOG (Class C) are tracked - these are different Alphabet share classes with different prices`, {
+        googlPrice: marketData['GOOGL']?.price.toFixed(2),
+        googPrice: marketData['GOOG']?.price.toFixed(2),
+        note: 'GOOGL has voting rights, GOOG does not - prices can differ'
+      });
+  }
+  
   return marketData;
 };
 
@@ -1092,18 +1208,23 @@ const fetchYahooFinanceDetailedInfo = async (ticker: string, baseData: TickerDat
 };
 
 export const createInitialMarketData = async (tickers: string[]): Promise<MarketData> => {
-  // Always include SPY and ^GSPC for S&P 500 benchmark tracking
-  const tickersWithSpy = [...new Set([...tickers, 'SPY', '^GSPC'])];
+  // Always include ^GSPC for S&P 500 benchmark tracking (^GSPC is the official index)
+  // SPY is the ETF - we only need one for benchmarking, so we use ^GSPC
+  const tickersWithBenchmark = [...new Set([...tickers, '^GSPC'])];
 
-  if (MODE === 'historical') {
-    console.log('📊 ✅ Historical Simulation Mode ENABLED');
-    logger.logSimulationEvent('Historical Simulation Mode ENABLED', { tickers: tickersWithSpy.length });
+  // Hybrid mode should use historical data if HISTORICAL_SIMULATION_START_DATE is set
+  const shouldUseHistorical = MODE === 'historical' || (MODE === 'hybrid' && HISTORICAL_SIMULATION_START_DATE);
+  
+  if (shouldUseHistorical) {
+    const modeLabel = MODE === 'hybrid' ? 'Hybrid Mode (Historical Phase)' : 'Historical Simulation Mode';
+    console.log(`📊 ✅ ${modeLabel} ENABLED`);
+    logger.logSimulationEvent(`${modeLabel} ENABLED`, { tickers: tickersWithBenchmark.length });
     historicalDataCache = {};
     currentHistoricalDay = 0;
-    historicalDataCache = await fetchHistoricalWeekData(tickersWithSpy);
+    historicalDataCache = await fetchHistoricalWeekData(tickersWithBenchmark);
     
     const marketData: MarketData = {};
-    tickersWithSpy.forEach(ticker => {
+    tickersWithBenchmark.forEach(ticker => {
       const dayData = historicalDataCache[ticker]?.[0];
       if (dayData) {
         marketData[ticker] = {
@@ -1128,16 +1249,16 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
     if (USE_DELAYED_DATA) {
       console.log(`⏰ Using ${DATA_DELAY_MINUTES}-minute delayed data`);
       logger.logSimulationEvent('Real-Time Market Data Mode ENABLED (Delayed)', { 
-        tickers: tickersWithSpy.length, 
+        tickers: tickersWithBenchmark.length, 
         delayMinutes: DATA_DELAY_MINUTES 
       });
     } else {
-      logger.logSimulationEvent('Real-Time Market Data Mode ENABLED', { tickers: tickersWithSpy.length });
+      logger.logSimulationEvent('Real-Time Market Data Mode ENABLED', { tickers: tickersWithBenchmark.length });
     }
     
     // For initial load, disable cache to ensure fresh data
     // If using delayed data, fetchYahooFinanceData will automatically use delayed endpoints
-    const marketData = await fetchRealMarketDataWithCascade(tickersWithSpy, false);
+    const marketData = await fetchRealMarketDataWithCascade(tickersWithBenchmark, false);
 
     if (ENABLE_YAHOO_DETAILED_INFO && !USE_DELAYED_DATA) {
       logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
@@ -1155,8 +1276,8 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
     return marketData;
   }
   console.log('📊 ✅ Simulated Market Data Mode (Default)');
-  logger.logSimulationEvent('Simulated Market Data Mode ENABLED', { tickers: tickersWithSpy.length });
-  return createSimulatedMarketData(tickersWithSpy);
+  logger.logSimulationEvent('Simulated Market Data Mode ENABLED', { tickers: tickersWithBenchmark.length });
+  return await createSimulatedMarketData(tickersWithBenchmark);
 };
 
 const getIntradayPrice = (basePrice: number, dailyChangePercent: number, intradayHour: number): number => {
@@ -1172,14 +1293,17 @@ export const generateNextIntradayMarketData = async (
   intradayHour: number,
   options?: { prefetchedData?: MarketData; missingTickers?: string[] }
 ): Promise<MarketData> => {
-  if (MODE === 'historical') {
-    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
-    let tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
+  // Hybrid mode should use historical data if HISTORICAL_SIMULATION_START_DATE is set and hasn't transitioned yet
+  const shouldUseHistorical = MODE === 'historical' || (MODE === 'hybrid' && HISTORICAL_SIMULATION_START_DATE && !hasHybridModeTransitioned());
+  
+  if (shouldUseHistorical) {
+    // Always include ^GSPC for S&P 500 benchmark tracking
+    let tickers = [...new Set([...Object.keys(previousMarketData), '^GSPC'])];
     if (tickers.length === 0) {
-      tickers = [...new Set([...Object.keys(historicalDataCache), 'SPY', '^GSPC'])];
+      tickers = [...new Set([...Object.keys(historicalDataCache), '^GSPC'])];
     }
     if (tickers.length === 0) {
-      tickers = [...new Set([...S_P500_TICKERS, 'SPY', '^GSPC'])];
+      tickers = [...new Set([...S_P500_TICKERS, '^GSPC'])];
     }
     
     if (tickers.length === 0) {
@@ -1224,8 +1348,8 @@ export const generateNextIntradayMarketData = async (
     
     return marketData;
   } else if (MODE === 'realtime') {
-    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
-    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
+    // Always include ^GSPC for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), '^GSPC'])];
     let fetchedData: MarketData = {};
     let usedPrefetch = false;
 
@@ -1265,7 +1389,36 @@ export const generateNextIntradayMarketData = async (
   
   // Simulated mode
   const newMarketData: MarketData = {};
+  const BENCHMARK_TICKERS = ['^GSPC'];
+  
+  // Fetch real prices for benchmark tickers during intraday updates
+  const benchmarkTickers = Object.keys(previousMarketData).filter(t => BENCHMARK_TICKERS.includes(t));
+  if (benchmarkTickers.length > 0) {
+    try {
+      const realBenchmarkData = await fetchRealMarketDataWithCascade(benchmarkTickers, true);
+      Object.assign(newMarketData, realBenchmarkData);
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[BENCHMARK DATA] Failed to fetch real prices for benchmark tickers, using previous prices`, {
+          tickers: benchmarkTickers,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      // Fallback: keep previous prices
+      benchmarkTickers.forEach(ticker => {
+        if (previousMarketData[ticker]) {
+          newMarketData[ticker] = { ...previousMarketData[ticker] };
+        }
+      });
+    }
+  }
+  
+  // Generate random prices for regular trading tickers
   Object.keys(previousMarketData).forEach(ticker => {
+    // Skip benchmark tickers (already handled above)
+    if (BENCHMARK_TICKERS.includes(ticker)) {
+      return;
+    }
+    
     const prevData = previousMarketData[ticker];
     const volatility = (Math.random() - 0.5) * 0.01;
     const intradayPrice = prevData.price * (1 + volatility);
@@ -1273,23 +1426,55 @@ export const generateNextIntradayMarketData = async (
     const prevPrice = prevData.price;
     const intradayChange = intradayPrice - prevPrice;
     
-    newMarketData[ticker] = {
+    const newTickerData: TickerData = {
       ticker,
       price: intradayPrice,
       dailyChange: prevData.dailyChange + intradayChange,
       dailyChangePercent: prevPrice > 0 ? (intradayPrice - (prevPrice - prevData.dailyChange)) / (prevPrice - prevData.dailyChange) : 0,
     };
+    
+    // Validate and log if there's a suspicious jump (>5% intraday change)
+    const intradayChangePercent = Math.abs(intradayChange / prevPrice);
+    if (intradayChangePercent > 0.05) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[INTRADAY JUMP] ${ticker}: ${prevPrice.toFixed(2)} → ${intradayPrice.toFixed(2)} (${(intradayChangePercent * 100).toFixed(2)}% change)`,
+        { 
+          ticker, 
+          previousPrice: prevPrice, 
+          newPrice: intradayPrice, 
+          changePercent: intradayChangePercent,
+          intradayHour
+        });
+    }
+    
+    validateMarketData(newTickerData, prevPrice);
+    newMarketData[ticker] = newTickerData;
   });
   return newMarketData;
 };
 
 export const generateNextDayMarketData = async (previousMarketData: MarketData): Promise<MarketData> => {
   currentIntradayHour = 0;
+  const BENCHMARK_TICKERS = ['^GSPC'];
 
-  if (MODE === 'historical') {
+  // Hybrid mode should use historical data if HISTORICAL_SIMULATION_START_DATE is set and hasn't transitioned yet
+  const shouldUseHistorical = MODE === 'historical' || (MODE === 'hybrid' && HISTORICAL_SIMULATION_START_DATE && !hasHybridModeTransitioned());
+  
+  if (shouldUseHistorical) {
+    // Check if we've run out of historical data (only Mon-Fri, so max index is 4)
+    if (currentHistoricalDay >= 4) {
+      // No more historical data - return previous market data unchanged
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[HISTORICAL DATA] No more historical data available (day ${currentHistoricalDay + 1}), keeping previous prices`, {
+          currentHistoricalDay,
+          maxDays: 4
+        });
+      return previousMarketData;
+    }
+    
     currentHistoricalDay++;
-    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
-    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
+    // Always include ^GSPC for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), '^GSPC'])];
     const marketData: MarketData = {};
     
     tickers.forEach(ticker => {
@@ -1297,19 +1482,45 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
       const dayData = historicalDays[currentHistoricalDay];
 
       if (dayData) {
+        // Get previous day's historical data to calculate the change correctly
+        const previousDayData = currentHistoricalDay > 0 ? historicalDays[currentHistoricalDay - 1] : null;
+        const previousDayClose = previousDayData?.price || previousMarketData[ticker]?.price || dayData.price;
+        
         // Use simulation's current price for day opening to prevent execution slippage
         // This ensures trades at day boundaries execute at the simulation's current price,
         // not the historical cache's stale price
         const dayOpenPrice = previousMarketData[ticker]?.price || dayData.price;
+        
+        // Calculate daily change from previous day's close to current day's open
+        // Use historical data's change if available, otherwise calculate from prices
+        const historicalChange = dayData.change || 0;
+        const historicalChangePercent = dayData.changePercent || 0;
+        
+        // Calculate change: if using simulation price, calculate from previous close
+        // Otherwise use historical change values
+        const dailyChange = previousMarketData[ticker]?.price 
+          ? (dayOpenPrice - previousDayClose)
+          : historicalChange;
+        const dailyChangePercent = previousMarketData[ticker]?.price && previousDayClose > 0
+          ? (dailyChange / previousDayClose)
+          : historicalChangePercent;
+        
         marketData[ticker] = {
           ticker,
           price: dayOpenPrice,
-          dailyChange: 0,
-          dailyChangePercent: 0,
+          dailyChange,
+          dailyChangePercent,
         };
       } else {
+        // No data for this day - use last available data
         const lastData = historicalDays[historicalDays.length - 1];
         if (lastData) {
+          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+            `[HISTORICAL DATA] No data for ${ticker} on day ${currentHistoricalDay}, using last available price`, {
+              ticker,
+              day: currentHistoricalDay,
+              lastPrice: lastData.price
+            });
           marketData[ticker] = {
             ticker,
             price: lastData.price,
@@ -1317,10 +1528,15 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
             dailyChangePercent: 0,
           };
         } else {
-          const fallbackPrice = 50 + Math.random() * 250;
-          marketData[ticker] = {
+          // No historical data at all - use previous price
+          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+            `[HISTORICAL DATA] No historical data for ${ticker}, using previous price`, {
+              ticker,
+              previousPrice: previousMarketData[ticker]?.price
+            });
+          marketData[ticker] = previousMarketData[ticker] || {
             ticker,
-            price: fallbackPrice,
+            price: 50 + Math.random() * 250,
             dailyChange: 0,
             dailyChangePercent: 0,
           };
@@ -1330,25 +1546,71 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     
     return marketData;
   } else if (MODE === 'realtime') {
-    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
-    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
+    // Always include ^GSPC for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), '^GSPC'])];
     return await fetchRealMarketDataWithCascade(tickers);
   }
   
   // Simulated mode
   const newMarketData: MarketData = {};
+  
+  // Fetch real prices for benchmark tickers
+  const benchmarkTickers = Object.keys(previousMarketData).filter(t => BENCHMARK_TICKERS.includes(t));
+  if (benchmarkTickers.length > 0) {
+    try {
+      const realBenchmarkData = await fetchRealMarketDataWithCascade(benchmarkTickers, true);
+      Object.assign(newMarketData, realBenchmarkData);
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+        `[BENCHMARK DATA] Failed to fetch real prices for benchmark tickers, using previous prices`, {
+          tickers: benchmarkTickers,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      // Fallback: keep previous prices
+      benchmarkTickers.forEach(ticker => {
+        if (previousMarketData[ticker]) {
+          newMarketData[ticker] = { ...previousMarketData[ticker] };
+        }
+      });
+    }
+  }
+  
+  // Generate random prices for regular trading tickers
   Object.keys(previousMarketData).forEach(ticker => {
+    // Skip benchmark tickers (already handled above)
+    if (BENCHMARK_TICKERS.includes(ticker)) {
+      return;
+    }
+    
     const prevData = previousMarketData[ticker];
     const newPrice = getNextPrice(prevData.price);
     const dailyChange = newPrice - prevData.price;
     const dailyChangePercent = dailyChange / prevData.price;
 
-    newMarketData[ticker] = {
+    const newTickerData: TickerData = {
       ticker,
       price: newPrice,
       dailyChange,
       dailyChangePercent,
     };
+    
+    // Validate and log day transition price changes
+    const priceChangePercent = Math.abs(dailyChangePercent);
+    if (priceChangePercent > 0.05) {
+      logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
+        `[DAY TRANSITION] ${ticker}: ${prevData.price.toFixed(2)} → ${newPrice.toFixed(2)} (${(priceChangePercent * 100).toFixed(2)}% change)`,
+        { 
+          ticker, 
+          previousPrice: prevData.price, 
+          newPrice, 
+          changePercent: priceChangePercent,
+          dailyChange,
+          dailyChangePercent
+        });
+    }
+    
+    validateMarketData(newTickerData, prevData.price);
+    newMarketData[ticker] = newTickerData;
   });
   return newMarketData;
 };

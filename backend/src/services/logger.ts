@@ -119,7 +119,9 @@ class Logger {
     price?: number,
     error?: Error | string
   ): void {
-    const level = success ? LogLevel.SUCCESS : LogLevel.ERROR;
+    // Use DEBUG level for successful fetches to reduce log noise (can be enabled if needed)
+    // Keep ERROR level for failures so they're still visible
+    const level = success ? LogLevel.DEBUG : LogLevel.ERROR;
     const message = success
       ? `Market data fetched: ${ticker} from ${source}`
       : `Market data fetch failed: ${ticker} from ${source}`;

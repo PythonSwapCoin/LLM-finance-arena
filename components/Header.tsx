@@ -35,7 +35,16 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
   const simulationMode = mode || 'simulated';
 
   // Get market status from backend info
+  // isMarketOpen will be:
+  // - true: for historical/simulated/hybrid (before transition) - always show "LIVE"
+  // - boolean (true/false): for realtime/hybrid (after transition) - show actual market status
+  // - null/undefined: fallback case (show "LIVE" as default until status is fetched)
   const isMarketOpen = connectionStatus?.backendInfo?.simulation?.isMarketOpen;
+  
+  // Always show market status indicator when we have a simulation mode
+  // Show "MARKET CLOSED" only when explicitly false, otherwise show "LIVE"
+  const shouldShowMarketStatus = simulationMode !== undefined;
+  const showMarketClosed = isMarketOpen === false; // Explicitly check for false
 
   useEffect(() => {
     const fetchCompetitions = async () => {
@@ -206,21 +215,25 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
 
         {/* Status badges - Right side (hidden on mobile, visible on md+) */}
         <div className="hidden md:flex items-center space-x-2 lg:space-x-4 flex-shrink-0">
-          {/* Live indicator with market status for realtime/hybrid modes */}
-          <div className="text-arena-text-primary flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${isMarketOpen === false ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`}></div>
-            <span className="text-sm font-medium">
-              {isMarketOpen === false ? 'MARKET CLOSED' : 'LIVE'}
-            </span>
-          </div>
-          <div className={`flex items-center space-x-2 px-2 lg:px-3 py-1 rounded-full ${modeInfo.color} bg-opacity-20 border border-current ${modeInfo.textColor}`}>
+          {/* Live indicator with market status */}
+          {shouldShowMarketStatus && (
+            <div className="text-arena-text-primary flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${showMarketClosed ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`}></div>
+              <span className="text-sm font-medium">
+                {showMarketClosed ? 'MARKET CLOSED' : 'LIVE'}
+              </span>
+            </div>
+          )}
+          {/* Hidden: Simulation mode badge (SIMULATED DATA, REAL-TIME DATA, etc.) */}
+          {/* <div className={`flex items-center space-x-2 px-2 lg:px-3 py-1 rounded-full ${modeInfo.color} bg-opacity-20 border border-current ${modeInfo.textColor}`}>
             <div className={`w-2 h-2 rounded-full ${modeInfo.color}`}></div>
             <span className="text-xs font-semibold">{modeInfo.label}</span>
-          </div>
-          <div className={`flex items-center space-x-2 px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-500 bg-opacity-20 text-green-400' : 'bg-red-500 bg-opacity-20 text-red-400'}`} title={isConnected ? `Backend connected${backendInfo ? ` - Day ${backendInfo.simulation?.day || 0}, ${backendInfo.simulation?.agentsCount || 0} agents` : ''}` : 'Backend disconnected'}>
+          </div> */}
+          {/* Hidden: Backend status indicator */}
+          {/* <div className={`flex items-center space-x-2 px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-500 bg-opacity-20 text-green-400' : 'bg-red-500 bg-opacity-20 text-red-400'}`} title={isConnected ? `Backend connected${backendInfo ? ` - Day ${backendInfo.simulation?.day || 0}, ${backendInfo.simulation?.agentsCount || 0} agents` : ''}` : 'Backend disconnected'}>
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
             <span className="font-semibold">{isConnected ? 'BACKEND' : 'OFFLINE'}</span>
-          </div>
+          </div> */}
           {hasRateLimitPressure && (
             <div
               className="flex items-center space-x-2 px-2 py-1 rounded text-xs bg-orange-500 bg-opacity-20 text-orange-400"

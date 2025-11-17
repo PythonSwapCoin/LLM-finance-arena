@@ -2,7 +2,7 @@ import { simulationManager } from './SimulationManager.js';
 import { step, tradeWindow, advanceDay } from './engine.js';
 import { generateNextIntradayMarketData, generateNextDayMarketData, isHistoricalSimulationComplete, getSimulationMode, prefetchRealtimeMarketData, type RealtimePrefetchResult, hasHybridModeTransitioned, shouldHybridModeTransition, setHybridModeTransitioned } from '../services/marketDataService.js';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
-import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
+import { isMarketOpen as checkMarketOpen, getNextMarketOpen, getETTime, isMarketOpen } from './marketHours.js';
 import type { MarketData } from '../types.js';
 import { updateChatMessagesStatusForSimulation } from '../services/multiSimChatService.js';
 import { updateTimerState } from '../services/timerService.js';
@@ -190,9 +190,21 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
     // Calculate new currentDate for the advanced day
     let newCurrentDate: string;
     if ((snapshot.mode === 'historical' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
+      // For historical/hybrid mode, skip weekends - only advance to trading days
       const start = new Date(snapshot.startDate);
-      start.setDate(start.getDate() + newDay);
-      newCurrentDate = start.toISOString();
+      let tradingDaysAdvanced = 0;
+      let currentDate = new Date(start);
+      
+      // Advance to the next trading day (skip weekends)
+      while (tradingDaysAdvanced < newDay) {
+        currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+        const dayOfWeek = currentDate.getUTCDay();
+        // Skip weekends (0 = Sunday, 6 = Saturday)
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          tradingDaysAdvanced++;
+        }
+      }
+      newCurrentDate = currentDate.toISOString();
     } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
       // For real-time mode, update currentDate to account for data delay
       const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
@@ -212,6 +224,19 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       newCurrentDate = start.toISOString();
     }
 
+    // Check if this is a weekend/holiday in simulated mode
+    const isSimulatedMode = snapshot.mode === 'simulated';
+    let marketStatus = '';
+    if (isSimulatedMode) {
+      const dateObj = new Date(newCurrentDate);
+      const marketOpen = isMarketOpen(dateObj);
+      if (!marketOpen) {
+        const dayOfWeek = dateObj.getUTCDay();
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        marketStatus = ` (MARKET CLOSED - ${dayNames[dayOfWeek]})`;
+      }
+    }
+
     instance.updateSnapshot({
       day: newDay,
       intradayHour: 0,
@@ -222,11 +247,26 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       chat: result.chat,
     });
 
+    // Get S&P 500 price for logging
+    const sp500Data = result.marketData['^GSPC'];
+    const sp500Price = sp500Data?.price || 0;
+    const sp500Change = sp500Data?.dailyChange || 0;
+    const sp500ChangePercent = sp500Data?.dailyChangePercent || 0;
+    const sp500Info = sp500Price > 0 
+      ? ` | S&P 500: $${sp500Price.toFixed(2)} (${sp500Change >= 0 ? '+' : ''}${sp500Change.toFixed(2)}, ${sp500ChangePercent >= 0 ? '+' : ''}${(sp500ChangePercent * 100).toFixed(2)}%)`
+      : '';
+
     logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-      `📅 Day ${newDay} started`, {
+      `📅 Day ${newDay} started${marketStatus}${sp500Info}`, {
         simulationType: simulationTypeId,
         day: newDay,
         currentDate: newCurrentDate,
+        marketOpen: isSimulatedMode ? isMarketOpen(new Date(newCurrentDate)) : undefined,
+        sp500: sp500Price > 0 ? {
+          price: sp500Price.toFixed(2),
+          dailyChange: sp500Change.toFixed(2),
+          dailyChangePercent: (sp500ChangePercent * 100).toFixed(2) + '%'
+        } : undefined
       });
 
     // Log prices and portfolio values at start of new day to ensure previousValue is correct
@@ -348,8 +388,24 @@ export const startMultiSimScheduler = async (): Promise<void> => {
           // Update timer to reflect new realtime intervals
           updateTimerState();
 
-          // Note: Multi-sim scheduler will automatically use realtime intervals after transition
-          // because the mode check below will treat hybrid (transitioned) as realtime
+          // Restart scheduler to switch from interval-based to realtime loop
+          logger.logSimulationEvent('Restarting scheduler with realtime loop after hybrid transition', {
+            oldSimInterval: getSimInterval(),
+            newTradeInterval: getTradeInterval()
+          });
+
+          // Stop current scheduler
+          await stopMultiSimScheduler();
+
+          // Restart with new realtime loop after a brief delay
+          setTimeout(() => {
+            startMultiSimScheduler().catch(err => {
+              logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+                'Failed to restart scheduler after hybrid transition', { error: err });
+            });
+          }, 1000);
+
+          return; // Exit current tick to allow scheduler restart
         }
       }
 
@@ -358,6 +414,32 @@ export const startMultiSimScheduler = async (): Promise<void> => {
       // Hybrid mode after transition: behaves like realtime (skips this block)
       const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
       if (!isRealtimeMode) {
+        // Check if market is closed (weekend/holiday) in simulated mode
+        const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
+        const dateObj = new Date(currentDate);
+        const marketOpen = isMarketOpen(dateObj);
+        
+        if (!marketOpen && mode === 'simulated') {
+          // Skip price ticks when market is closed (weekends/holidays)
+          const dayOfWeek = dateObj.getUTCDay();
+          const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const lastSkipLog = (global as any).lastMarketClosedSkipLog;
+          const skipKey = `${snapshot.day}-${dayOfWeek}`;
+          
+          // Only log once per day to reduce noise
+          if (lastSkipLog !== skipKey) {
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              `⏸️ Skipping price tick - Market closed (${dayNames[dayOfWeek]}, Day ${snapshot.day})`, {
+                day: snapshot.day,
+                dayOfWeek: dayNames[dayOfWeek],
+                currentDate: currentDate,
+                marketOpen: false
+              });
+            (global as any).lastMarketClosedSkipLog = skipKey;
+          }
+          return; // Skip processing when market is closed
+        }
+        
         const minutesPerTick = getSimulatedMinutesPerTick();
         const newIntradayHour = snapshot.intradayHour + (minutesPerTick / 60);
 
@@ -367,6 +449,39 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         const shouldAdvanceDay = newIntradayHour >= MARKET_CLOSE_HOUR;
 
         if (shouldAdvanceDay) {
+          // Check if next day would be a weekend in historical/hybrid mode
+          const isHistoricalMode = mode === 'historical' || (mode === 'hybrid' && !hasHybridModeTransitioned());
+          if (isHistoricalMode && snapshot.startDate) {
+            const nextDay = snapshot.day + 1;
+            const start = new Date(snapshot.startDate);
+            let tradingDaysAdvanced = 0;
+            let checkDate = new Date(start);
+            
+            // Calculate what date the next day would be
+            while (tradingDaysAdvanced < nextDay) {
+              checkDate.setUTCDate(checkDate.getUTCDate() + 1);
+              const dayOfWeek = checkDate.getUTCDay();
+              if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                tradingDaysAdvanced++;
+              }
+            }
+            
+            // Check if this date is a weekend
+            const dayOfWeek = checkDate.getUTCDay();
+            if (dayOfWeek === 0 || dayOfWeek === 6) {
+              // Skip weekend - don't advance day, just keep current prices
+              const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+                `⏸️ Skipping day advancement - Weekend (${dayNames[dayOfWeek]}, would be Day ${nextDay})`, {
+                  day: snapshot.day,
+                  nextDay,
+                  date: checkDate.toISOString(),
+                  dayOfWeek: dayNames[dayOfWeek]
+                });
+              return; // Skip processing - wait for next trading day
+            }
+          }
+          
           // Advance to next day
           const nextDayData = await generateNextDayMarketData(currentMarketData);
           simulationManager.updateSharedMarketData(nextDayData);
@@ -392,12 +507,82 @@ export const startMultiSimScheduler = async (): Promise<void> => {
           await Promise.all(stepPromises);
         }
       } else {
-        // Real-time mode
+        // Real-time mode (including hybrid after transition)
+        // Check if market is closed - skip price ticks if closed
+        const now = new Date();
+        const isOpen = checkMarketOpen(now);
+        if (!isOpen) {
+          // Log market closed status (only once per status change)
+          const lastMarketStatus = (global as any).lastPriceTickMarketStatus;
+          if (lastMarketStatus !== 'closed') {
+            const etTime = getETTime(now);
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              '[MARKET STATUS] MARKET CLOSED - Skipping price tick', {
+                etTime: etTime.toISOString(),
+                mode,
+              });
+            (global as any).lastPriceTickMarketStatus = 'closed';
+          }
+          return; // Skip price tick when market is closed
+        } else {
+          // Market is open - log status change
+          const lastMarketStatus = (global as any).lastPriceTickMarketStatus;
+          if (lastMarketStatus !== 'open') {
+            const etTime = getETTime(now);
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              '[MARKET STATUS] MARKET OPEN - Processing price tick', {
+                etTime: etTime.toISOString(),
+                mode,
+              });
+            (global as any).lastPriceTickMarketStatus = 'open';
+          }
+        }
+
+        // Calculate intradayHour from current ET time
+        // Market opens at 9:30 AM ET, so intradayHour = (current ET time - 9:30 AM) in hours
+        const etTime = getETTime(now);
+        const etHours = etTime.getUTCHours();
+        const etMinutes = etTime.getUTCMinutes();
+        const marketOpenHour = 9;
+        const marketOpenMinute = 30;
+        
+        // Calculate hours since market open
+        const totalMinutesSinceOpen = (etHours - marketOpenHour) * 60 + (etMinutes - marketOpenMinute);
+        const calculatedIntradayHour = Math.max(0, totalMinutesSinceOpen / 60);
+        
+        // Cap at 6.5 hours (market closes at 4:00 PM ET = 9:30 AM + 6.5 hours)
+        const newIntradayHour = Math.min(calculatedIntradayHour, 6.5);
+
+        // Update currentDate and currentTimestamp for realtime mode
+        const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
+        const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+        
+        let newCurrentDate: string;
+        let newCurrentTimestamp: number | undefined;
+        
+        if (USE_DELAYED_DATA) {
+          const dataTime = new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000));
+          newCurrentDate = dataTime.toISOString();
+          newCurrentTimestamp = dataTime.getTime();
+        } else {
+          newCurrentDate = now.toISOString();
+          newCurrentTimestamp = now.getTime();
+        }
+
+        // Update intradayHour, currentDate, and currentTimestamp for all simulations
+        for (const [_, instance] of simulations) {
+          instance.updateSnapshot({ 
+            intradayHour: newIntradayHour,
+            currentDate: newCurrentDate,
+            currentTimestamp: newCurrentTimestamp
+          });
+        }
+
         let newMarketData: MarketData;
         if (prefetchedRealtimeData?.marketData) {
           newMarketData = prefetchedRealtimeData.marketData;
         } else {
-          newMarketData = await generateNextIntradayMarketData(currentMarketData, snapshot.day, snapshot.intradayHour);
+          newMarketData = await generateNextIntradayMarketData(currentMarketData, snapshot.day, newIntradayHour);
         }
 
         // Update shared market data
@@ -420,15 +605,33 @@ export const startMultiSimScheduler = async (): Promise<void> => {
       // Check market status for realtime mode and hybrid mode (after transition)
       const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
       if (isRealtimeMode) {
-        const now = getETTime();
+        const now = new Date();
         const isOpen = checkMarketOpen(now);
         if (!isOpen) {
-          logger.logSimulationEvent('Skipping trade window - market is closed', {
-            etTime: now.toISOString(),
-            mode,
-            hybridTransitioned: mode === 'hybrid' ? hasHybridModeTransitioned() : undefined,
-          });
+          // Log market closed status (only once per status change)
+          const lastMarketStatus = (global as any).lastMarketStatus;
+          if (lastMarketStatus !== 'closed') {
+            const etTime = getETTime(now);
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              '[MARKET STATUS] MARKET CLOSED - Skipping trade window', {
+                etTime: etTime.toISOString(),
+                mode,
+              });
+            (global as any).lastMarketStatus = 'closed';
+          }
           return;
+        } else {
+          // Market is open - log status change
+          const lastMarketStatus = (global as any).lastMarketStatus;
+          if (lastMarketStatus !== 'open') {
+            const etTime = getETTime(now);
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              '[MARKET STATUS] MARKET OPEN', {
+                etTime: etTime.toISOString(),
+                mode,
+              });
+            (global as any).lastMarketStatus = 'open';
+          }
         }
       }
 
@@ -476,17 +679,19 @@ export const startMultiSimScheduler = async (): Promise<void> => {
   };
 
   // Start intervals
-  if (mode === 'realtime') {
+  // Use realtime loop for realtime mode OR hybrid mode after transition
+  const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+  if (isRealtimeMode) {
     // Real-time mode with prefetching
     realtimeLoopAbortController = { stop: false };
     const abortController = realtimeLoopAbortController;
 
     realtimePriceLoopPromise = (async () => {
       while (!abortController.stop) {
-        const now = getETTime();
+        const now = new Date();
         const isOpen = checkMarketOpen(now);
         if (!isOpen) {
-          const nextOpen = getNextMarketOpen();
+          const nextOpen = getNextMarketOpen(now);
           const msUntilOpen = nextOpen.getTime() - now.getTime();
           logger.logSimulationEvent('Market closed, waiting for next open', {
             nextOpen: nextOpen.toISOString(),

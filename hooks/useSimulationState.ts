@@ -40,6 +40,16 @@ export interface ConnectionStatus {
   backendInfo?: {
     status: string;
     backend: string;
+    simulation?: {
+      mode?: string;
+      day?: number;
+      intradayHour?: number;
+      agentsCount?: number;
+      tickersCount?: number;
+      lastUpdated?: string;
+      isMarketOpen?: boolean | null;
+    };
+    marketData?: any;
   };
 }
 
@@ -157,6 +167,8 @@ export const useSimulationState = (simulationTypeId: string) => {
             connected: true,
             lastChecked: new Date().toISOString(),
             backendInfo: {
+              // Preserve existing backendInfo (including simulation.isMarketOpen) from connection check
+              ...prev.connectionStatus.backendInfo,
               status: 'connected',
               backend: 'online',
             },
@@ -196,6 +208,8 @@ export const useSimulationState = (simulationTypeId: string) => {
             backendInfo: {
               status: data.status || 'connected',
               backend: data.backend || 'online',
+              simulation: data.simulation, // Include full simulation object with isMarketOpen
+              marketData: data.marketData,
             },
           },
         }));

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { Agent, Trade } from '../types';
+import { getAgentDisplayName } from '../utils/modelNameFormatter';
 
 interface TradeWithAgent extends Trade {
   agentName: string;
@@ -14,6 +15,7 @@ interface RecentTradesBarProps {
   simulationMode?: 'simulated' | 'realtime' | 'historical';
   day?: number;
   intradayHour?: number;
+  simulationTypeName?: string;
 }
 
 // Calculate time ago from trade timestamp
@@ -165,7 +167,8 @@ export const RecentTradesBar: React.FC<RecentTradesBarProps> = ({
   currentDate, 
   simulationMode,
   day,
-  intradayHour
+  intradayHour,
+  simulationTypeName
 }) => {
   const [hoveredTradeIndex, setHoveredTradeIndex] = useState<number | null>(null);
   
@@ -180,7 +183,7 @@ export const RecentTradesBar: React.FC<RecentTradesBarProps> = ({
         .slice(0, 3)
         .map(trade => ({
           ...trade,
-          agentName: agent.name,
+          agentName: getAgentDisplayName(agent, simulationTypeName),
           agentColor: agent.color,
         }));
       recentTrades.push(...agentRecentTrades);
