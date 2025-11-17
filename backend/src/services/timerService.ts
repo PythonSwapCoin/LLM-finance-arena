@@ -89,7 +89,7 @@ export const calculateNextTradeWindowTimestamp = (): number => {
   // Calculate minutes per tick based on simulation interval
   // For simulated/historical: default 30 minutes per tick
   // For realtime: default 10 minutes per tick
-  const minutesPerTick = mode === 'realtime' ? 10 : 30;
+  const minutesPerTick = isRealtimeMode ? 10 : 30;
 
   const currentIntradayHour = snapshot.intradayHour;
   const nextTradeWindowHour = Math.ceil(currentIntradayHour / tradeIntervalHours) * tradeIntervalHours;
