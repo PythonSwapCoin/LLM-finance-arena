@@ -1028,17 +1028,17 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     filteredTimestamps.forEach((timestamp, index) => {
       // Find the original index in sortedTimestamps for boundary detection
       const originalIndex = sortedTimestamps.indexOf(timestamp);
-      
+
       // Check for day boundaries
       let currentDayKey: string | null = null;
       if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
         // Real-time: use Unix timestamp to get date in ET timezone
         const date = new Date(timestamp * 1000);
-        
+
         // Get date string in ET timezone for day comparison
         // Use Intl.DateTimeFormat to get ET date components
         try {
-          const etDateStr = date.toLocaleDateString('en-US', { 
+          const etDateStr = date.toLocaleDateString('en-US', {
             timeZone: 'America/New_York',
             year: 'numeric',
             month: '2-digit',
@@ -1050,7 +1050,7 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           // Fallback: use UTC date if timezone is not supported
           currentDayKey = `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`;
         }
-        
+
         // Check if this is a new day and market open time (9:30 AM ET)
         // Include first data point (index === 0) as a day boundary
         // Skip weekends - don't show boundaries for Saturday/Sunday
@@ -1066,19 +1066,40 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             // Check if it's around market open (within first hour of market)
             // Get hour in ET timezone
             try {
-              const etHour = parseInt(date.toLocaleTimeString('en-US', { 
+              const etHour = parseInt(date.toLocaleTimeString('en-US', {
                 timeZone: 'America/New_York',
                 hour: '2-digit',
                 hour12: false
               }).split(':')[0]);
-              const etMinute = parseInt(date.toLocaleTimeString('en-US', { 
+              const etMinute = parseInt(date.toLocaleTimeString('en-US', {
                 timeZone: 'America/New_York',
                 minute: '2-digit'
               }).split(':')[1]);
               const etMinutes = etHour * 60 + etMinute;
               // Market open is 9:30 AM ET (570 minutes)
               if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
-                boundaries.push(timestamp);
+                // Check if this is Monday after a weekend (i.e., there was a gap from Friday)
+                // by checking if the previous trading day was more than 1 day ago
+                if (index > 0) {
+                  const prevTimestamp = filteredTimestamps[index - 1];
+                  const prevDate = new Date(prevTimestamp * 1000);
+                  const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60); // difference in days
+
+                  // If there's a gap of more than 1.5 days (indicating a weekend), add two boundaries
+                  if (daysDiff > 1.5) {
+                    // Add a boundary for "Saturday" (end of Friday) - slightly before Monday
+                    // Use a timestamp that's 1 second before the Monday market open
+                    boundaries.push(timestamp - 1);
+                    // Add a boundary for Monday market open
+                    boundaries.push(timestamp);
+                  } else {
+                    // Normal day transition, just add one boundary
+                    boundaries.push(timestamp);
+                  }
+                } else {
+                  // First data point, just add one boundary
+                  boundaries.push(timestamp);
+                }
               }
             } catch {
               // Fallback: use UTC approximation
@@ -1086,7 +1107,20 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
               const utcMinute = date.getUTCMinutes();
               const utcMinutes = utcHour * 60 + utcMinute;
               if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
-                boundaries.push(timestamp);
+                // Check for weekend gap
+                if (index > 0) {
+                  const prevTimestamp = filteredTimestamps[index - 1];
+                  const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60);
+
+                  if (daysDiff > 1.5) {
+                    boundaries.push(timestamp - 1);
+                    boundaries.push(timestamp);
+                  } else {
+                    boundaries.push(timestamp);
+                  }
+                } else {
+                  boundaries.push(timestamp);
+                }
               }
             }
           }
@@ -1335,19 +1369,19 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             chartData.forEach((d, idx) => {
               const timestamp = d.timestamp as number;
               let currentDayKey: string | null = null;
-              
+
               if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
                 // Real-time: use Unix timestamp to get date in ET timezone
                 const date = new Date(timestamp * 1000);
                 try {
-                  const etDateStr = date.toLocaleDateString('en-US', { 
+                  const etDateStr = date.toLocaleDateString('en-US', {
                     timeZone: 'America/New_York',
                     year: 'numeric',
                     month: '2-digit',
                     day: '2-digit'
                   });
                   currentDayKey = etDateStr;
-                  
+
                   // Check if this is a new day and around market open (9:30 AM ET)
                   // Skip weekends - don't show boundaries for Saturday/Sunday
                   const isNewDay = lastDayKey === null || currentDayKey !== lastDayKey;
@@ -1355,26 +1389,55 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                     // Skip weekend days - don't show boundaries for them
                     if (!isWeekend(date, 'America/New_York')) {
                       try {
-                        const etHour = parseInt(date.toLocaleTimeString('en-US', { 
+                        const etHour = parseInt(date.toLocaleTimeString('en-US', {
                           timeZone: 'America/New_York',
                           hour: '2-digit',
                           hour12: false
                         }).split(':')[0]);
-                        const etMinute = parseInt(date.toLocaleTimeString('en-US', { 
+                        const etMinute = parseInt(date.toLocaleTimeString('en-US', {
                           timeZone: 'America/New_York',
                           minute: '2-digit'
                         }).split(':')[1]);
                         const etMinutes = etHour * 60 + etMinute;
                         // Market open is 9:30 AM ET (570 minutes), check within first hour
                         if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
-                          dayBoundaryTimestamps.push(timestamp);
+                          // Check if this is Monday after a weekend
+                          if (idx > 0) {
+                            const prevTimestamp = chartData[idx - 1].timestamp as number;
+                            const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60);
+
+                            // If there's a gap of more than 1.5 days (indicating a weekend), add two boundaries
+                            if (daysDiff > 1.5) {
+                              // Add boundary for "Saturday" (end of Friday)
+                              dayBoundaryTimestamps.push(timestamp - 1);
+                              // Add boundary for Monday market open
+                              dayBoundaryTimestamps.push(timestamp);
+                            } else {
+                              dayBoundaryTimestamps.push(timestamp);
+                            }
+                          } else {
+                            dayBoundaryTimestamps.push(timestamp);
+                          }
                         }
                       } catch {
                         const utcHour = date.getUTCHours();
                         const utcMinute = date.getUTCMinutes();
                         const utcMinutes = utcHour * 60 + utcMinute;
                         if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
-                          dayBoundaryTimestamps.push(timestamp);
+                          // Check for weekend gap
+                          if (idx > 0) {
+                            const prevTimestamp = chartData[idx - 1].timestamp as number;
+                            const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60);
+
+                            if (daysDiff > 1.5) {
+                              dayBoundaryTimestamps.push(timestamp - 1);
+                              dayBoundaryTimestamps.push(timestamp);
+                            } else {
+                              dayBoundaryTimestamps.push(timestamp);
+                            }
+                          } else {
+                            dayBoundaryTimestamps.push(timestamp);
+                          }
                         }
                       }
                     }

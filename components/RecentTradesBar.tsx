@@ -177,9 +177,9 @@ export const RecentTradesBar: React.FC<RecentTradesBarProps> = ({
 
   agents.forEach(agent => {
     if (agent.tradeHistory && agent.tradeHistory.length > 0) {
-      // Get the last 3 trades from each agent
+      // Get the last 3 trades from each agent (most recent first)
       const agentRecentTrades = [...agent.tradeHistory]
-        .reverse()
+        .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 3)
         .map(trade => ({
           ...trade,
