@@ -2,6 +2,7 @@ import type { MarketData, TickerData, MarketDataTelemetry, SimulationSnapshot } 
 import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 import { S_P500_TICKERS } from '../constants.js';
+import { setDateToMarketOpenET } from '../simulation/marketHours.js';
 
 const resolveMode = (): 'simulated' | 'realtime' | 'historical' | 'hybrid' => {
   const raw = (process.env.MODE || 'simulated').toLowerCase();
@@ -245,8 +246,6 @@ function setCachedMarketData(ticker: string, data: TickerData): void {
 
 const setToMarketOpen = (date: Date): Date => {
   // Use the ET-aware function from marketHours
-  // Import it dynamically to avoid circular dependencies
-  const { setDateToMarketOpenET } = require('../simulation/marketHours.js');
   return setDateToMarketOpenET(date);
 };
 
