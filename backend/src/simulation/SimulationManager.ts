@@ -159,7 +159,13 @@ class SimulationInstance {
       } else {
         // Simulated or hybrid mode: use HISTORICAL_SIMULATION_START_DATE if set, otherwise use current date
         const SIMULATED_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE || process.env.SIMULATED_START_DATE;
-        if (SIMULATED_START_DATE) {
+        if (SIMULATED_START_DATE && mode === 'hybrid') {
+          // For hybrid mode, use getHistoricalSimulationStartDate to ensure correct Monday adjustment
+          const { getHistoricalSimulationStartDate } = await import('../services/marketDataService.js');
+          const histStart = getHistoricalSimulationStartDate();
+          startDate = histStart.toISOString();
+          currentDate = startDate;
+        } else if (SIMULATED_START_DATE) {
           const date = new Date(SIMULATED_START_DATE);
           if (!isNaN(date.getTime())) {
             startDate = await getMarketOpenDate(date);

@@ -2,6 +2,7 @@ import React from 'react';
 import type { Agent, Position } from '../types';
 import { PerformanceChart } from './PerformanceChart';
 import { XMarkIcon } from './icons/Icons';
+import { getAgentDisplayName } from '../utils/modelNameFormatter';
 
 interface AgentDetailViewProps {
   agent: Agent;
@@ -11,6 +12,7 @@ interface AgentDetailViewProps {
   currentDate?: string;
   simulationMode?: 'simulated' | 'realtime' | 'historical';
   showModelName?: boolean;
+  simulationTypeName?: string;
 }
 
 const StatCard: React.FC<{ label: string; value: string; className?: string }> = ({ label, value, className = '' }) => (
@@ -19,7 +21,7 @@ const StatCard: React.FC<{ label: string; value: string; className?: string }> =
         <p className={`text-xl font-bold ${className}`}>{value}</p>
     </div>
 );
-export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose, marketData = {}, startDate, currentDate, simulationMode, showModelName = true }) => {
+export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose, marketData = {}, startDate, currentDate, simulationMode, showModelName = true, simulationTypeName }) => {
     const latestPerf = agent.performanceHistory[agent.performanceHistory.length - 1];
     const positions = Object.values(agent.portfolio.positions).filter((p: Position) => p.quantity > 0);
     
@@ -85,7 +87,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                     {agent.image ? (
                       <img 
                         src={agent.image} 
-                        alt={agent.name}
+                        alt={getAgentDisplayName(agent, simulationTypeName)}
                         className="w-10 h-10 rounded-full object-cover border border-arena-border"
                         onError={(e) => {
                           // Fallback to color dot if image fails to load
@@ -101,8 +103,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                       <div className="w-4 h-4 rounded-full" style={{backgroundColor: agent.color}}></div>
                     )}
                     <div>
-                        <h2 className="text-xl font-bold text-arena-text-primary">{agent.name}</h2>
-                        {showModelName && <p className="text-sm text-arena-text-secondary">{agent.model}</p>}
+                        <h2 className="text-xl font-bold text-arena-text-primary">{getAgentDisplayName(agent, simulationTypeName)}</h2>
                     </div>
                 </div>
                 <button onClick={onClose} className="text-arena-text-secondary hover:text-arena-text-primary">
@@ -149,7 +150,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                             <thead className="bg-gray-900 text-arena-text-secondary">
                                 <tr>
                                     <th className="p-3">Ticker</th>
-                                    <th className="p-3">Name</th>
                                     <th className="p-3 text-right">Quantity</th>
                                     <th className="p-3 text-right">Avg. Cost</th>
                                     <th className="p-3 text-right">Current Price</th>
@@ -162,7 +162,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                 {/* Cash row - always show at top */}
                                 <tr className="bg-gray-800/50">
                                     <td className="p-3 font-mono font-semibold">CASH</td>
-                                    <td className="p-3 text-arena-text-secondary">-</td>
                                     <td className="p-3 font-mono text-right">-</td>
                                     <td className="p-3 font-mono text-right">-</td>
                                     <td className="p-3 font-mono text-right">-</td>
@@ -170,10 +169,9 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                     <td className="p-3 font-mono text-right">$0.00 (0.00%)</td>
                                     <td className="p-3 text-arena-text-secondary">-</td>
                                 </tr>
-                                {positionsWithValues.length > 0 ? positionsWithValues.map((pos: any) => (
-                                    <tr key={pos.ticker}>
+                                {positionsWithValues.length > 0 ? positionsWithValues.map((pos: any, index: number) => (
+                                    <tr key={`${pos.ticker}-${index}`}>
                                         <td className="p-3 font-mono">{pos.ticker}</td>
-                                        <td className="p-3 text-arena-text-secondary">{pos.stockName}</td>
                                         <td className="p-3 font-mono text-right">{pos.quantity}</td>
                                         <td className="p-3 font-mono text-right">${(pos.averageCost ?? 0).toFixed(2)}</td>
                                         <td className="p-3 font-mono text-right">${(pos.currentPrice ?? 0).toFixed(2)}</td>
@@ -187,7 +185,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({ agent, onClose
                                     </tr>
                                 )) : null}
                                 {positionsWithValues.length === 0 && (
-                                    <tr><td colSpan={8} className="p-4 text-center text-arena-text-secondary">No open positions.</td></tr>
+                                    <tr><td colSpan={7} className="p-4 text-center text-arena-text-secondary">No open positions.</td></tr>
                                 )}
                             </tbody>
                         </table>

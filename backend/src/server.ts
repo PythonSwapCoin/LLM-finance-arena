@@ -33,12 +33,28 @@ const shutdown = async ({ reason, exitCode, error }: { reason: string; exitCode:
     logger.logSimulationEvent(`${reason} - initiating shutdown`, {});
   }
 
+  // Stop scheduler first
   await stopMultiSimScheduler();
 
-  await fastify.close().catch(err => {
+  // Close Fastify server with timeout
+  try {
+    await Promise.race([
+      fastify.close(),
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+            'Fastify close timeout - forcing exit', {});
+          resolve();
+        }, 5000); // 5 second timeout
+      })
+    ]);
+  } catch (err) {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
       'Failed to close Fastify instance during shutdown', { error: err });
-  });
+  }
+
+  // Give a moment for port to be released
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   process.exit(exitCode);
 };
@@ -131,9 +147,57 @@ const initializeAllSimulations = async (): Promise<void> => {
   initializeTimer();
 };
 
+// Check and free port if needed (Windows)
+const freePortIfNeeded = async (port: number): Promise<void> => {
+  if (process.platform !== 'win32') {
+    return; // Only needed on Windows
+  }
+
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    // Find process using the port
+    const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
+    const lines = stdout.trim().split('\n').filter(line => line.includes('LISTENING'));
+    
+    if (lines.length > 0) {
+      // Extract PID from the last column
+      const pids = new Set<string>();
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && pid !== '0') {
+          pids.add(pid);
+        }
+      }
+
+      // Kill processes
+      for (const pid of pids) {
+        try {
+          logger.log(LogLevel.INFO, LogCategory.SYSTEM,
+            `Killing process ${pid} using port ${port}`, {});
+          await execAsync(`taskkill /PID ${pid} /F`);
+          // Wait a moment for port to be released
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (err) {
+          // Process might already be gone, ignore
+        }
+      }
+    }
+  } catch (err) {
+    // Port might be free, or command failed - continue anyway
+    // The listen() call will fail with a clear error if port is still in use
+  }
+};
+
 // Start server
 const start = async (): Promise<void> => {
   try {
+    // Try to free port if it's in use (Windows only)
+    await freePortIfNeeded(PORT);
+
     await initializeAllSimulations();
 
     await fastify.listen({

@@ -40,31 +40,92 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
 
   // Connection status endpoint - returns backend info for frontend verification
   fastify.get('/api/status', async () => {
-    const snapshot = simulationState.getSnapshot();
     const telemetry = getMarketDataTelemetry();
-    const mode = snapshot.mode || 'simulated';
+    
+    // Check if we're using multi-simulation mode
+    const { simulationManager } = await import('../simulation/SimulationManager.js');
+    const simulations = simulationManager.getAllSimulations();
+    
+    let mode: string = 'simulated';
+    let day = 0;
+    let intradayHour = 0;
+    let agentsCount = 0;
+    let tickersCount = 0;
+    let lastUpdated: string | undefined;
+    
+    if (simulations.size > 0) {
+      // Use first simulation's state for status (they all share the same mode/day)
+      const firstSim = simulations.values().next().value;
+      const snapshot = firstSim.getSnapshot();
+      mode = snapshot.mode || 'simulated';
+      day = snapshot.day;
+      intradayHour = snapshot.intradayHour;
+      agentsCount = snapshot.agents.length;
+      tickersCount = Object.keys(snapshot.marketData).length;
+      lastUpdated = snapshot.lastUpdated;
+    } else {
+      // Fallback to old single-simulation state if multi-sim not initialized
+      const snapshot = simulationState.getSnapshot();
+      mode = snapshot.mode || 'simulated';
+      day = snapshot.day;
+      intradayHour = snapshot.intradayHour;
+      agentsCount = snapshot.agents.length;
+      tickersCount = Object.keys(snapshot.marketData).length;
+      lastUpdated = snapshot.lastUpdated;
+    }
 
-    // Check market status for realtime and hybrid modes
-    const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
-    const marketOpenStatus = isRealtimeMode ? isMarketOpen() : null;
+    // Determine market status display:
+    // - Historical/simulated/hybrid (before transition): always show as "live" (return true)
+    // - Realtime/hybrid (after transition): show actual market status (true/false)
+    const hasTransitioned = hasHybridModeTransitioned();
+    const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasTransitioned);
+    const isHistoricalOrSimulated = mode === 'historical' || mode === 'simulated';
+    const isHybridBeforeTransition = mode === 'hybrid' && !hasTransitioned;
+    
+    let marketOpenStatus: boolean | null;
+    if (isHistoricalOrSimulated || isHybridBeforeTransition) {
+      // Show as "LIVE" for historical/simulated/hybrid (before transition)
+      marketOpenStatus = true;
+    } else if (isRealtimeMode) {
+      // Show actual market status for realtime/hybrid (after transition)
+      // This will return false if market is closed (e.g., Monday morning before 9:30 AM ET)
+      const actualMarketStatus = isMarketOpen();
+      marketOpenStatus = actualMarketStatus;
+      
+      // Log transition detection for debugging
+      if (mode === 'hybrid' && hasTransitioned) {
+        const { logger, LogLevel, LogCategory } = await import('../services/logger.js');
+        logger.log(LogLevel.INFO, LogCategory.SYSTEM,
+          'Status endpoint: Hybrid mode transitioned, market status check', {
+            mode,
+            hasTransitioned,
+            isRealtimeMode,
+            marketOpen: actualMarketStatus,
+            currentTime: new Date().toISOString(),
+          });
+      }
+    } else {
+      // Fallback: shouldn't happen, but default to null
+      marketOpenStatus = null;
+    }
 
     return {
       status: 'connected',
       backend: 'online',
       timestamp: new Date().toISOString(),
       simulation: {
-        mode: snapshot.mode,
-        day: snapshot.day,
-        intradayHour: snapshot.intradayHour,
-        agentsCount: snapshot.agents.length,
-        tickersCount: Object.keys(snapshot.marketData).length,
-        lastUpdated: snapshot.lastUpdated,
+        mode,
+        day,
+        intradayHour,
+        agentsCount,
+        tickersCount,
+        lastUpdated: lastUpdated || new Date().toISOString(),
         simIntervalMs: getSimInterval(),
         tradeIntervalMs: getTradeInterval(),
         isMarketOpen: marketOpenStatus, // null for non-realtime modes, boolean for realtime/hybrid
       },
       marketData: {
-        tickersCount: Object.keys(snapshot.marketData).length,
+        tickersCount,
         sources: telemetry.sources,
         rateLimits: telemetry.rateLimits,
       },

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import type { Agent, PerformanceMetrics } from '../types';
+import { getAgentDisplayName } from '../utils/modelNameFormatter';
 
 interface InfoPanelProps {
   agents: Agent[];
@@ -268,7 +269,7 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
                   <div className="text-xs text-arena-text-secondary">HIGHEST</div>
                   <div className="flex items-center space-x-2 mt-1">
                       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{backgroundColor: highestPerformer.color}}></div>
-                      <div className="font-semibold text-arena-text-primary truncate">{highestPerformer.name}</div>
+                      <div className="font-semibold text-arena-text-primary truncate">{getAgentDisplayName(highestPerformer, simulationTypeName)}</div>
                   </div>
                   <div className="font-mono text-arena-text-primary mt-1">${highestPerformer.performanceHistory.slice(-1)[0].totalValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
               </div>
@@ -276,7 +277,7 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
                   <div className="text-xs text-arena-text-secondary">LOWEST</div>
                   <div className="flex items-center space-x-2 mt-1">
                       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{backgroundColor: lowestPerformer.color}}></div>
-                      <div className="font-semibold text-arena-text-primary truncate">{lowestPerformer.name}</div>
+                      <div className="font-semibold text-arena-text-primary truncate">{getAgentDisplayName(lowestPerformer, simulationTypeName)}</div>
                   </div>
                   <div className="font-mono text-arena-text-primary mt-1">${lowestPerformer.performanceHistory.slice(-1)[0].totalValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
               </div>
@@ -287,6 +288,9 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
         <h3 className="text-base font-bold text-arena-text-primary mb-2">About This Simulation</h3>
         <p className="text-arena-text-secondary leading-relaxed text-sm">
           {getSimulationDescription()}
+        </p>
+        <p className="text-arena-text-secondary leading-relaxed text-sm mt-2">
+          Want to compete? Deploy your own trading bot and compete for the glory! <span className="text-arena-text-tertiary italic">(Coming Soon)</span>
         </p>
       </div>
 
@@ -302,10 +306,10 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
                   {topOfDay.map((performer, index) => {
                     const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
                     return (
-                      <div key={performer.agent.id} className="flex justify-between items-center py-1 px-2 rounded bg-arena-surface/30">
+                      <div key={`top-day-${performer.agent.id}-${index}`} className="flex justify-between items-center py-1 px-2 rounded bg-arena-surface/30">
                         <div className="flex items-center space-x-2">
                           <span>{emoji}</span>
-                          <span className="text-arena-text-primary font-medium">{performer.agent.name}</span>
+                          <span className="text-arena-text-primary font-medium">{getAgentDisplayName(performer.agent, simulationTypeName)}</span>
                         </div>
                         <span className="text-arena-text-tertiary font-mono">{(performer.return * 100).toFixed(2)}%</span>
                       </div>
@@ -321,10 +325,10 @@ export const InfoPanel: React.FC<InfoPanelProps> = ({
                   {topOfWeek.map((performer, index) => {
                     const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
                     return (
-                      <div key={performer.agent.id} className="flex justify-between items-center py-1 px-2 rounded bg-arena-surface/30">
+                      <div key={`top-week-${performer.agent.id}-${index}`} className="flex justify-between items-center py-1 px-2 rounded bg-arena-surface/30">
                         <div className="flex items-center space-x-2">
                           <span>{emoji}</span>
-                          <span className="text-arena-text-primary font-medium">{performer.agent.name}</span>
+                          <span className="text-arena-text-primary font-medium">{getAgentDisplayName(performer.agent, simulationTypeName)}</span>
                         </div>
                         <span className="text-arena-text-tertiary font-mono">{(performer.return * 100).toFixed(2)}%</span>
                       </div>

@@ -87,11 +87,8 @@ const saveSnapshotToFile = async (snapshot: SimulationSnapshot): Promise<void> =
 
     await fs.writeFile(fullPath, JSON.stringify(snapshot, null, 2), 'utf-8');
 
-    logger.logSimulationEvent('Snapshot saved to persistence', {
-      driver: 'file',
-      path: fullPath,
-      day: snapshot.day,
-    });
+    // Only log snapshot saves on day changes or errors (reduce noise)
+    // (Logging removed to reduce terminal noise - errors still logged below)
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
       'Error saving snapshot', {
@@ -311,12 +308,8 @@ class PostgresAdapter {
         ]
       );
 
-      logger.logSimulationEvent('Snapshot saved to persistence', {
-        driver: 'postgres',
-        namespace: this.namespace,
-        snapshotId,
-        day: snapshot.day,
-      });
+      // Only log snapshot saves on day changes or errors (reduce noise)
+      // (Logging removed to reduce terminal noise - errors still logged below)
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
         'Error saving snapshot to Postgres', {
@@ -445,11 +438,7 @@ export const saveSnapshot = async (snapshot: SimulationSnapshot, snapshotId?: st
     const customPath = `${baseName}_${snapshotId}${ext}`;
     await ensureDirectoryExists(customPath);
     await fs.writeFile(customPath, JSON.stringify(snapshot, null, 2), 'utf-8');
-    logger.logSimulationEvent('Snapshot saved to persistence', {
-      driver: 'file',
-      path: customPath,
-      day: snapshot.day,
-    });
+    // Snapshot save logging removed to reduce terminal noise
     return;
   }
   return saveSnapshotToFile(snapshot);

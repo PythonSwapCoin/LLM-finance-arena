@@ -35,6 +35,37 @@ const estimateTradeFee = (notional: number): number => {
   return Math.max(variableFee, MIN_TRADE_FEE);
 };
 
+// Calculate the maximum quantity of shares that can be bought with available cash
+// Accounts for execution fees (percentage-based with minimum)
+const calculateMaxAffordableQuantity = (price: number, availableCash: number): number => {
+  if (price <= 0 || availableCash <= 0) {
+    return 0;
+  }
+  
+  // If the minimum fee alone exceeds available cash, can't buy any shares
+  if (MIN_TRADE_FEE >= availableCash) {
+    return 0;
+  }
+  
+  // Try percentage-based fee calculation first
+  // cash >= quantity * price * (1 + TRADING_FEE_RATE)
+  const maxQuantityWithPercentageFee = Math.floor(availableCash / (price * (1 + TRADING_FEE_RATE)));
+  
+  // Check if this quantity would trigger the minimum fee
+  const notionalForPercentage = maxQuantityWithPercentageFee * price;
+  const feeForPercentage = notionalForPercentage * TRADING_FEE_RATE;
+  
+  if (feeForPercentage >= MIN_TRADE_FEE) {
+    // Percentage fee applies, return this quantity
+    return Math.max(0, maxQuantityWithPercentageFee);
+  } else {
+    // Minimum fee applies, need to account for it
+    // cash >= quantity * price + MIN_TRADE_FEE
+    const maxQuantityWithMinFee = Math.floor((availableCash - MIN_TRADE_FEE) / price);
+    return Math.max(0, maxQuantityWithMinFee);
+  }
+};
+
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   return Promise.race([
     promise,
@@ -815,22 +846,41 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
         }
         if (t.action === 'buy') {
           const price = marketData[t.ticker].price;
-          const notional = t.quantity * price;
+          const requestedQuantity = t.quantity;
+          const notional = requestedQuantity * price;
           const fees = estimateTradeFee(notional);
           const totalCost = notional + fees;
           if (totalCost > agent.portfolio.cash) {
-            // Log as INFO, not ERROR, since this is normal portfolio constraint (not a system error)
-            logger.log(LogLevel.INFO, LogCategory.TRADE,
-              `[${agent.name}] Cannot buy ${t.quantity} shares of ${t.ticker} - insufficient cash`, {
-                agentName: agent.name,
-                ticker: t.ticker,
-                quantity: t.quantity,
-                price: price.toFixed(2),
-                needed: totalCost.toFixed(2),
-                available: agent.portfolio.cash.toFixed(2),
-                shortfall: (totalCost - agent.portfolio.cash).toFixed(2)
-              });
-            return false;
+            // Cannot afford full quantity - adjust to maximum affordable quantity
+            const maxAffordableQuantity = calculateMaxAffordableQuantity(price, agent.portfolio.cash);
+            
+            if (maxAffordableQuantity > 0) {
+              // Adjust the trade quantity to what can be afforded
+              t.quantity = maxAffordableQuantity;
+              logger.log(LogLevel.INFO, LogCategory.TRADE,
+                `[${agent.name}] Adjusted buy order for ${t.ticker}: requested ${requestedQuantity} shares, adjusted to ${maxAffordableQuantity} (insufficient cash)`, {
+                  agentName: agent.name,
+                  ticker: t.ticker,
+                  requestedQuantity: requestedQuantity,
+                  adjustedQuantity: maxAffordableQuantity,
+                  price: price.toFixed(2),
+                  needed: totalCost.toFixed(2),
+                  available: agent.portfolio.cash.toFixed(2)
+                });
+            } else {
+              // Cannot afford even 1 share - reject the trade
+              logger.log(LogLevel.INFO, LogCategory.TRADE,
+                `[${agent.name}] Cannot buy ${requestedQuantity} shares of ${t.ticker} - insufficient cash (cannot afford even 1 share)`, {
+                  agentName: agent.name,
+                  ticker: t.ticker,
+                  quantity: requestedQuantity,
+                  price: price.toFixed(2),
+                  needed: totalCost.toFixed(2),
+                  available: agent.portfolio.cash.toFixed(2),
+                  shortfall: (totalCost - agent.portfolio.cash).toFixed(2)
+                });
+              return false;
+            }
           }
         }
         return true;

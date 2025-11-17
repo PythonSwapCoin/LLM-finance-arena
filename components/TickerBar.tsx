@@ -28,10 +28,10 @@ export const TickerBar: React.FC<{ marketData: MarketData }> = ({ marketData }) 
   return (
     <div className="bg-arena-bg border-b border-arena-border h-10 flex items-center overflow-hidden">
       <div className="flex animate-marquee whitespace-nowrap">
-         {tickersToShow.map(ticker => <Ticker key={ticker} data={marketData[ticker]} />)}
+         {tickersToShow.map((ticker, index) => <Ticker key={`ticker-${ticker}-${index}`} data={marketData[ticker]} />)}
       </div>
        <div className="flex animate-marquee whitespace-nowrap">
-         {tickersToShow.map(ticker => <Ticker key={`${ticker}-2`} data={marketData[ticker]} />)}
+         {tickersToShow.map((ticker, index) => <Ticker key={`ticker-${ticker}-${index}-2`} data={marketData[ticker]} />)}
       </div>
        <style>{`
         @keyframes marquee {
