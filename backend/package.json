@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "clean": "rimraf dist",
+    "rebuild": "npm run clean && npm run build",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "worker": "node dist/worker.js",
@@ -19,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.1",
+    "rimraf": "^6.1.0",
     "tsx": "^4.19.2",
     "typescript": "~5.8.2"
   }
