@@ -1290,10 +1290,12 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     tickers.forEach(ticker => {
       const historicalDays = historicalDataCache[ticker] || [];
       const dayData = historicalDays[currentHistoricalDay];
-      
+
       if (dayData) {
-        const prevDayData = historicalDays[currentHistoricalDay - 1];
-        const dayOpenPrice = prevDayData ? prevDayData.price : dayData.price;
+        // Use simulation's current price for day opening to prevent execution slippage
+        // This ensures trades at day boundaries execute at the simulation's current price,
+        // not the historical cache's stale price
+        const dayOpenPrice = previousMarketData[ticker]?.price || dayData.price;
         marketData[ticker] = {
           ticker,
           price: dayOpenPrice,
