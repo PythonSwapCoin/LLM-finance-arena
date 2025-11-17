@@ -7,6 +7,7 @@ import type { MarketData } from '../types.js';
 import { updateChatMessagesStatusForSimulation } from '../services/multiSimChatService.js';
 import { updateTimerState } from '../services/timerService.js';
 import { saveSnapshot } from '../store/persistence.js';
+import { priceLogService } from '../services/priceLogService.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -223,6 +224,27 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       marketData: result.marketData,
       chat: result.chat,
     });
+
+    // Log prices and portfolio values at start of new day to ensure previousValue is correct
+    try {
+      const updatedSnapshot = instance.getSnapshot();
+      if (updatedSnapshot.marketData && Object.keys(updatedSnapshot.marketData).length > 0 && updatedSnapshot.agents.length > 0) {
+        const timestamp = newDay + (0 / 6.5); // Day + intradayHour fraction
+        priceLogService.logPricesAndPortfolios(
+          updatedSnapshot.marketData,
+          updatedSnapshot.agents,
+          newDay,
+          0, // intradayHour
+          timestamp
+        );
+      }
+    } catch (error) {
+      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+        'Failed to log prices after day advancement', {
+          simulationType: simulationTypeId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+    }
 
     logger.logSimulationEvent(`Advanced to day ${newDay} for simulation ${simulationTypeId}`, {
       simulationType: simulationTypeId,
