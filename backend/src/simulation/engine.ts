@@ -232,7 +232,7 @@ const handleTradeWindowAgent = async (
           logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, true, undefined, fees);
         } else {
           const errorMsg = `Insufficient cash: need $${totalCost.toFixed(2)} including fees, have $${newPortfolio.cash.toFixed(2)}`;
-          console.warn(`[${agent.name}] Insufficient cash for ${trade.quantity} shares of ${trade.ticker}`);
+          // Log failed trade - logger.logTrade will handle this as ERROR
           logger.logTrade(agent.name, trade.ticker, 'buy', trade.quantity, tradePrice, false, errorMsg, fees);
           failedTrades.push({
             ticker: trade.ticker,
@@ -709,16 +709,19 @@ export const tradeWindow = async (
   const roundId = createRoundId(day, intradayHour);
 
   // Mark messages as 'delivered' when they are sent to agents
+  // IMPORTANT: Only deliver messages that match the current roundId
+  // This ensures messages are delivered to the correct trade window
   let chatWithDeliveredMessages = chat;
   if (chat.config.enabled) {
     const updatedMessages = chat.messages.map(message => {
-      // Mark pending user messages as 'delivered' when processing them
-      // Don't filter by roundId - process ALL pending messages
+      // Mark pending user messages as 'delivered' ONLY if they match the current roundId
+      // This prevents premature delivery of messages intended for future rounds
       if (
         message.senderType === 'user' &&
-        message.status === 'pending'
+        message.status === 'pending' &&
+        message.roundId === roundId
       ) {
-        return { ...message, status: 'delivered' as const, roundId };
+        return { ...message, status: 'delivered' as const };
       }
       return message;
     });

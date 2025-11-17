@@ -34,6 +34,9 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
 
   const simulationMode = mode || 'simulated';
 
+  // Get market status from backend info
+  const isMarketOpen = connectionStatus?.backendInfo?.simulation?.isMarketOpen;
+
   useEffect(() => {
     const fetchCompetitions = async () => {
       try {
@@ -203,10 +206,13 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
 
         {/* Status badges - Right side (hidden on mobile, visible on md+) */}
         <div className="hidden md:flex items-center space-x-2 lg:space-x-4 flex-shrink-0">
-          <a href="#" className="text-arena-text-primary flex items-center space-x-2">
-            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-            <span className="text-sm font-medium">LIVE</span>
-          </a>
+          {/* Live indicator with market status for realtime/hybrid modes */}
+          <div className="text-arena-text-primary flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${isMarketOpen === false ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`}></div>
+            <span className="text-sm font-medium">
+              {isMarketOpen === false ? 'MARKET CLOSED' : 'LIVE'}
+            </span>
+          </div>
           <div className={`flex items-center space-x-2 px-2 lg:px-3 py-1 rounded-full ${modeInfo.color} bg-opacity-20 border border-current ${modeInfo.textColor}`}>
             <div className={`w-2 h-2 rounded-full ${modeInfo.color}`}></div>
             <span className="text-xs font-semibold">{modeInfo.label}</span>
