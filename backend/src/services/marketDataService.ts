@@ -449,12 +449,16 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
   const catchUpThresholdMs = minutesPerTick ? Math.min(minutesPerTick * 60 * 1000, 30 * 60 * 1000) : 15 * 60 * 1000; // Max 30 minutes threshold
   const shouldTransition = timeDifference >= 0 && timeDifference <= catchUpThresholdMs;
 
-  logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-    'Checking hybrid mode transition', {
-      currentDate,
-      currentDay,
-      intradayHour,
-      simulationDateTime: simulationDate.toISOString(),
+  // Only log when we're close to transition (within 5 minutes) or when transitioning
+  const timeDifferenceMinutes = timeDifference / 60000;
+  if (shouldTransition || timeDifferenceMinutes < 5) {
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      shouldTransition ? '🔄 HYBRID MODE TRANSITION: Caught up to real-time!' : 'Hybrid mode: approaching transition',
+      {
+        currentDate,
+        currentDay,
+        intradayHour,
+        simulationDateTime: simulationDate.toISOString(),
       simulationTimeET: simETString,
       simulationDayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][simET.dayOfWeek],
       currentDateTime: now.toISOString(),
@@ -463,10 +467,11 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
       effectiveDayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][effectiveET.dayOfWeek],
       useDelayedData: USE_DELAYED_DATA,
       dataDelayMinutes: DATA_DELAY_MINUTES,
-      timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
-      thresholdMinutes: catchUpThresholdMs / 60000,
-      shouldTransition
-    });
+        timeDifferenceMinutes: (timeDifference / 60000).toFixed(2),
+        thresholdMinutes: catchUpThresholdMs / 60000,
+        shouldTransition
+      });
+  }
 
   return shouldTransition;
 };

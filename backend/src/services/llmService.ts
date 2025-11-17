@@ -277,11 +277,11 @@ export const getTradeDecisions = async (
   // Determine which model will be used (for logging)
   const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
   const displayModel = USE_UNIFIED_MODEL ? `${agent.model} (→ ${UNIFIED_MODEL})` : agent.model;
-  console.log(`[${agent.name}] Starting trade decision request (model: ${displayModel})`);
-  
+  // Removed verbose logging - only errors will be logged
+
   // If LLM is disabled, use synthetic trades
   if (!ENABLE_LLM) {
-    console.log(`[${agent.name}] Using synthetic trades (LLM disabled)`);
+    // Synthetic trades in use (LLM disabled)
     logger.log(LogLevel.INFO, LogCategory.LLM,
       `Using synthetic trades for ${agent.name} (ENABLE_LLM=false)`, { agent: agent.name });
     return generateSyntheticTrades(agent, marketData, day, chatContext);
@@ -641,7 +641,7 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
       throw error;
     }
     
-    console.log(`[${agent.name}] Received response (${responseTime}ms, ${tokensUsed} tokens). JSON length: ${jsonText.length}`);
+    // Removed verbose logging - response details only logged on errors
     logger.logLLMCall(agent.name, modelToUse, true, tokensUsed, responseTime);
 
     // Parse and validate response with improved JSON repair
@@ -792,12 +792,7 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     
     // Validate and filter trades
     const rawTrades = result.trades || [];
-    if (rawTrades.length === 0 && result.rationale) {
-      // Log when agent returns empty trades (might be intentional or a problem)
-      console.log(`[${agent.name}] Returned ${rawTrades.length} trades. Rationale: ${result.rationale.substring(0, 150)}...`);
-    } else if (rawTrades.length > 0) {
-      console.log(`[${agent.name}] Returned ${rawTrades.length} trade(s)`);
-    }
+    // Removed verbose trade count logging - only errors will be logged
     
     const validTrades = rawTrades
       .filter((t: any) => {

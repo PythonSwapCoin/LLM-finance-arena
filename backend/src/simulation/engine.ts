@@ -6,6 +6,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
 import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatService.js';
 import { createRoundId } from '../utils/chatUtils.js';
 import { priceLogService } from '../services/priceLogService.js';
+import { validatePortfolioCalculations } from '../utils/portfolioValidator.js';
 
 const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
   if (value === undefined) {
@@ -846,6 +847,9 @@ export const tradeWindow = async (
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
 
+  // Validate portfolio calculations (only logs if issues found)
+  validatePortfolioCalculations(updatedAgents, marketData, day, intradayHour);
+
   return {
     day,
     intradayHour,
@@ -904,17 +908,9 @@ export const advanceDay = async (
 
           if (!isNaN(marketReturn) && isFinite(marketReturn)) {
             newTotalValue = lastPerf.totalValue * (1 + marketReturn);
-
-            // Debug logging to trace benchmark updates
-            console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: prevGSPC=${prevGspcPrice.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
+            // Removed verbose benchmark logging - only portfolio validation errors will be logged
           }
-        } else {
-          // First update - no previous price, so no change
-          console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: FIRST UPDATE - currentGSPC=${currentGspc.price.toFixed(2)}, value=$${newTotalValue.toFixed(2)}`);
         }
-      } else {
-        // Debug: log why update didn't happen
-        console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, currentPrice=${currentGspc?.price}`);
       }
     } else if (b.id === 'AIMI') {
       // AI Managers Index: Direct average of all agent portfolio values
@@ -951,6 +947,9 @@ export const advanceDay = async (
 
     return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
+
+  // Validate portfolio calculations (only logs if issues found)
+  validatePortfolioCalculations(updatedAgents, newMarketData, nextDay, 0);
 
   return {
     day: nextDay,

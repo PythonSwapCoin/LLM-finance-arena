@@ -121,11 +121,7 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
     snapshot = instance.getSnapshot();
   }
 
-  logger.logSimulationEvent(`Trade window starting for ${simType.name}`, {
-    simulationType: simulationTypeId,
-    day: snapshot.day,
-    intradayHour: snapshot.intradayHour,
-  });
+  // Removed verbose "Trade window starting" log - only errors will be logged
 
   try {
     const result = await tradeWindow({
@@ -146,11 +142,7 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
       marketData: result.marketData,
     });
 
-    logger.logSimulationEvent(`Trade window completed for ${simType.name}`, {
-      simulationType: simulationTypeId,
-      day: snapshot.day,
-      intradayHour: snapshot.intradayHour,
-    });
+    // Removed verbose "Trade window completed" log - only errors will be logged
 
     // Save snapshot after trade window
     try {
@@ -227,11 +219,12 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       chat: result.chat,
     });
 
-    logger.logSimulationEvent(`Advanced to day ${newDay} for simulation ${simulationTypeId}`, {
-      simulationType: simulationTypeId,
-      newDay,
-      currentDate: newCurrentDate,
-    });
+    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+      `📅 Day ${newDay} started`, {
+        simulationType: simulationTypeId,
+        day: newDay,
+        currentDate: newCurrentDate,
+      });
 
     // Log prices and portfolio values at start of new day to ensure previousValue is correct
     try {
