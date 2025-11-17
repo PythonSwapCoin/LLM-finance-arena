@@ -568,70 +568,53 @@ export const step = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // Use SPY (S&P 500 ETF) price directly from market data
-      // Always use price changes between snapshots - this is the most robust approach
-      const spyTicker = 'SPY';
-      const currentSpy = newMarketData[spyTicker];
-      const prevSpy = currentSnapshot.marketData[spyTicker];
-      
-      let marketReturn = 0;
-      let hasValidReturn = false;
-      
-      if (currentSpy && prevSpy && prevSpy.price > 0 && currentSpy.price > 0) {
-        // Calculate return from SPY price change - this is the correct and robust method
-        marketReturn = (currentSpy.price - prevSpy.price) / prevSpy.price;
-        hasValidReturn = true;
-      } else {
-        // SPY not available, fallback to calculating from all stocks
-        const tickers = Object.keys(newMarketData);
-        
-        if (tickers.length === 0) {
-          // No market data available, keep current value
-          return { ...b, performanceHistory: [...b.performanceHistory, lastPerf] };
-        }
+      // Use ^GSPC (S&P 500 Index) price directly from yfinance
+      const gspcTicker = '^GSPC';
+      const currentGspc = newMarketData[gspcTicker];
+      const prevGspc = currentSnapshot.marketData[gspcTicker];
 
-        // Calculate return from actual price changes between snapshots
-        // Only use stocks that have both previous and current prices
+      if (currentGspc && prevGspc && prevGspc.price > 0 && currentGspc.price > 0) {
+        // Calculate return from ^GSPC price change
+        const marketReturn = (currentGspc.price - prevGspc.price) / prevGspc.price;
+
+        if (!isNaN(marketReturn) && isFinite(marketReturn)) {
+          newTotalValue = lastPerf.totalValue * (1 + marketReturn);
+        }
+      }
+      // If ^GSPC data is not available, keep the same value (don't update)
+    } else if (b.id === 'AIMI') {
+      // AI Managers Index: Average of all agent returns (only for wall street arena)
+      if (agents.length > 0) {
         let totalReturn = 0;
-        let validReturns = 0;
-        let totalWeight = 0;
-        
-        tickers.forEach(ticker => {
-          const currentStock = newMarketData[ticker];
-          const prevStock = currentSnapshot.marketData[ticker];
-          
-          if (prevStock && prevStock.price > 0 && currentStock && currentStock.price > 0) {
-            const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
-            
-            // Use market cap for weighting if available, otherwise equal weight
-            const weight = currentStock.marketCap || 1;
-            totalReturn += stockReturn * weight;
-            totalWeight += weight;
-            validReturns++;
+        let validAgents = 0;
+
+        agents.forEach(agent => {
+          // Get the agent's previous and current portfolio values
+          const agentHistory = agent.performanceHistory;
+          if (agentHistory.length >= 2) {
+            const prevPerf = agentHistory[agentHistory.length - 2];
+            const currPerf = agentHistory[agentHistory.length - 1];
+
+            if (prevPerf.totalValue > 0 && currPerf.totalValue > 0) {
+              const agentReturn = (currPerf.totalValue / prevPerf.totalValue) - 1;
+              totalReturn += agentReturn;
+              validAgents++;
+            }
+          } else if (agentHistory.length === 1) {
+            // First update: use the agent's current return
+            const currPerf = agentHistory[0];
+            const agentReturn = currPerf.totalReturn;
+            totalReturn += agentReturn;
+            validAgents++;
           }
         });
-        
-        if (validReturns > 0) {
-          if (totalWeight > 0) {
-            // Weighted average return (market-cap weighted if available, otherwise equal weight)
-            marketReturn = totalReturn / totalWeight;
-            hasValidReturn = true;
-          } else {
-            // Edge case: all stocks have marketCap = 0, use equal weighting
-            marketReturn = totalReturn / validReturns;
-            hasValidReturn = true;
-          }
+
+        if (validAgents > 0) {
+          const avgReturn = totalReturn / validAgents;
+          newTotalValue = lastPerf.totalValue * (1 + avgReturn);
         }
       }
-      
-      // Apply the market return only if it's valid
-      // If we can't calculate a return from prices, keep the same value (don't update)
-      if (hasValidReturn && !isNaN(marketReturn) && isFinite(marketReturn)) {
-        newTotalValue = lastPerf.totalValue * (1 + marketReturn);
-      }
-      // If marketReturn is invalid, keep the same value (don't update)
     }
-    // AI Managers Index removed - no longer needed
 
     // For benchmarks, calculate metrics directly using the newTotalValue from market returns
     // We don't use calculateAllMetrics with a fake portfolio because we want to use the exact
@@ -818,8 +801,39 @@ export const tradeWindow = async (
     if (b.id === S_P500_BENCHMARK_ID) {
       // S&P 500 doesn't change during trade windows (market data unchanged)
       newTotalValue = lastPerf.totalValue;
+    } else if (b.id === 'AIMI') {
+      // AI Managers Index: Average of all agent returns after trades
+      if (updatedAgents.length > 0) {
+        let totalReturn = 0;
+        let validAgents = 0;
+
+        updatedAgents.forEach(agent => {
+          // Get the agent's previous and current portfolio values
+          const agentHistory = agent.performanceHistory;
+          if (agentHistory.length >= 2) {
+            const prevPerf = agentHistory[agentHistory.length - 2];
+            const currPerf = agentHistory[agentHistory.length - 1];
+
+            if (prevPerf.totalValue > 0 && currPerf.totalValue > 0) {
+              const agentReturn = (currPerf.totalValue / prevPerf.totalValue) - 1;
+              totalReturn += agentReturn;
+              validAgents++;
+            }
+          } else if (agentHistory.length === 1) {
+            // First update: use the agent's current return
+            const currPerf = agentHistory[0];
+            const agentReturn = currPerf.totalReturn;
+            totalReturn += agentReturn;
+            validAgents++;
+          }
+        });
+
+        if (validAgents > 0) {
+          const avgReturn = totalReturn / validAgents;
+          newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+        }
+      }
     }
-    // AI Managers Index removed - no longer needed
 
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, marketData, b.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
@@ -873,78 +887,53 @@ export const advanceDay = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // Use SPY (S&P 500 ETF) price directly from market data
-      // Always use price changes between snapshots - this is the most robust approach
-      const spyTicker = 'SPY';
-      const currentSpy = newMarketData[spyTicker];
-      const prevSpy = currentSnapshot.marketData[spyTicker];
-      
-      let marketReturn = 0;
-      let hasValidReturn = false;
-      
-      if (currentSpy && prevSpy && prevSpy.price > 0 && currentSpy.price > 0) {
-        // Calculate return from SPY price change - this is the correct and robust method
-        marketReturn = (currentSpy.price - prevSpy.price) / prevSpy.price;
-        hasValidReturn = true;
-      } else {
-        // SPY not available, fallback to calculating from all stocks
-        const tickers = Object.keys(newMarketData);
-        
-        if (tickers.length === 0) {
-          // No market data available, keep current value
-          return { ...b, performanceHistory: [...b.performanceHistory, lastPerf] };
+      // Use ^GSPC (S&P 500 Index) price directly from yfinance
+      const gspcTicker = '^GSPC';
+      const currentGspc = newMarketData[gspcTicker];
+      const prevGspc = currentSnapshot.marketData[gspcTicker];
+
+      if (currentGspc && prevGspc && prevGspc.price > 0 && currentGspc.price > 0) {
+        // Calculate return from ^GSPC price change
+        const marketReturn = (currentGspc.price - prevGspc.price) / prevGspc.price;
+
+        if (!isNaN(marketReturn) && isFinite(marketReturn)) {
+          newTotalValue = lastPerf.totalValue * (1 + marketReturn);
         }
-
-        // Calculate return from actual price changes between days
-        // Only use stocks that have both previous and current prices
+      }
+      // If ^GSPC data is not available, keep the same value (don't update)
+    } else if (b.id === 'AIMI') {
+      // AI Managers Index: Average of all agent returns (only for wall street arena)
+      if (updatedAgents.length > 0) {
         let totalReturn = 0;
-        let validReturns = 0;
-        let totalWeight = 0;
+        let validAgents = 0;
 
-        tickers.forEach(ticker => {
-          const currentStock = newMarketData[ticker];
-          const prevStock = currentSnapshot.marketData[ticker];
+        updatedAgents.forEach(agent => {
+          // Get the agent's previous and current portfolio values
+          const agentHistory = agent.performanceHistory;
+          if (agentHistory.length >= 2) {
+            const prevPerf = agentHistory[agentHistory.length - 2];
+            const currPerf = agentHistory[agentHistory.length - 1];
 
-          if (prevStock && prevStock.price > 0 && currentStock && currentStock.price > 0) {
-            const stockReturn = (currentStock.price - prevStock.price) / prevStock.price;
-            
-            // Use market cap for weighting if available, otherwise equal weight
-            const weight = currentStock.marketCap || 1;
-            totalReturn += stockReturn * weight;
-            totalWeight += weight;
-            validReturns++;
+            if (prevPerf.totalValue > 0 && currPerf.totalValue > 0) {
+              const agentReturn = (currPerf.totalValue / prevPerf.totalValue) - 1;
+              totalReturn += agentReturn;
+              validAgents++;
+            }
+          } else if (agentHistory.length === 1) {
+            // First update: use the agent's current return
+            const currPerf = agentHistory[0];
+            const agentReturn = currPerf.totalReturn;
+            totalReturn += agentReturn;
+            validAgents++;
           }
         });
 
-        if (validReturns > 0) {
-          if (totalWeight > 0) {
-            // Weighted average return (market-cap weighted if available, otherwise equal weight)
-            marketReturn = totalReturn / totalWeight;
-            hasValidReturn = true;
-          } else {
-            // Edge case: all stocks have marketCap = 0, use equal weighting
-            marketReturn = totalReturn / validReturns;
-            hasValidReturn = true;
-          }
-        }
-        
-        // If we can't calculate return from prices, log a warning but keep the same value
-        if (!hasValidReturn) {
-          logger.logSimulationEvent('Warning: Cannot calculate market return - no valid price comparison', {
-            tickerCount: Object.keys(newMarketData).length,
-            prevTickerCount: Object.keys(currentSnapshot.marketData).length
-          });
+        if (validAgents > 0) {
+          const avgReturn = totalReturn / validAgents;
+          newTotalValue = lastPerf.totalValue * (1 + avgReturn);
         }
       }
-
-      // Apply the market return only if it's valid
-      // If we can't calculate a return from prices, keep the same value (don't update)
-      if (hasValidReturn && !isNaN(marketReturn) && isFinite(marketReturn)) {
-        newTotalValue = lastPerf.totalValue * (1 + marketReturn);
-      }
-      // If marketReturn is invalid, keep the same value (don't update)
     }
-    // AI Managers Index removed - no longer needed
 
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, b.performanceHistory, nextDay);
     newMetrics.intradayHour = 0;

@@ -1018,9 +1018,9 @@ const fetchYahooFinanceDetailedInfo = async (ticker: string, baseData: TickerDat
 };
 
 export const createInitialMarketData = async (tickers: string[]): Promise<MarketData> => {
-  // Always include SPY for S&P 500 benchmark tracking
-  const tickersWithSpy = [...new Set([...tickers, 'SPY'])];
-  
+  // Always include SPY and ^GSPC for S&P 500 benchmark tracking
+  const tickersWithSpy = [...new Set([...tickers, 'SPY', '^GSPC'])];
+
   if (MODE === 'historical') {
     console.log('📊 ✅ Historical Simulation Mode ENABLED');
     logger.logSimulationEvent('Historical Simulation Mode ENABLED', { tickers: tickersWithSpy.length });
@@ -1099,13 +1099,13 @@ export const generateNextIntradayMarketData = async (
   options?: { prefetchedData?: MarketData; missingTickers?: string[] }
 ): Promise<MarketData> => {
   if (MODE === 'historical') {
-    // Always include SPY for S&P 500 benchmark tracking
-    let tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
+    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
+    let tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
     if (tickers.length === 0) {
-      tickers = [...new Set([...Object.keys(historicalDataCache), 'SPY'])];
+      tickers = [...new Set([...Object.keys(historicalDataCache), 'SPY', '^GSPC'])];
     }
     if (tickers.length === 0) {
-      tickers = [...new Set([...S_P500_TICKERS, 'SPY'])];
+      tickers = [...new Set([...S_P500_TICKERS, 'SPY', '^GSPC'])];
     }
     
     if (tickers.length === 0) {
@@ -1150,8 +1150,8 @@ export const generateNextIntradayMarketData = async (
     
     return marketData;
   } else if (MODE === 'realtime') {
-    // Always include SPY for S&P 500 benchmark tracking
-    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
+    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
     let fetchedData: MarketData = {};
     let usedPrefetch = false;
 
@@ -1214,8 +1214,8 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
 
   if (MODE === 'historical') {
     currentHistoricalDay++;
-    // Always include SPY for S&P 500 benchmark tracking
-    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
+    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
     const marketData: MarketData = {};
     
     tickers.forEach(ticker => {
@@ -1254,8 +1254,8 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     
     return marketData;
   } else if (MODE === 'realtime') {
-    // Always include SPY for S&P 500 benchmark tracking
-    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY'])];
+    // Always include SPY and ^GSPC for S&P 500 benchmark tracking
+    const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
     return await fetchRealMarketDataWithCascade(tickers);
   }
   
