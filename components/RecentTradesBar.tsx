@@ -195,6 +195,16 @@ export const RecentTradesBar: React.FC<RecentTradesBarProps> = ({
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 15);
 
+  // Debug logging
+  if (sortedTrades.length > 0) {
+    console.log('Recent trades (first 3):', sortedTrades.slice(0, 3).map(t => ({
+      timestamp: t.timestamp,
+      action: t.action,
+      symbol: t.symbol,
+      agent: t.agentName
+    })));
+  }
+
   if (sortedTrades.length === 0) {
     return <div className="h-10 bg-arena-bg border-b border-arena-border" />;
   }
