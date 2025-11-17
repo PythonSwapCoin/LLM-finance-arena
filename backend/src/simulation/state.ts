@@ -62,11 +62,14 @@ class SimulationState {
 
     const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, marketData, [], 0);
     const benchmarks: Benchmark[] = [
-      { 
-        id: S_P500_BENCHMARK_ID, 
-        name: 'S&P 500', 
-        color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID], 
-        performanceHistory: [initialBenchmarkMetrics] 
+      {
+        id: S_P500_BENCHMARK_ID,
+        name: 'S&P 500',
+        color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID],
+        performanceHistory: [initialBenchmarkMetrics],
+        metadata: {
+          lastGspcPrice: marketData['^GSPC']?.price  // Store initial ^GSPC price
+        }
       }
     ];
 

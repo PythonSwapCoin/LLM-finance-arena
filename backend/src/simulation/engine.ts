@@ -568,24 +568,29 @@ export const step = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // Use ^GSPC (S&P 500 Index) - calculate return from previous value
+      // Use ^GSPC (S&P 500 Index) - calculate return from stored previous price
       const gspcTicker = '^GSPC';
       const currentGspc = newMarketData[gspcTicker];
-      const prevGspc = currentSnapshot.marketData[gspcTicker];
+      const prevGspcPrice = b.metadata?.lastGspcPrice;
 
-      if (currentGspc && prevGspc && prevGspc.price > 0 && currentGspc.price > 0) {
-        // Calculate return from ^GSPC price change
-        const marketReturn = (currentGspc.price - prevGspc.price) / prevGspc.price;
+      if (currentGspc && currentGspc.price > 0) {
+        if (prevGspcPrice && prevGspcPrice > 0) {
+          // Calculate return from ^GSPC price change
+          const marketReturn = (currentGspc.price - prevGspcPrice) / prevGspcPrice;
 
-        if (!isNaN(marketReturn) && isFinite(marketReturn)) {
-          newTotalValue = lastPerf.totalValue * (1 + marketReturn);
+          if (!isNaN(marketReturn) && isFinite(marketReturn)) {
+            newTotalValue = lastPerf.totalValue * (1 + marketReturn);
 
-          // Debug logging to trace benchmark updates
-          console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: prevGSPC=${prevGspc.price.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
+            // Debug logging to trace benchmark updates
+            console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: prevGSPC=${prevGspcPrice.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
+          }
+        } else {
+          // First update - no previous price, so no change
+          console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: FIRST UPDATE - currentGSPC=${currentGspc.price.toFixed(2)}, value=$${newTotalValue.toFixed(2)}`);
         }
       } else {
         // Debug: log why update didn't happen
-        console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, prevGspc=${!!prevGspc}, currentPrice=${currentGspc?.price}, prevPrice=${prevGspc?.price}`);
+        console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, currentPrice=${currentGspc?.price}`);
       }
     } else if (b.id === 'AIMI') {
       // AI Managers Index: Direct average of all agent portfolio values
@@ -651,7 +656,12 @@ export const step = async (
       intradayHour,
     };
 
-    return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
+    // Update metadata with current ^GSPC price for next calculation
+    const updatedMetadata = b.id === S_P500_BENCHMARK_ID && newMarketData['^GSPC']
+      ? { ...b.metadata, lastGspcPrice: newMarketData['^GSPC'].price }
+      : b.metadata;
+
+    return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
 
   return {
@@ -825,7 +835,12 @@ export const tradeWindow = async (
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, marketData, b.performanceHistory, timestamp);
     newMetrics.intradayHour = intradayHour;
 
-    return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
+    // Update metadata with current ^GSPC price for next calculation
+    const updatedMetadata = b.id === S_P500_BENCHMARK_ID && marketData['^GSPC']
+      ? { ...b.metadata, lastGspcPrice: marketData['^GSPC'].price }
+      : b.metadata;
+
+    return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
 
   return {
@@ -874,24 +889,29 @@ export const advanceDay = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // Use ^GSPC (S&P 500 Index) - calculate return from previous value
+      // Use ^GSPC (S&P 500 Index) - calculate return from stored previous price
       const gspcTicker = '^GSPC';
       const currentGspc = newMarketData[gspcTicker];
-      const prevGspc = currentSnapshot.marketData[gspcTicker];
+      const prevGspcPrice = b.metadata?.lastGspcPrice;
 
-      if (currentGspc && prevGspc && prevGspc.price > 0 && currentGspc.price > 0) {
-        // Calculate return from ^GSPC price change
-        const marketReturn = (currentGspc.price - prevGspc.price) / prevGspc.price;
+      if (currentGspc && currentGspc.price > 0) {
+        if (prevGspcPrice && prevGspcPrice > 0) {
+          // Calculate return from ^GSPC price change
+          const marketReturn = (currentGspc.price - prevGspcPrice) / prevGspcPrice;
 
-        if (!isNaN(marketReturn) && isFinite(marketReturn)) {
-          newTotalValue = lastPerf.totalValue * (1 + marketReturn);
+          if (!isNaN(marketReturn) && isFinite(marketReturn)) {
+            newTotalValue = lastPerf.totalValue * (1 + marketReturn);
 
-          // Debug logging to trace benchmark updates
-          console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: prevGSPC=${prevGspc.price.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
+            // Debug logging to trace benchmark updates
+            console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: prevGSPC=${prevGspcPrice.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
+          }
+        } else {
+          // First update - no previous price, so no change
+          console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: FIRST UPDATE - currentGSPC=${currentGspc.price.toFixed(2)}, value=$${newTotalValue.toFixed(2)}`);
         }
       } else {
         // Debug: log why update didn't happen
-        console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, prevGspc=${!!prevGspc}, currentPrice=${currentGspc?.price}, prevPrice=${prevGspc?.price}`);
+        console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, currentPrice=${currentGspc?.price}`);
       }
     } else if (b.id === 'AIMI') {
       // AI Managers Index: Direct average of all agent portfolio values
@@ -921,7 +941,12 @@ export const advanceDay = async (
     const newMetrics = calculateAllMetrics({cash: newTotalValue, positions: {}}, newMarketData, b.performanceHistory, nextDay);
     newMetrics.intradayHour = 0;
 
-    return { ...b, performanceHistory: [...b.performanceHistory, newMetrics] };
+    // Update metadata with current ^GSPC price for next calculation
+    const updatedMetadata = b.id === S_P500_BENCHMARK_ID && newMarketData['^GSPC']
+      ? { ...b.metadata, lastGspcPrice: newMarketData['^GSPC'].price }
+      : b.metadata;
+
+    return { ...b, performanceHistory: [...b.performanceHistory, newMetrics], metadata: updatedMetadata };
   });
 
   return {

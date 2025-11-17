@@ -129,6 +129,10 @@ export interface Benchmark {
   name: string;
   color: string;
   performanceHistory: PerformanceMetrics[];
+  metadata?: {
+    lastGspcPrice?: number;  // Track ^GSPC price for S&P 500 benchmark calculations
+    [key: string]: any;
+  };
 }
 
 export interface MarketDataSourceTelemetry {
