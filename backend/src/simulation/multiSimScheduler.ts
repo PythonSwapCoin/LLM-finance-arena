@@ -156,7 +156,10 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
     }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
-      `Failed to execute trade window for simulation ${simulationTypeId}`, { error });
+      `Failed to execute trade window for simulation ${simulationTypeId}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
   }
 };
 
@@ -259,7 +262,10 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
     }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
-      `Failed to advance day for simulation ${simulationTypeId}`, { error });
+      `Failed to advance day for simulation ${simulationTypeId}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
   }
 };
 

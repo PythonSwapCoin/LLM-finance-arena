@@ -581,17 +581,9 @@ export const step = async (
 
           if (!isNaN(marketReturn) && isFinite(marketReturn)) {
             newTotalValue = lastPerf.totalValue * (1 + marketReturn);
-
-            // Debug logging to trace benchmark updates
-            console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: prevGSPC=${prevGspcPrice.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
+            // Removed verbose benchmark logging - only portfolio validation errors will be logged
           }
-        } else {
-          // First update - no previous price, so no change
-          console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: FIRST UPDATE - currentGSPC=${currentGspc.price.toFixed(2)}, value=$${newTotalValue.toFixed(2)}`);
         }
-      } else {
-        // Debug: log why update didn't happen
-        console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, currentPrice=${currentGspc?.price}`);
       }
     } else if (b.id === 'AIMI') {
       // AI Managers Index: Direct average of all agent portfolio values

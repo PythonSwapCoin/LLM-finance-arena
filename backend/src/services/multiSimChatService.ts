@@ -10,7 +10,7 @@ import {
   cloneChatMessages,
   calculateTargetRoundId,
 } from '../utils/chatUtils.js';
-import { getSimInterval } from '../simulation/multiSimScheduler.js';
+import { getTradeInterval } from '../simulation/multiSimScheduler.js';
 
 interface UserMessageInput {
   username: string;
@@ -74,10 +74,10 @@ export const addUserMessageToSimulation = (
     throw new Error('Messages cannot include links or promotional content.');
   }
 
-  // Calculate the target round for this message
+  // Calculate the target round for this message (use trade interval, not sim interval)
   const simulationMode = snapshot.mode;
-  const simIntervalMs = getSimInterval();
-  const roundId = calculateTargetRoundId(snapshot.day, snapshot.intradayHour, simulationMode, simIntervalMs);
+  const tradeIntervalMs = getTradeInterval();
+  const roundId = calculateTargetRoundId(snapshot.day, snapshot.intradayHour, simulationMode, tradeIntervalMs);
 
   // Rate limiting: check messages from this user in this round
   const userMessagesThisRound = chat.messages.filter(message =>

@@ -10,7 +10,7 @@ import {
   cloneChatMessages,
   calculateTargetRoundId,
 } from '../utils/chatUtils.js';
-import { getSimInterval } from '../simulation/scheduler.js';
+import { getTradeInterval } from '../simulation/scheduler.js';
 
 interface AddUserMessageInput {
   username: string;
@@ -54,8 +54,8 @@ export const addUserMessageToChat = (input: AddUserMessageInput): { chat: ChatSt
   // Calculate the target round for this message, accounting for 1-minute safety buffer
   // If we're too close to the next round, assign to the round after that
   const simulationMode = snapshot.mode;
-  const simIntervalMs = getSimInterval();
-  const roundId = calculateTargetRoundId(snapshot.day, snapshot.intradayHour, simulationMode, simIntervalMs);
+  const tradeIntervalMs = getTradeInterval();
+  const roundId = calculateTargetRoundId(snapshot.day, snapshot.intradayHour, simulationMode, tradeIntervalMs);
 
   const userMessagesThisRound = chat.messages.filter(message =>
     message.senderType === 'user'
