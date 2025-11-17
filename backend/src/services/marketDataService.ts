@@ -1286,14 +1286,15 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     // Always include SPY and ^GSPC for S&P 500 benchmark tracking
     const tickers = [...new Set([...Object.keys(previousMarketData), 'SPY', '^GSPC'])];
     const marketData: MarketData = {};
-    
+
     tickers.forEach(ticker => {
       const historicalDays = historicalDataCache[ticker] || [];
       const dayData = historicalDays[currentHistoricalDay];
-      
+
       if (dayData) {
-        const prevDayData = historicalDays[currentHistoricalDay - 1];
-        const dayOpenPrice = prevDayData ? prevDayData.price : dayData.price;
+        // Use simulation's current price for day opening to avoid price discontinuities
+        // This ensures trades at day boundary use the price agents are seeing, not historical cache
+        const dayOpenPrice = previousMarketData[ticker]?.price || dayData.price;
         marketData[ticker] = {
           ticker,
           price: dayOpenPrice,
@@ -1320,7 +1321,7 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
         }
       }
     });
-    
+
     return marketData;
   } else if (MODE === 'realtime') {
     // Always include SPY and ^GSPC for S&P 500 benchmark tracking
