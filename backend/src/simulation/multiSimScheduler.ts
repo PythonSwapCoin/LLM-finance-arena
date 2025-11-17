@@ -110,12 +110,14 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
   const instance = simulationManager.getSimulation(simulationTypeId);
   if (!instance) return;
 
-  const snapshot = instance.getSnapshot();
+  let snapshot = instance.getSnapshot();
   const simType = instance.getSimulationType();
 
   // Update chat message status to "delivered" for this round (only for chat-enabled simulations)
   if (simType.chatEnabled) {
     updateChatMessagesStatusForSimulation(simulationTypeId, snapshot.day, snapshot.intradayHour);
+    // Get fresh snapshot after updating message status so agents see "delivered" messages
+    snapshot = instance.getSnapshot();
   }
 
   logger.logSimulationEvent(`Trade window starting for ${simType.name}`, {
