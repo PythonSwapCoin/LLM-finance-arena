@@ -568,7 +568,7 @@ export const step = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // Use ^GSPC (S&P 500 Index) price directly from yfinance
+      // Use ^GSPC (S&P 500 Index) - calculate return from previous value
       const gspcTicker = '^GSPC';
       const currentGspc = newMarketData[gspcTicker];
       const prevGspc = currentSnapshot.marketData[gspcTicker];
@@ -579,39 +579,35 @@ export const step = async (
 
         if (!isNaN(marketReturn) && isFinite(marketReturn)) {
           newTotalValue = lastPerf.totalValue * (1 + marketReturn);
+
+          // Debug logging to trace benchmark updates
+          console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: prevGSPC=${prevGspc.price.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
         }
+      } else {
+        // Debug: log why update didn't happen
+        console.log(`[S&P500 Benchmark] Day ${day}, Hour ${intradayHour}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, prevGspc=${!!prevGspc}, currentPrice=${currentGspc?.price}, prevPrice=${prevGspc?.price}`);
       }
-      // If ^GSPC data is not available, keep the same value (don't update)
     } else if (b.id === 'AIMI') {
-      // AI Managers Index: Average of all agent returns (only for wall street arena)
-      if (agents.length > 0) {
-        let totalReturn = 0;
+      // AI Managers Index: Direct average of all agent portfolio values
+      // This ensures AIMI exactly matches agents when they all have identical portfolios
+      if (updatedAgents.length > 0) {
+        let totalValue = 0;
         let validAgents = 0;
 
-        agents.forEach(agent => {
-          // Get the agent's previous and current portfolio values
+        updatedAgents.forEach(agent => {
           const agentHistory = agent.performanceHistory;
-          if (agentHistory.length >= 2) {
-            const prevPerf = agentHistory[agentHistory.length - 2];
+          if (agentHistory.length > 0) {
             const currPerf = agentHistory[agentHistory.length - 1];
-
-            if (prevPerf.totalValue > 0 && currPerf.totalValue > 0) {
-              const agentReturn = (currPerf.totalValue / prevPerf.totalValue) - 1;
-              totalReturn += agentReturn;
+            if (currPerf.totalValue > 0) {
+              totalValue += currPerf.totalValue;
               validAgents++;
             }
-          } else if (agentHistory.length === 1) {
-            // First update: use the agent's current return
-            const currPerf = agentHistory[0];
-            const agentReturn = currPerf.totalReturn;
-            totalReturn += agentReturn;
-            validAgents++;
           }
         });
 
         if (validAgents > 0) {
-          const avgReturn = totalReturn / validAgents;
-          newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+          // Direct average of portfolio values (not incremental returns)
+          newTotalValue = totalValue / validAgents;
         }
       }
     }
@@ -802,35 +798,26 @@ export const tradeWindow = async (
       // S&P 500 doesn't change during trade windows (market data unchanged)
       newTotalValue = lastPerf.totalValue;
     } else if (b.id === 'AIMI') {
-      // AI Managers Index: Average of all agent returns after trades
+      // AI Managers Index: Direct average of all agent portfolio values
+      // This ensures AIMI exactly matches agents when they all have identical portfolios
       if (updatedAgents.length > 0) {
-        let totalReturn = 0;
+        let totalValue = 0;
         let validAgents = 0;
 
         updatedAgents.forEach(agent => {
-          // Get the agent's previous and current portfolio values
           const agentHistory = agent.performanceHistory;
-          if (agentHistory.length >= 2) {
-            const prevPerf = agentHistory[agentHistory.length - 2];
+          if (agentHistory.length > 0) {
             const currPerf = agentHistory[agentHistory.length - 1];
-
-            if (prevPerf.totalValue > 0 && currPerf.totalValue > 0) {
-              const agentReturn = (currPerf.totalValue / prevPerf.totalValue) - 1;
-              totalReturn += agentReturn;
+            if (currPerf.totalValue > 0) {
+              totalValue += currPerf.totalValue;
               validAgents++;
             }
-          } else if (agentHistory.length === 1) {
-            // First update: use the agent's current return
-            const currPerf = agentHistory[0];
-            const agentReturn = currPerf.totalReturn;
-            totalReturn += agentReturn;
-            validAgents++;
           }
         });
 
         if (validAgents > 0) {
-          const avgReturn = totalReturn / validAgents;
-          newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+          // Direct average of portfolio values (not incremental returns)
+          newTotalValue = totalValue / validAgents;
         }
       }
     }
@@ -887,7 +874,7 @@ export const advanceDay = async (
     let newTotalValue = lastPerf.totalValue;
 
     if (b.id === S_P500_BENCHMARK_ID) {
-      // Use ^GSPC (S&P 500 Index) price directly from yfinance
+      // Use ^GSPC (S&P 500 Index) - calculate return from previous value
       const gspcTicker = '^GSPC';
       const currentGspc = newMarketData[gspcTicker];
       const prevGspc = currentSnapshot.marketData[gspcTicker];
@@ -898,39 +885,35 @@ export const advanceDay = async (
 
         if (!isNaN(marketReturn) && isFinite(marketReturn)) {
           newTotalValue = lastPerf.totalValue * (1 + marketReturn);
+
+          // Debug logging to trace benchmark updates
+          console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: prevGSPC=${prevGspc.price.toFixed(2)}, currentGSPC=${currentGspc.price.toFixed(2)}, return=${(marketReturn * 100).toFixed(4)}%, prevValue=$${lastPerf.totalValue.toFixed(2)}, newValue=$${newTotalValue.toFixed(2)}`);
         }
+      } else {
+        // Debug: log why update didn't happen
+        console.log(`[S&P500 Benchmark - advanceDay] Day ${nextDay}: UPDATE SKIPPED - currentGspc=${!!currentGspc}, prevGspc=${!!prevGspc}, currentPrice=${currentGspc?.price}, prevPrice=${prevGspc?.price}`);
       }
-      // If ^GSPC data is not available, keep the same value (don't update)
     } else if (b.id === 'AIMI') {
-      // AI Managers Index: Average of all agent returns (only for wall street arena)
+      // AI Managers Index: Direct average of all agent portfolio values
+      // This ensures AIMI exactly matches agents when they all have identical portfolios
       if (updatedAgents.length > 0) {
-        let totalReturn = 0;
+        let totalValue = 0;
         let validAgents = 0;
 
         updatedAgents.forEach(agent => {
-          // Get the agent's previous and current portfolio values
           const agentHistory = agent.performanceHistory;
-          if (agentHistory.length >= 2) {
-            const prevPerf = agentHistory[agentHistory.length - 2];
+          if (agentHistory.length > 0) {
             const currPerf = agentHistory[agentHistory.length - 1];
-
-            if (prevPerf.totalValue > 0 && currPerf.totalValue > 0) {
-              const agentReturn = (currPerf.totalValue / prevPerf.totalValue) - 1;
-              totalReturn += agentReturn;
+            if (currPerf.totalValue > 0) {
+              totalValue += currPerf.totalValue;
               validAgents++;
             }
-          } else if (agentHistory.length === 1) {
-            // First update: use the agent's current return
-            const currPerf = agentHistory[0];
-            const agentReturn = currPerf.totalReturn;
-            totalReturn += agentReturn;
-            validAgents++;
           }
         });
 
         if (validAgents > 0) {
-          const avgReturn = totalReturn / validAgents;
-          newTotalValue = lastPerf.totalValue * (1 + avgReturn);
+          // Direct average of portfolio values (not incremental returns)
+          newTotalValue = totalValue / validAgents;
         }
       }
     }
