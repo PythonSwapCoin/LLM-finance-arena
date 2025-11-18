@@ -182,5 +182,16 @@ export interface SimulationSnapshot {
   chat: ChatState;
   currentTimestamp?: number; // Timestamp in milliseconds for realtime mode
   lastUpdated: string;
+  // Historical preload metadata (for saving historical data to preload in realtime mode)
+  historicalPreloadMetadata?: {
+    mode: 'historical';
+    startDate: string;
+    endDate: string;
+    endDay: number;
+    endIntradayHour: number;
+    tickIntervalMs: number;
+    marketMinutesPerTick: number;
+    realtimeTickIntervalMs: number;
+  };
 }
 
