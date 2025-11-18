@@ -364,6 +364,45 @@ export const startMultiSimScheduler = async (): Promise<void> => {
           totalDays: snapshot.day + 1,
           finalDay: snapshot.day,
         });
+
+        // Save historical preload data if enabled
+        const shouldSavePreload = process.env.SAVE_HISTORICAL_PRELOAD !== 'false';
+        if (shouldSavePreload && snapshot.mode === 'historical') {
+          try {
+            const preloadSnapshotId = process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'historical-preload';
+
+            logger.logSimulationEvent('Saving historical preload snapshot', {
+              snapshotId: preloadSnapshotId,
+              day: snapshot.day,
+              intradayHour: snapshot.intradayHour
+            });
+
+            // Create metadata for the preload snapshot
+            const preloadSnapshot = {
+              ...snapshot,
+              historicalPreloadMetadata: {
+                mode: 'historical' as const,
+                startDate: snapshot.startDate || new Date().toISOString(),
+                endDate: snapshot.currentDate || new Date().toISOString(),
+                endDay: snapshot.day,
+                endIntradayHour: snapshot.intradayHour,
+                tickIntervalMs: parseInt(process.env.SIM_INTERVAL_MS || '30000', 10),
+                marketMinutesPerTick: parseInt(process.env.SIM_MARKET_MINUTES_PER_TICK || '30', 10),
+                realtimeTickIntervalMs: parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10)
+              }
+            };
+
+            await saveSnapshot(preloadSnapshot, preloadSnapshotId);
+
+            logger.logSimulationEvent('Historical preload snapshot saved', {
+              snapshotId: preloadSnapshotId
+            });
+          } catch (err) {
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+              'Failed to save historical preload snapshot', { error: err });
+          }
+        }
+
         await stopMultiSimScheduler();
         return;
       }
