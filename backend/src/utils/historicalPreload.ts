@@ -60,6 +60,15 @@ export const convertHistoricalTimestampToRealtime = (
 };
 
 /**
+ * Check if a timestamp falls on a weekend
+ */
+const isWeekend = (timestamp: number): boolean => {
+  const date = new Date(timestamp);
+  const dayOfWeek = date.getUTCDay();
+  return dayOfWeek === 0 || dayOfWeek === 6; // Sunday = 0, Saturday = 6
+};
+
+/**
  * Interpolate performance history from historical intervals to realtime intervals
  *
  * Historical data might have sparse intervals (e.g., every 30 minutes of market time)
@@ -67,6 +76,7 @@ export const convertHistoricalTimestampToRealtime = (
  *
  * This function expands historical data points to match the realtime interval by
  * creating multiple copies of each historical data point with adjusted timestamps.
+ * IMPORTANT: Skips weekends - no data points are created for Saturday or Sunday.
  *
  * @param historicalMetrics - Original performance history from historical mode
  * @param startDate - Start date of historical simulation (ISO string)
@@ -101,11 +111,14 @@ export const interpolatePerformanceHistory = (
     // Convert historical timestamp to realtime timestamp
     const timestamp = convertHistoricalTimestampToRealtime(metric.timestamp, startDate);
 
-    // Create the main data point with realtime timestamp
-    interpolatedMetrics.push({
-      ...metric,
-      timestamp
-    });
+    // Only add if not a weekend
+    if (!isWeekend(timestamp)) {
+      // Create the main data point with realtime timestamp
+      interpolatedMetrics.push({
+        ...metric,
+        timestamp
+      });
+    }
 
     // If there's a next metric, interpolate between current and next
     if (nextMetric && historicalMarketMinutesPerTick > realtimeIntervalMinutes) {
@@ -115,10 +128,15 @@ export const interpolatePerformanceHistory = (
 
       // Create interpolated points with constant values (assuming prices stay constant between ticks)
       for (let j = 1; j <= numInterpolatedPoints; j++) {
-        interpolatedMetrics.push({
-          ...metric, // Same values as current metric
-          timestamp: timestamp + (j * realtimeIntervalMs)
-        });
+        const interpolatedTimestamp = timestamp + (j * realtimeIntervalMs);
+
+        // Only add if not a weekend
+        if (!isWeekend(interpolatedTimestamp)) {
+          interpolatedMetrics.push({
+            ...metric, // Same values as current metric
+            timestamp: interpolatedTimestamp
+          });
+        }
       }
     }
   }

@@ -99,8 +99,9 @@ HISTORICAL_SIMULATION_START_DATE=2025-01-06
 SAVE_HISTORICAL_PRELOAD=true
 HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload  # Default snapshot ID
 
-# Optional: Set maximum simulation days
-MAX_SIMULATION_DAYS=5  # Simulation will stop after 5 days
+# IMPORTANT: Set maximum simulation days (counts WEEKDAYS only, max 5 for one week)
+MAX_SIMULATION_DAYS=5  # 5 weekdays = Mon-Fri (one trading week)
+# MAX_SIMULATION_DAYS=6  # Would be Mon-Mon (6 weekdays across two weeks)
 ```
 
 **What it does:**
@@ -108,7 +109,8 @@ MAX_SIMULATION_DAYS=5  # Simulation will stop after 5 days
 - Default: First week of 2025 (Jan 6-10, 2025)
 - Simulates trading as if starting at the beginning of that week
 - Uses actual historical prices from Yahoo Finance
-- Automatically stops after 5 days (completes the full week)
+- **IMPORTANT:** MAX_SIMULATION_DAYS counts **weekdays only** (Sat/Sun are automatically skipped)
+- Recommended: Set MAX_SIMULATION_DAYS to 5 or less for best results with historical data
 
 **Custom Date:**
 - Set `HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different week
@@ -136,13 +138,16 @@ MAX_SIMULATION_DAYS=5  # Simulation will stop after 5 days
 2. **Switch to Realtime Mode with Preload:**
    ```env
    MODE=realtime
-   REALTIME_PRELOAD_HISTORICAL=true
+   REALTIME_PRELOAD_HISTORICAL=true  # ⚠️ REQUIRED to load historical data!
    HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload
    ```
+
+   **⚠️ IMPORTANT:** You MUST set `REALTIME_PRELOAD_HISTORICAL=true` for realtime mode to load the historical data. Without this, realtime mode will start fresh without any historical data.
 
    - Realtime mode loads the historical snapshot
    - Historical data is interpolated to match realtime intervals
    - Charts show combined historical + realtime data seamlessly
+   - Weekends are automatically filtered out (no weekend data points in charts)
 
 ### Data Interpolation
 
@@ -157,8 +162,14 @@ The system handles different tick intervals automatically:
 When preloading, each historical data point is expanded to match the realtime interval:
 - Example: 30-min historical tick → 3 data points at 10-min intervals (with constant values)
 
-### Gap Handling
+### Weekend and Gap Handling
 
+**Weekend Filtering:**
+- All weekend timestamps (Saturday and Sunday) are automatically filtered out
+- No data points are created for weekends in the interpolation
+- Charts will NOT show any weekend dates
+
+**Time Gap Handling:**
 If there's a time gap between historical end and realtime start:
 
 - The system fills the gap with constant values (assumes prices stayed the same)
