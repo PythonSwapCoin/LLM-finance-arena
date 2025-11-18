@@ -81,47 +81,190 @@ class SimulationInstance {
       return;
     }
 
-    // Create agents from the simulation type configuration
-    const agents = createAgentsFromConfigs(this.simulationType.traderConfigs);
+    const mode = getSimulationMode();
 
-    const initialAgentStates = agents.map(agent => {
-      const initialMetrics = calculateAllMetrics(agent.portfolio, marketData, [], 0);
-      return {
-        ...agent,
-        performanceHistory: [initialMetrics],
-        rationaleHistory: { 0: 'Initial state - no trades yet.' },
-        memory: {
-          recentTrades: [],
-          pastRationales: [],
-          pastPerformance: [initialMetrics],
+    // Check if we should preload historical data in realtime mode
+    const shouldPreloadHistorical = mode === 'realtime' &&
+      process.env.REALTIME_PRELOAD_HISTORICAL === 'true';
+
+    let initialAgentStates: Agent[];
+    let benchmarks: Benchmark[];
+
+    if (shouldPreloadHistorical) {
+      // Load historical preload snapshot
+      const { prepareAgentsForRealtimePreload, prepareBenchmarksForRealtimePreload } = await import('../utils/historicalPreload.js');
+
+      const preloadSnapshotId = process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'historical-preload';
+
+      try {
+        logger.logSimulationEvent('Loading historical preload snapshot for realtime mode', {
+          snapshotId: preloadSnapshotId,
+          simulationType: this.simulationType.id
+        });
+
+        const historicalSnapshot = await loadSnapshot(preloadSnapshotId);
+
+        if (historicalSnapshot && historicalSnapshot.historicalPreloadMetadata) {
+          const metadata = historicalSnapshot.historicalPreloadMetadata;
+          const realtimeStartDate = new Date().toISOString();
+
+          logger.logSimulationEvent('Historical preload snapshot found, interpolating data', {
+            historicalStart: metadata.startDate,
+            historicalEnd: metadata.endDate,
+            realtimeStart: realtimeStartDate,
+            historicalPoints: historicalSnapshot.agents[0]?.performanceHistory?.length || 0,
+            historicalMarketMinutesPerTick: metadata.marketMinutesPerTick,
+            realtimeIntervalMs: metadata.realtimeTickIntervalMs,
+            simulationType: this.simulationType.id
+          });
+
+          // Prepare agents and benchmarks with interpolated data
+          initialAgentStates = prepareAgentsForRealtimePreload(
+            historicalSnapshot.agents,
+            metadata,
+            realtimeStartDate
+          );
+
+          benchmarks = prepareBenchmarksForRealtimePreload(
+            historicalSnapshot.benchmarks,
+            metadata,
+            realtimeStartDate
+          );
+
+          logger.logSimulationEvent('Historical data preloaded successfully', {
+            agents: initialAgentStates.length,
+            interpolatedPoints: initialAgentStates[0]?.performanceHistory?.length || 0,
+            simulationType: this.simulationType.id
+          });
+        } else {
+          logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+            'Historical preload snapshot not found or missing metadata, starting fresh', {
+              snapshotId: preloadSnapshotId,
+              simulationType: this.simulationType.id
+            });
+
+          // Fall back to normal initialization
+          const agents = createAgentsFromConfigs(this.simulationType.traderConfigs);
+          initialAgentStates = agents.map(agent => {
+            const initialMetrics = calculateAllMetrics(agent.portfolio, marketData, [], 0);
+            return {
+              ...agent,
+              performanceHistory: [initialMetrics],
+              rationaleHistory: { 0: 'Initial state - no trades yet.' },
+              memory: {
+                recentTrades: [],
+                pastRationales: [],
+                pastPerformance: [initialMetrics],
+              }
+            };
+          });
+
+          const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, marketData, [], 0);
+          benchmarks = [
+            {
+              id: S_P500_BENCHMARK_ID,
+              name: 'S&P 500',
+              color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID],
+              performanceHistory: [initialBenchmarkMetrics],
+              metadata: {
+                lastGspcPrice: marketData['^GSPC']?.price
+              }
+            }
+          ];
+
+          if (this.simulationType.id === 'multi-model') {
+            benchmarks.push({
+              id: AI_MANAGERS_INDEX_ID,
+              name: 'AI Managers Index',
+              color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID],
+              performanceHistory: [initialBenchmarkMetrics]
+            });
+          }
         }
-      };
-    });
+      } catch (error) {
+        logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+          'Failed to load historical preload snapshot, starting fresh', {
+            error: error instanceof Error ? error.message : String(error),
+            simulationType: this.simulationType.id
+          });
 
-    const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, marketData, [], 0);
-    const benchmarks: Benchmark[] = [
-      {
-        id: S_P500_BENCHMARK_ID,
-        name: 'S&P 500',
-        color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID],
-        performanceHistory: [initialBenchmarkMetrics],
-        metadata: {
-          lastGspcPrice: marketData['^GSPC']?.price  // Store initial ^GSPC price
+        // Fall back to normal initialization
+        const agents = createAgentsFromConfigs(this.simulationType.traderConfigs);
+        initialAgentStates = agents.map(agent => {
+          const initialMetrics = calculateAllMetrics(agent.portfolio, marketData, [], 0);
+          return {
+            ...agent,
+            performanceHistory: [initialMetrics],
+            rationaleHistory: { 0: 'Initial state - no trades yet.' },
+            memory: {
+              recentTrades: [],
+              pastRationales: [],
+              pastPerformance: [initialMetrics],
+            }
+          };
+        });
+
+        const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, marketData, [], 0);
+        benchmarks = [
+          {
+            id: S_P500_BENCHMARK_ID,
+            name: 'S&P 500',
+            color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID],
+            performanceHistory: [initialBenchmarkMetrics],
+            metadata: {
+              lastGspcPrice: marketData['^GSPC']?.price
+            }
+          }
+        ];
+
+        if (this.simulationType.id === 'multi-model') {
+          benchmarks.push({
+            id: AI_MANAGERS_INDEX_ID,
+            name: 'AI Managers Index',
+            color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID],
+            performanceHistory: [initialBenchmarkMetrics]
+          });
         }
       }
-    ];
-
-    // Only include AI Managers Index for Wall Street Arena (multi-model) mode
-    if (this.simulationType.id === 'multi-model') {
-      benchmarks.push({
-        id: AI_MANAGERS_INDEX_ID,
-        name: 'AI Managers Index',
-        color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID],
-        performanceHistory: [initialBenchmarkMetrics]
+    } else {
+      // Normal initialization without preload
+      const agents = createAgentsFromConfigs(this.simulationType.traderConfigs);
+      initialAgentStates = agents.map(agent => {
+        const initialMetrics = calculateAllMetrics(agent.portfolio, marketData, [], 0);
+        return {
+          ...agent,
+          performanceHistory: [initialMetrics],
+          rationaleHistory: { 0: 'Initial state - no trades yet.' },
+          memory: {
+            recentTrades: [],
+            pastRationales: [],
+            pastPerformance: [initialMetrics],
+          }
+        };
       });
-    }
 
-    const mode = getSimulationMode();
+      const initialBenchmarkMetrics = calculateAllMetrics({cash: INITIAL_CASH, positions: {}}, marketData, [], 0);
+      benchmarks = [
+        {
+          id: S_P500_BENCHMARK_ID,
+          name: 'S&P 500',
+          color: BENCHMARK_COLORS[S_P500_BENCHMARK_ID],
+          performanceHistory: [initialBenchmarkMetrics],
+          metadata: {
+            lastGspcPrice: marketData['^GSPC']?.price
+          }
+        }
+      ];
+
+      if (this.simulationType.id === 'multi-model') {
+        benchmarks.push({
+          id: AI_MANAGERS_INDEX_ID,
+          name: 'AI Managers Index',
+          color: BENCHMARK_COLORS[AI_MANAGERS_INDEX_ID],
+          performanceHistory: [initialBenchmarkMetrics]
+        });
+      }
+    }
     const now = new Date();
     let startDate: string;
     let currentDate: string;
