@@ -46,11 +46,12 @@ export const formatTimestampToDate = (
       date.setHours(9 + hours, 30 + minutes, 0, 0); // Market hours start at 9:30
       return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     } else if (simulationMode === 'realtime') {
-      // For real-time mode: timestamp is a Unix timestamp (seconds since epoch)
-      // Check if it's a Unix timestamp (large number, > 1000000000) or day-based (small number)
+      // For real-time mode: timestamp is a Unix timestamp (milliseconds or seconds since epoch)
+      // Check if it's a Unix timestamp (large number) or day-based (small number)
       if (timestamp > 1000000000) {
-        // Unix timestamp (seconds) - convert directly to date
-        const date = new Date(timestamp * 1000); // Convert seconds to milliseconds
+        // Unix timestamp - detect if milliseconds (13 digits) or seconds (10 digits)
+        const timestampMs = timestamp > 10000000000 ? timestamp : timestamp * 1000;
+        const date = new Date(timestampMs);
         return date.toLocaleString('en-US', {
           month: 'short',
           day: 'numeric',
@@ -141,7 +142,9 @@ export const formatTradeTimestamp = (
   intradayHour?: number
 ): string => {
   if (simulationMode === 'realtime' && timestamp > 1000000000) {
-    const date = new Date(timestamp * 1000);
+    // Unix timestamp - detect if milliseconds (13 digits) or seconds (10 digits)
+    const timestampMs = timestamp > 10000000000 ? timestamp : timestamp * 1000;
+    const date = new Date(timestampMs);
     return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',

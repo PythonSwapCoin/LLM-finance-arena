@@ -68,6 +68,10 @@ POLYGON_API_KEY=your_key_here
 # Optional: Use 30-minute delayed data to avoid rate limits (recommended)
 USE_DELAYED_DATA=true
 DATA_DELAY_MINUTES=30
+
+# Optional: Preload historical data when starting realtime mode
+REALTIME_PRELOAD_HISTORICAL=true
+HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload  # Default snapshot ID
 ```
 
 **Data Sources (in order):**
@@ -90,6 +94,13 @@ DATA_DELAY_MINUTES=30
 MODE=historical
 # Optional: Set custom start date (must be a Monday, defaults to first week of 2025)
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
+
+# Optional: Save snapshot for preloading in realtime mode (default: true)
+SAVE_HISTORICAL_PRELOAD=true
+HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload  # Default snapshot ID
+
+# Optional: Set maximum simulation days
+MAX_SIMULATION_DAYS=5  # Simulation will stop after 5 days
 ```
 
 **What it does:**
@@ -103,6 +114,83 @@ HISTORICAL_SIMULATION_START_DATE=2025-01-06
 - Set `HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different week
 - The date will be adjusted to the nearest Monday
 - Example: `HISTORICAL_SIMULATION_START_DATE=2024-06-03` (will use June 3-7, 2024)
+
+## Historical Data Preload Feature
+
+**Use Case:** Run historical simulation first, then switch to realtime mode with the historical data already loaded.
+
+### How It Works
+
+1. **Run Historical Mode First:**
+   ```env
+   MODE=historical
+   HISTORICAL_SIMULATION_START_DATE=2025-11-10
+   MAX_SIMULATION_DAYS=5
+   SAVE_HISTORICAL_PRELOAD=true
+   ```
+
+   - The simulation will run for 5 days using historical data
+   - When complete, it automatically saves a snapshot for preloading
+   - Snapshot is saved to `./data/snapshot_historical-preload.json` (or database)
+
+2. **Switch to Realtime Mode with Preload:**
+   ```env
+   MODE=realtime
+   REALTIME_PRELOAD_HISTORICAL=true
+   HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload
+   ```
+
+   - Realtime mode loads the historical snapshot
+   - Historical data is interpolated to match realtime intervals
+   - Charts show combined historical + realtime data seamlessly
+
+### Data Interpolation
+
+The system handles different tick intervals automatically:
+
+- **Historical Mode:** Typically uses 30-minute market intervals per tick
+  - Configured via `SIM_MARKET_MINUTES_PER_TICK=30`
+
+- **Realtime Mode:** Uses actual time intervals (e.g., 10 minutes)
+  - Configured via `REALTIME_SIM_INTERVAL_MS=600000` (10 minutes)
+
+When preloading, each historical data point is expanded to match the realtime interval:
+- Example: 30-min historical tick → 3 data points at 10-min intervals (with constant values)
+
+### Gap Handling
+
+If there's a time gap between historical end and realtime start:
+
+- The system fills the gap with constant values (assumes prices stayed the same)
+- Weekends are automatically skipped (no data points added for Sat/Sun)
+- Trading day boundaries are properly maintained
+
+### Example Workflow
+
+```bash
+# Step 1: Run historical simulation for last week
+# Set MODE=historical and HISTORICAL_SIMULATION_START_DATE=2025-11-10
+npm run dev  # Frontend
+npm run dev  # Backend (in backend directory)
+
+# Wait for historical simulation to complete (shows "Historical simulation complete")
+
+# Step 2: Switch to realtime mode with preload
+# Update .env: MODE=realtime, REALTIME_PRELOAD_HISTORICAL=true
+# Restart backend server
+
+# Result: Charts show last week's data + current realtime data
+```
+
+### Configuration Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SAVE_HISTORICAL_PRELOAD` | `true` | Save snapshot when historical mode completes |
+| `REALTIME_PRELOAD_HISTORICAL` | `false` | Load historical data when realtime mode starts |
+| `HISTORICAL_PRELOAD_SNAPSHOT_ID` | `historical-preload` | Snapshot ID for preload data |
+| `SIM_MARKET_MINUTES_PER_TICK` | `30` | Market minutes per tick in historical mode |
+| `REALTIME_SIM_INTERVAL_MS` | `600000` | Tick interval in realtime mode (10 minutes) |
 
 ## Important Notes
 
