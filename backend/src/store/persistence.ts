@@ -1,10 +1,11 @@
 import type { SimulationSnapshot } from '../types.js';
 import { promises as fs } from 'fs';
 import { dirname, isAbsolute, resolve } from 'path';
-import pg, { Pool } from 'pg';
+import pg from 'pg';
+import type { Pool } from 'pg';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 
-const { Pool } = pg;
+const { Pool: PgPool } = pg;
 
 const DEFAULT_PERSIST_PATH = './data/snapshot.json';
 const DEFAULT_NAMESPACE = 'default';
@@ -161,7 +162,7 @@ class PostgresAdapter {
     const connectionString = getPostgresConnectionString();
     const useSSL = shouldUsePostgresSSL();
 
-    this.pool = new Pool({
+    this.pool = new PgPool({
       connectionString,
       ssl: useSSL ? { rejectUnauthorized: false } : undefined,
     });
