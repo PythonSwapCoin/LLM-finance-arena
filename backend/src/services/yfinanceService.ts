@@ -76,7 +76,7 @@ export class Ticker {
         headers: {
           'Accept': 'application/json',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (!response.ok) {
@@ -165,7 +165,7 @@ export class Ticker {
         headers: {
           'Accept': 'application/json',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (!response.ok) {
@@ -222,7 +222,7 @@ export class Ticker {
         headers: {
           'Accept': 'application/json',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (!response.ok) {
