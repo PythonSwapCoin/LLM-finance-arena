@@ -300,14 +300,11 @@ These options make it easier to stay within OpenRouter ticket limits or rate lim
 The backend supports two persistence drivers controlled by `PERSISTENCE_DRIVER`:
 
 - `file` (default): Persists snapshots to a JSON document on disk. Point `PERSIST_PATH` at a mounted volume in production.
-- `postgres`: Stores the latest snapshot and a history of every intraday save to Render Postgres (or any compatible Postgres instance).
+- `postgres`: Stores the latest snapshot to Render Postgres (or any compatible Postgres instance). Historical writes have been disabled to reduce database churn, but the legacy table remains available if you previously used it.
 
 Regardless of driver, the engine flushes state to storage after every price tick, trade window, day advancement, and the autosave interval (`SNAPSHOT_AUTOSAVE_INTERVAL_MS`, default 15 minutes).
 
-When Postgres is enabled, two tables are created automatically:
-
-- `simulation_snapshots` – Keeps the most recent snapshot per namespace, allowing instant recovery after restarts.
-- `simulation_snapshot_history` – Appends/updates one row per `(namespace, day, intraday_hour, mode)` so you can reconstruct multi-day seasons or run analytics later.
+When Postgres is enabled, the service maintains the `simulation_snapshots` table, keeping the most recent snapshot per namespace so the engine can resume instantly after restarts. The `simulation_snapshot_history` table is no longer written to by default, but existing deployments can continue to query any data already stored there.
 
 Startup behavior:
 
