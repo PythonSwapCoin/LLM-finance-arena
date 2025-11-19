@@ -1,7 +1,7 @@
 import type { SimulationSnapshot } from '../types.js';
 import { promises as fs } from 'fs';
 import { dirname, isAbsolute, resolve } from 'path';
-import pg from 'pg';
+import pg, { Pool } from 'pg';
 import { logger, LogLevel, LogCategory } from '../services/logger.js';
 
 const { Pool } = pg;
@@ -142,7 +142,7 @@ const shouldUsePostgresSSL = (): boolean => {
 };
 
 class PostgresAdapter {
-  private pool: any;
+  private pool: Pool;
   private initializationPromise: Promise<void> | null = null;
   private namespace: string;
   private snapshotId: string;
