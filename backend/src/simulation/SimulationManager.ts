@@ -352,7 +352,7 @@ class SimulationInstance {
 
     logger.logSimulationEvent('Simulation instance initialized', {
       simulationType: this.simulationType.id,
-      agentCount: agents.length,
+      agentCount: initialAgentStates.length,
       chatEnabled: this.simulationType.chatEnabled,
     });
   }
