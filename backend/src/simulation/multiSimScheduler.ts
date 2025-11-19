@@ -451,8 +451,8 @@ export const startMultiSimScheduler = async (): Promise<void> => {
       // Update intraday hour for simulated/historical mode
       // Hybrid mode before transition: uses accelerated logic
       // Hybrid mode after transition: behaves like realtime (skips this block)
-      const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
-      if (!isRealtimeMode) {
+      const isRealtimeModeForTicks = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+      if (!isRealtimeModeForTicks) {
         // Check if market is closed (weekend/holiday) in simulated mode
         const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
         const dateObj = new Date(currentDate);
@@ -639,11 +639,11 @@ export const startMultiSimScheduler = async (): Promise<void> => {
   };
 
   // Trade window handler
-  const tradeWindowHandler = async () => {
-    try {
-      // Check market status for realtime mode and hybrid mode (after transition)
-      const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
-      if (isRealtimeMode) {
+    const tradeWindowHandler = async () => {
+      try {
+        // Check market status for realtime mode and hybrid mode (after transition)
+        const isRealtimeModeForTrades = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+        if (isRealtimeModeForTrades) {
         const now = new Date();
         const isOpen = checkMarketOpen(now);
         if (!isOpen) {
@@ -719,8 +719,8 @@ export const startMultiSimScheduler = async (): Promise<void> => {
 
   // Start intervals
   // Use realtime loop for realtime mode OR hybrid mode after transition
-  const isRealtimeMode = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
-  if (isRealtimeMode) {
+    const isRealtimeModeForScheduler = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+    if (isRealtimeModeForScheduler) {
     // Real-time mode with prefetching
     realtimeLoopAbortController = { stop: false };
     const abortController = realtimeLoopAbortController;
