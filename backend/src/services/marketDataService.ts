@@ -292,6 +292,18 @@ export const getHistoricalSimulationStartDate = (): Date => {
 };
 
 export const isHistoricalSimulationComplete = (simulationDay?: number): boolean => {
+  // Only enforce the max historical day limit when we're actually running
+  // a historical/simulated flow. In realtime mode (or hybrid after the
+  // realtime transition) the scheduler should continue indefinitely.
+  const enforceHistoricalLimit =
+    MODE === 'historical' ||
+    MODE === 'simulated' ||
+    (MODE === 'hybrid' && !hybridModeHasTransitioned);
+
+  if (!enforceHistoricalLimit) {
+    return false;
+  }
+
   // Check if there's a configured max simulation day
   const maxSimulationDay = process.env.MAX_SIMULATION_DAYS
     ? parseInt(process.env.MAX_SIMULATION_DAYS, 10) - 1  // Convert to 0-indexed day

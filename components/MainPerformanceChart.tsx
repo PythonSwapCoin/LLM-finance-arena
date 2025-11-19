@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import type { Agent, Benchmark } from '../types';
 import { INITIAL_CASH } from '../constants';
 import { formatTimestampToDate } from '../utils/timeFormatting';
+import { getTradingDateFromStart } from '../shared/tradingDays';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
 import { addTradingDays, getNextTradingDay, isWeekend } from '../utils/tradingDays';
 
@@ -192,10 +193,9 @@ const getDateFromTimestamp = (
     if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
       return new Date(timestamp * 1000);
     } else if (startDate) {
-      const start = new Date(startDate);
       if (simulationMode === 'historical' || simulationMode === 'simulated') {
         const daysToAdd = Math.floor(timestamp);
-        const date = addTradingDays(start, daysToAdd);
+        const date = getTradingDateFromStart(startDate, daysToAdd);
         const hourDecimal = timestamp - daysToAdd;
         const hours = Math.floor(hourDecimal * 10);
         const minutes = Math.round((hourDecimal * 10 - hours) * 60);
@@ -552,8 +552,7 @@ const formatXAxisLabel = (
       // Show date label at the beginning of each day
       if (isNewDay && isMarketOpen) {
         if (startDate) {
-          const baseDate = new Date(startDate);
-          const simulatedDate = addTradingDays(baseDate, dayNum);
+          const simulatedDate = getTradingDateFromStart(startDate, dayNum);
           simulatedDate.setHours(9, 30, 0, 0);
           
           const dateStr = simulatedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -585,8 +584,7 @@ const formatXAxisLabel = (
         // Show label if it's a day we want to show, or if it's first/last point
         if (dayNum % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
           if (startDate) {
-            const baseDate = new Date(startDate);
-            const simulatedDate = addTradingDays(baseDate, dayNum);
+            const simulatedDate = getTradingDateFromStart(startDate, dayNum);
             simulatedDate.setHours(9, 30, 0, 0);
             
             const day = simulatedDate.getDate();
@@ -608,8 +606,7 @@ const formatXAxisLabel = (
     if (isNewDay && isMarketOpen) {
       if (startDate) {
         // Calculate the actual date from startDate
-        const baseDate = new Date(startDate);
-        const simulatedDate = addTradingDays(baseDate, dayNum);
+        const simulatedDate = getTradingDateFromStart(startDate, dayNum);
         simulatedDate.setHours(9, 30, 0, 0);
         
         // Format as "06/Jan" style
@@ -662,9 +659,8 @@ const formatXAxisLabel = (
     if (isNewDay && isMarketOpen) {
       // For historical mode, use startDate to show the actual historical date
       if (simulationMode === 'historical' && startDate) {
-        const start = new Date(startDate);
         const daysToAdd = Math.floor(timestamp);
-        const histDate = addTradingDays(start, daysToAdd);
+        const histDate = getTradingDateFromStart(startDate, daysToAdd);
         const dateStr = histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
         return `${dateStr} ${timeStr}`;
@@ -693,9 +689,8 @@ const formatXAxisLabel = (
       // Show label if it's a day we want to show, or if it's first/last point
       if (dayNumber % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
         if (simulationMode === 'historical' && startDate) {
-          const start = new Date(startDate);
           const daysToAdd = Math.floor(timestamp);
-          const histDate = addTradingDays(start, daysToAdd);
+          const histDate = getTradingDateFromStart(startDate, daysToAdd);
           return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -710,9 +705,8 @@ const formatXAxisLabel = (
   if (isNewDay && isMarketOpen) {
     // For historical mode, use startDate to show the actual historical date
     if (simulationMode === 'historical' && startDate) {
-      const start = new Date(startDate);
       const daysToAdd = Math.floor(timestamp);
-      const histDate = addTradingDays(start, daysToAdd);
+      const histDate = getTradingDateFromStart(startDate, daysToAdd);
       return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
