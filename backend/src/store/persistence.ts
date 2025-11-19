@@ -12,6 +12,14 @@ const DEFAULT_SNAPSHOT_ID = 'current';
 
 export type PersistenceDriver = 'file' | 'postgres';
 
+export type HistoryCleanupResult = {
+  tableExisted: boolean;
+  deletedRows: number;
+  sizeBeforeBytes?: number;
+  sizeAfterBytes?: number;
+  freedBytes?: number;
+};
+
 let cachedDriver: PersistenceDriver | null = null;
 
 const determineDriver = (): PersistenceDriver => {
@@ -176,23 +184,7 @@ class PostgresAdapter {
     `);
 
     await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS simulation_snapshot_history (
-        namespace TEXT NOT NULL,
-        day INTEGER NOT NULL,
-        intraday_hour INTEGER NOT NULL,
-        mode TEXT NOT NULL,
-        snapshot JSONB NOT NULL,
-        recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (namespace, day, intraday_hour, mode)
-      )
-    `);
-
-    await this.pool.query(`
       CREATE INDEX IF NOT EXISTS idx_sim_snapshots_namespace ON simulation_snapshots(namespace)
-    `);
-
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_sim_snapshots_history_namespace ON simulation_snapshot_history(namespace)
     `);
 
     if (!this.hasLoggedInitialization) {
@@ -293,21 +285,6 @@ class PostgresAdapter {
         ]
       );
 
-      await this.pool.query(
-        `INSERT INTO simulation_snapshot_history(namespace, day, intraday_hour, mode, snapshot, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())
-         ON CONFLICT (namespace, day, intraday_hour, mode)
-          DO UPDATE SET snapshot = EXCLUDED.snapshot,
-           recorded_at = NOW()`
-        , [
-          this.namespace,
-          snapshot.day,
-          intradayKey,
-          snapshot.mode,
-          snapshot,
-        ]
-      );
-
       // Only log snapshot saves on day changes or errors (reduce noise)
       // (Logging removed to reduce terminal noise - errors still logged below)
     } catch (error) {
@@ -329,13 +306,6 @@ class PostgresAdapter {
         `DELETE FROM simulation_snapshots WHERE namespace = $1 AND snapshot_id = $2`,
         [this.namespace, snapshotId]
       );
-      // Only clear history if clearing default snapshot (for backward compatibility)
-      if (!customSnapshotId) {
-        await this.pool.query(
-          `DELETE FROM simulation_snapshot_history WHERE namespace = $1`,
-          [this.namespace]
-        );
-      }
       logger.logSimulationEvent('Cleared Postgres snapshot data', {
         driver: 'postgres',
         namespace: this.namespace,
@@ -344,6 +314,66 @@ class PostgresAdapter {
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
         'Failed to clear Postgres snapshot data', {
+          driver: 'postgres',
+          namespace: this.namespace,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
+
+  async cleanupHistoryTable(): Promise<HistoryCleanupResult> {
+    await this.ensureInitialized();
+
+    try {
+      const existence = await this.pool.query<{ oid: string | null }>(
+        `SELECT to_regclass('simulation_snapshot_history') AS oid`
+      );
+
+      const exists = Boolean(existence.rows[0]?.oid);
+      if (!exists) {
+        return { tableExisted: false, deletedRows: 0 };
+      }
+
+      const preMetrics = await this.pool.query<{
+        size_bytes: string;
+        row_count: string;
+      }>(
+        `SELECT pg_total_relation_size('simulation_snapshot_history') AS size_bytes,
+                COUNT(*)::bigint AS row_count
+         FROM simulation_snapshot_history`
+      );
+
+      const sizeBeforeBytes = Number(preMetrics.rows[0]?.size_bytes || 0);
+      const rowCountBefore = Number(preMetrics.rows[0]?.row_count || 0);
+
+      const deletion = await this.pool.query('DELETE FROM simulation_snapshot_history');
+      const deletedRows = deletion.rowCount ?? rowCountBefore;
+
+      const postMetrics = await this.pool.query<{ size_bytes: string }>(
+        `SELECT pg_total_relation_size('simulation_snapshot_history') AS size_bytes`
+      );
+
+      const sizeAfterBytes = Number(postMetrics.rows[0]?.size_bytes || 0);
+      const freedBytes = Math.max(sizeBeforeBytes - sizeAfterBytes, 0);
+
+      logger.logSimulationEvent('Cleared Postgres snapshot history', {
+        driver: 'postgres',
+        namespace: this.namespace,
+        deletedRows,
+        freedBytes,
+      });
+
+      return {
+        tableExisted: true,
+        deletedRows,
+        sizeBeforeBytes,
+        sizeAfterBytes,
+        freedBytes,
+      };
+    } catch (error) {
+      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+        'Failed to clean Postgres snapshot history', {
           driver: 'postgres',
           namespace: this.namespace,
           error: error instanceof Error ? error.message : String(error)
@@ -442,6 +472,15 @@ export const saveSnapshot = async (snapshot: SimulationSnapshot, snapshotId?: st
     return;
   }
   return saveSnapshotToFile(snapshot);
+};
+
+export const cleanupHistorySnapshots = async (): Promise<HistoryCleanupResult> => {
+  if (getPersistenceDriver() !== 'postgres') {
+    throw new Error('History cleanup is only available for Postgres persistence');
+  }
+
+  const adapter = getPostgresAdapter();
+  return adapter.cleanupHistoryTable();
 };
 
 export const clearSnapshot = async (snapshotId?: string): Promise<void> => {

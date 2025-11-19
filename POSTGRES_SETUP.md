@@ -5,7 +5,9 @@ This guide walks through provisioning a Postgres database on Render and wiring i
 ## Why move to Postgres?
 
 - **Resilience:** Snapshots are stored outside the backend container, so restarts or redeploys pick up exactly where the engine left off.
-- **History:** Every intraday save is archived in `simulation_snapshot_history`, enabling analytics across multiple trading days without replaying prior sessions.
+- **History:** Legacy deployments can continue to read from `simulation_snapshot_history`, but new saves only target `simulation_snapshots`, reducing write volume by roughly 95% while keeping realtime + preload flows intact.
+
+  - **Cleanup:** If an existing deployment has accumulated old rows in `simulation_snapshot_history`, you can clear them without touching the current state by calling `POST /api/database/cleanup-history`. The endpoint reports rows removed and bytes freed so you can reclaim storage safely.
 - **Shared storage:** Multiple backend instances (preview vs. production) can point at isolated namespaces inside the same database.
 
 ## Prerequisites
@@ -44,7 +46,7 @@ This guide walks through provisioning a Postgres database on Render and wiring i
 During startup the backend will:
 
 - Establish a connection to Postgres using the provided URL.
-- Create/verify two tables (`simulation_snapshots`, `simulation_snapshot_history`).
+- Create/verify the `simulation_snapshots` table (the legacy `simulation_snapshot_history` table is no longer written to).
 - Load the most recent snapshot for the configured namespace.
 
 Logs will confirm the connection and highlight any migration issues. Errors typically stem from invalid credentials or blocked SSL settings.
@@ -60,10 +62,7 @@ Logs will confirm the connection and highlight any migration issues. Errors typi
 2. Trigger a price tick (wait for the scheduler or use the UI). A follow-up log should read `Snapshot saved to persistence` with `driver: postgres`.
 3. Restart the Render service. When it comes back online, `/api/simulation/state` should immediately return the previous snapshot instead of starting from day 0.
 
-4. Optional: Inspect the tables directly using Render’s **Connect** tab or any Postgres client. You should see rows in:
-
-   - `simulation_snapshots` – single row per namespace containing the latest JSON snapshot.
-   - `simulation_snapshot_history` – one row per `(namespace, day, intraday_hour, mode)`.
+4. Optional: Inspect the tables directly using Render’s **Connect** tab or any Postgres client. You should see rows in `simulation_snapshots` — a single row per namespace containing the latest JSON snapshot. The historical table remains available for legacy analytics but is no longer updated by the service.
 
 ## Local Development with Postgres
 
@@ -88,7 +87,7 @@ You can also test Postgres persistence locally:
 - **From the UI / API:** `POST /api/simulation/reset` clears the active persistence target (file or Postgres) and restarts the season.
 - **Manual cleanup:**
   - File driver – delete the snapshot path defined by `PERSIST_PATH`.
-  - Postgres driver – run `DELETE FROM simulation_snapshots WHERE namespace = '<name>'; DELETE FROM simulation_snapshot_history WHERE namespace = '<name>';`.
+  - Postgres driver – run `DELETE FROM simulation_snapshots WHERE namespace = '<name>';`.
 
 ## Troubleshooting
 

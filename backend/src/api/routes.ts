@@ -18,6 +18,7 @@ import {
   getPersistenceTargetDescription,
   clearSnapshot,
   saveSnapshot,
+  cleanupHistorySnapshots,
 } from '../store/persistence.js';
 import type {
   SimulationStateResponse,
@@ -238,9 +239,43 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
       };
     } catch (error) {
       reply.code(500);
-      return { 
-        ok: false, 
-        error: error instanceof Error ? error.message : String(error) 
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  });
+
+  fastify.post('/api/database/cleanup-history', async (request, reply) => {
+    try {
+      if (getPersistenceDriver() !== 'postgres') {
+        reply.code(400);
+        return {
+          ok: false,
+          message: 'History cleanup is only available when using Postgres persistence',
+        };
+      }
+
+      const persistenceTarget = getPersistenceTargetDescription();
+      const result = await cleanupHistorySnapshots();
+
+      return {
+        ok: true,
+        persistenceTarget,
+        tableExisted: result.tableExisted,
+        deletedRows: result.deletedRows,
+        sizeBeforeBytes: result.sizeBeforeBytes,
+        sizeAfterBytes: result.sizeAfterBytes,
+        freedBytes: result.freedBytes,
+        message: result.tableExisted
+          ? 'simulation_snapshot_history cleared successfully'
+          : 'History table not found; nothing to clean',
+      };
+    } catch (error) {
+      reply.code(500);
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
       };
     }
   });
