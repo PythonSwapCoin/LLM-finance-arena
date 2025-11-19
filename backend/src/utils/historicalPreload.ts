@@ -7,7 +7,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
  */
 
 export interface HistoricalPreloadMetadata {
-  mode: 'historical';
+  mode: 'historical' | 'realtime' | 'hybrid';
   startDate: string; // ISO date string
   endDate: string; // ISO date string
   endDay: number;
@@ -16,6 +16,14 @@ export interface HistoricalPreloadMetadata {
   marketMinutesPerTick: number; // SIM_MARKET_MINUTES_PER_TICK used in historical mode
   realtimeTickIntervalMs: number; // REALTIME_SIM_INTERVAL_MS for target interpolation
 }
+
+export const getHistoricalPreloadSnapshotId = (simulationTypeId?: string): string => {
+  const baseId = process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'historical-preload';
+  if (!simulationTypeId) {
+    return baseId;
+  }
+  return `${baseId}-${simulationTypeId}`;
+};
 
 /**
  * Convert a historical day number to an actual timestamp (milliseconds)
@@ -241,14 +249,18 @@ export const prepareAgentsForRealtimePreload = (
   metadata: HistoricalPreloadMetadata,
   realtimeStartDate: string
 ): Agent[] => {
+  const isHistoricalSource = metadata.mode === 'historical' || metadata.mode === 'hybrid';
+
   return historicalAgents.map(agent => {
     // Interpolate performance history
-    let interpolated = interpolatePerformanceHistory(
-      agent.performanceHistory,
-      metadata.startDate,
-      metadata.marketMinutesPerTick,
-      metadata.realtimeTickIntervalMs
-    );
+    let interpolated = isHistoricalSource
+      ? interpolatePerformanceHistory(
+        agent.performanceHistory,
+        metadata.startDate,
+        metadata.marketMinutesPerTick,
+        metadata.realtimeTickIntervalMs
+      )
+      : agent.performanceHistory;
 
     // Fill gap between historical end and realtime start
     if (interpolated.length > 0) {
@@ -263,10 +275,12 @@ export const prepareAgentsForRealtimePreload = (
     }
 
     // Convert trade history timestamps
-    const convertedTrades = agent.tradeHistory.map(trade => ({
-      ...trade,
-      timestamp: convertHistoricalTimestampToRealtime(trade.timestamp, metadata.startDate)
-    }));
+    const convertedTrades = isHistoricalSource
+      ? agent.tradeHistory.map(trade => ({
+        ...trade,
+        timestamp: convertHistoricalTimestampToRealtime(trade.timestamp, metadata.startDate)
+      }))
+      : agent.tradeHistory;
 
     // Update memory with interpolated performance
     const memory = agent.memory ? {
@@ -296,14 +310,18 @@ export const prepareBenchmarksForRealtimePreload = (
   metadata: HistoricalPreloadMetadata,
   realtimeStartDate: string
 ): Benchmark[] => {
+  const isHistoricalSource = metadata.mode === 'historical' || metadata.mode === 'hybrid';
+
   return historicalBenchmarks.map(benchmark => {
     // Interpolate performance history
-    let interpolated = interpolatePerformanceHistory(
-      benchmark.performanceHistory,
-      metadata.startDate,
-      metadata.marketMinutesPerTick,
-      metadata.realtimeTickIntervalMs
-    );
+    let interpolated = isHistoricalSource
+      ? interpolatePerformanceHistory(
+        benchmark.performanceHistory,
+        metadata.startDate,
+        metadata.marketMinutesPerTick,
+        metadata.realtimeTickIntervalMs
+      )
+      : benchmark.performanceHistory;
 
     // Fill gap between historical end and realtime start
     if (interpolated.length > 0) {
