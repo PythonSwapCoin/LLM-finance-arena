@@ -4,6 +4,7 @@ import type { Agent, Benchmark } from '../types';
 import { INITIAL_CASH } from '../constants';
 import { formatTimestampToDate } from '../utils/timeFormatting';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
+import { addTradingDays, getNextTradingDay, isWeekend } from '../utils/tradingDays';
 
 type Participant = Agent | Benchmark;
 
@@ -180,47 +181,6 @@ const isWithinMarketHours = (
   }
 };
 
-// Helper function to check if a date is a weekend (Saturday = 6, Sunday = 0)
-const isWeekend = (date: Date, timeZone?: string): boolean => {
-  try {
-    if (timeZone) {
-      // Get day of week in the specified timezone by formatting and parsing
-      // Use a formatter to get the weekday name, then check if it's Saturday or Sunday
-      const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        weekday: 'long'
-      });
-      const weekday = formatter.format(date).toLowerCase();
-      return weekday === 'saturday' || weekday === 'sunday';
-    } else {
-      // Use UTC day of week (0 = Sunday, 6 = Saturday)
-      const dayOfWeek = date.getUTCDay();
-      return dayOfWeek === 0 || dayOfWeek === 6;
-    }
-  } catch {
-    // Fallback: use UTC
-    const dayOfWeek = date.getUTCDay();
-    return dayOfWeek === 0 || dayOfWeek === 6;
-  }
-};
-
-// Helper function to get the next trading day (skip weekends)
-const getNextTradingDay = (date: Date, timeZone?: string): Date => {
-  const nextDay = new Date(date);
-  let daysToAdd = 1;
-  
-  // Keep adding days until we find a weekday
-  while (true) {
-    nextDay.setTime(date.getTime() + (daysToAdd * 24 * 60 * 60 * 1000));
-    if (!isWeekend(nextDay, timeZone)) {
-      break;
-    }
-    daysToAdd++;
-  }
-  
-  return nextDay;
-};
-
 // Helper function to get date from timestamp
 const getDateFromTimestamp = (
   timestamp: number,
@@ -235,8 +195,7 @@ const getDateFromTimestamp = (
       const start = new Date(startDate);
       if (simulationMode === 'historical' || simulationMode === 'simulated') {
         const daysToAdd = Math.floor(timestamp);
-        const date = new Date(start);
-        date.setDate(start.getDate() + daysToAdd);
+        const date = addTradingDays(start, daysToAdd);
         const hourDecimal = timestamp - daysToAdd;
         const hours = Math.floor(hourDecimal * 10);
         const minutes = Math.round((hourDecimal * 10 - hours) * 60);
@@ -594,8 +553,7 @@ const formatXAxisLabel = (
       if (isNewDay && isMarketOpen) {
         if (startDate) {
           const baseDate = new Date(startDate);
-          const simulatedDate = new Date(baseDate);
-          simulatedDate.setDate(baseDate.getDate() + dayNum);
+          const simulatedDate = addTradingDays(baseDate, dayNum);
           simulatedDate.setHours(9, 30, 0, 0);
           
           const dateStr = simulatedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -628,8 +586,7 @@ const formatXAxisLabel = (
         if (dayNum % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
           if (startDate) {
             const baseDate = new Date(startDate);
-            const simulatedDate = new Date(baseDate);
-            simulatedDate.setDate(baseDate.getDate() + dayNum);
+            const simulatedDate = addTradingDays(baseDate, dayNum);
             simulatedDate.setHours(9, 30, 0, 0);
             
             const day = simulatedDate.getDate();
@@ -652,8 +609,7 @@ const formatXAxisLabel = (
       if (startDate) {
         // Calculate the actual date from startDate
         const baseDate = new Date(startDate);
-        const simulatedDate = new Date(baseDate);
-        simulatedDate.setDate(baseDate.getDate() + dayNum);
+        const simulatedDate = addTradingDays(baseDate, dayNum);
         simulatedDate.setHours(9, 30, 0, 0);
         
         // Format as "06/Jan" style
@@ -708,8 +664,7 @@ const formatXAxisLabel = (
       if (simulationMode === 'historical' && startDate) {
         const start = new Date(startDate);
         const daysToAdd = Math.floor(timestamp);
-        const histDate = new Date(start);
-        histDate.setDate(start.getDate() + daysToAdd);
+        const histDate = addTradingDays(start, daysToAdd);
         const dateStr = histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
         return `${dateStr} ${timeStr}`;
@@ -740,8 +695,7 @@ const formatXAxisLabel = (
         if (simulationMode === 'historical' && startDate) {
           const start = new Date(startDate);
           const daysToAdd = Math.floor(timestamp);
-          const histDate = new Date(start);
-          histDate.setDate(start.getDate() + daysToAdd);
+          const histDate = addTradingDays(start, daysToAdd);
           return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -758,8 +712,7 @@ const formatXAxisLabel = (
     if (simulationMode === 'historical' && startDate) {
       const start = new Date(startDate);
       const daysToAdd = Math.floor(timestamp);
-      const histDate = new Date(start);
-      histDate.setDate(start.getDate() + daysToAdd);
+      const histDate = addTradingDays(start, daysToAdd);
       return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

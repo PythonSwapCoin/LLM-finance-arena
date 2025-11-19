@@ -1,3 +1,5 @@
+import { addTradingDays } from './tradingDays';
+
 export type SimulationMode = 'simulated' | 'realtime' | 'historical';
 
 const formatSimulatedIntradayTime = (hours: number, minutes: number): string => {
@@ -33,8 +35,7 @@ export const formatTimestampToDate = (
     if (simulationMode === 'historical') {
       // For historical: use actual historical dates
       const daysToAdd = Math.floor(timestamp);
-      const date = new Date(start);
-      date.setDate(start.getDate() + daysToAdd);
+      const date = addTradingDays(start, daysToAdd);
 
       const hourDecimal = timestamp - daysToAdd;
       const hours = Math.floor(hourDecimal * 10);
@@ -72,8 +73,7 @@ export const formatTimestampToDate = (
       }
       // Fallback
       const daysToAdd = Math.floor(timestamp);
-      const date = new Date(start);
-      date.setDate(start.getDate() + daysToAdd);
+      const date = addTradingDays(start, daysToAdd);
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     } else {
       // Simulated: use startDate to calculate actual dates, format as "06/Jan"
@@ -85,8 +85,7 @@ export const formatTimestampToDate = (
       // Calculate the actual date from startDate
       if (startDate) {
         const baseDate = new Date(startDate);
-        const simulatedDate = new Date(baseDate);
-        simulatedDate.setDate(baseDate.getDate() + daysToAdd);
+        const simulatedDate = addTradingDays(baseDate, daysToAdd);
         simulatedDate.setHours(9 + hours, 30 + minutes, 0, 0);
 
         // Format as "06/Jan" style
@@ -170,8 +169,7 @@ export const formatTradeTimestamp = (
   const minutes = Math.round((hourDecimal * 10 - hours) * 60);
 
   if (startDate) {
-    const baseDate = new Date(startDate);
-    baseDate.setDate(baseDate.getDate() + dayIndex);
+    const baseDate = addTradingDays(new Date(startDate), dayIndex);
     baseDate.setHours(9 + hours, 30 + minutes, 0, 0);
     const dateLabel = baseDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const timeLabel = baseDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });

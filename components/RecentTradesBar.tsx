@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { Agent, Trade } from '../types';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
+import { addTradingDays } from '../utils/tradingDays';
 
 interface TradeWithAgent extends Trade {
   agentName: string;
@@ -42,9 +43,8 @@ const getTimeAgo = (
       const hourDecimal = tradeTimestamp - dayNum;
       const hours = Math.floor(hourDecimal * 10);
       const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-      
-      tradeDate = new Date(start);
-      tradeDate.setDate(start.getDate() + dayNum);
+
+      tradeDate = addTradingDays(start, dayNum);
       tradeDate.setHours(9 + hours, 30 + minutes, 0, 0);
 
       // Calculate current time
