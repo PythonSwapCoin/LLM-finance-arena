@@ -7,6 +7,7 @@ import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { priceLogService } from '../services/priceLogService.js';
 import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
+import { getHistoricalPreloadSnapshotId } from '../utils/historicalPreload.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -65,6 +66,7 @@ const getFirstTradeHour = (): number => {
 };
 
 const EXPORT_INTERVAL_MS = parseInt(process.env.EXPORT_INTERVAL_MS || '86400000', 10); // 24 hours default
+const HISTORICAL_PRELOAD_SAVE_INTERVAL_MS = 5 * 60 * 60 * 1000; // 5 hours
 
 let priceTickInterval: NodeJS.Timeout | null = null;
 let tradeWindowInterval: NodeJS.Timeout | null = null;
@@ -75,6 +77,85 @@ let isRunning = false;
 let lastExportDay = -1;
 let lastMarketDay: Date | null = null; // Track last market day for real-time mode
 let firstTradeExecuted = false; // Track if first trade has been executed
+let lastHistoricalPreloadSaveTime: number | null = null;
+
+const shouldSaveHistoricalPreloadSnapshot = (mode: string): boolean => {
+  if (process.env.SAVE_HISTORICAL_PRELOAD === 'false') {
+    return false;
+  }
+  if (mode === 'historical' || mode === 'realtime') {
+    return true;
+  }
+  if (mode === 'hybrid') {
+    return hasHybridModeTransitioned();
+  }
+  return false;
+};
+
+const saveHistoricalPreloadSnapshot = async (
+  snapshot: ReturnType<typeof simulationState.getSnapshot>,
+  mode: string,
+  reason: string,
+  simulationTypeId?: string
+): Promise<void> => {
+  const preloadSnapshotId = getHistoricalPreloadSnapshotId(simulationTypeId);
+  const realtimeTickIntervalMs = parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10);
+  const historicalTickIntervalMs = parseInt(process.env.SIM_INTERVAL_MS || '30000', 10);
+  const metadataMode = mode === 'hybrid' && hasHybridModeTransitioned() ? 'hybrid' : mode;
+
+  logger.logSimulationEvent('Saving historical preload snapshot', {
+    snapshotId: preloadSnapshotId,
+    day: snapshot.day,
+    intradayHour: snapshot.intradayHour,
+    reason,
+    mode: metadataMode
+  });
+
+  const preloadSnapshot = {
+    ...snapshot,
+    historicalPreloadMetadata: {
+      mode: metadataMode,
+      startDate: snapshot.startDate || snapshot.currentDate || new Date().toISOString(),
+      endDate: snapshot.currentDate || new Date().toISOString(),
+      endDay: snapshot.day,
+      endIntradayHour: snapshot.intradayHour,
+      tickIntervalMs: metadataMode === 'historical' ? historicalTickIntervalMs : realtimeTickIntervalMs,
+      marketMinutesPerTick: parseInt(process.env.SIM_MARKET_MINUTES_PER_TICK || '30', 10),
+      realtimeTickIntervalMs
+    }
+  };
+
+  await saveSnapshot(preloadSnapshot, preloadSnapshotId);
+
+  logger.logSimulationEvent('Historical preload snapshot saved', {
+    snapshotId: preloadSnapshotId,
+    mode: metadataMode,
+    reason
+  });
+};
+
+const maybeSaveRealtimeHistoricalPreload = async (
+  snapshot: ReturnType<typeof simulationState.getSnapshot>,
+  mode: string,
+  timestamp: number | undefined
+): Promise<void> => {
+  if (!shouldSaveHistoricalPreloadSnapshot(mode)) {
+    return;
+  }
+
+  const currentTime = Number.isFinite(timestamp) ? Number(timestamp) : Date.now();
+  if (lastHistoricalPreloadSaveTime && currentTime - lastHistoricalPreloadSaveTime < HISTORICAL_PRELOAD_SAVE_INTERVAL_MS) {
+    return;
+  }
+
+  try {
+    await saveHistoricalPreloadSnapshot(snapshot, mode, 'periodic-realtime');
+    lastHistoricalPreloadSaveTime = currentTime;
+  } catch (err) {
+    logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+      'Failed to save realtime historical preload snapshot', { error: err });
+  }
+};
 
 export const startScheduler = async (): Promise<void> => {
   if (isRunning) {
@@ -83,6 +164,7 @@ export const startScheduler = async (): Promise<void> => {
   }
 
   isRunning = true;
+  lastHistoricalPreloadSaveTime = null;
   const simInterval = getSimInterval();
   const tradeInterval = getTradeInterval();
   const mode = getSimulationMode();
@@ -109,37 +191,9 @@ export const startScheduler = async (): Promise<void> => {
         });
 
         // Save historical preload data if enabled
-        const shouldSavePreload = process.env.SAVE_HISTORICAL_PRELOAD !== 'false';
-        if (shouldSavePreload && snapshot.mode === 'historical') {
+        if (shouldSaveHistoricalPreloadSnapshot(snapshot.mode)) {
           try {
-            const preloadSnapshotId = process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'historical-preload';
-
-            logger.logSimulationEvent('Saving historical preload snapshot', {
-              snapshotId: preloadSnapshotId,
-              day: snapshot.day,
-              intradayHour: snapshot.intradayHour
-            });
-
-            // Create metadata for the preload snapshot
-            const preloadSnapshot = {
-              ...snapshot,
-              historicalPreloadMetadata: {
-                mode: 'historical' as const,
-                startDate: snapshot.startDate || new Date().toISOString(),
-                endDate: snapshot.currentDate || new Date().toISOString(),
-                endDay: snapshot.day,
-                endIntradayHour: snapshot.intradayHour,
-                tickIntervalMs: parseInt(process.env.SIM_INTERVAL_MS || '30000', 10),
-                marketMinutesPerTick: parseInt(process.env.SIM_MARKET_MINUTES_PER_TICK || '30', 10),
-                realtimeTickIntervalMs: parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10)
-              }
-            };
-
-            await saveSnapshot(preloadSnapshot, preloadSnapshotId);
-
-            logger.logSimulationEvent('Historical preload snapshot saved', {
-              snapshotId: preloadSnapshotId
-            });
+            await saveHistoricalPreloadSnapshot(snapshot, snapshot.mode, 'final-historical');
           } catch (err) {
             logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to save historical preload snapshot', { error: err });
@@ -438,11 +492,13 @@ export const startScheduler = async (): Promise<void> => {
         
         // Persist after price tick
         await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-          logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+          logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
             'Failed to persist snapshot after price tick', { error: err });
         });
-        
-        logger.log(LogLevel.INFO, LogCategory.SIMULATION, 
+
+        await maybeSaveRealtimeHistoricalPreload(simulationState.getSnapshot(), mode, currentTimestamp);
+
+        logger.log(LogLevel.INFO, LogCategory.SIMULATION,
           `Price tick completed: updated ${Object.keys(newMarketData).length} tickers`, {
             day: updatedSnapshot.day,
             intradayHour: intradayHour.toFixed(2),

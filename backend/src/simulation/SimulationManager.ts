@@ -92,17 +92,28 @@ class SimulationInstance {
 
     if (shouldPreloadHistorical) {
       // Load historical preload snapshot
-      const { prepareAgentsForRealtimePreload, prepareBenchmarksForRealtimePreload } = await import('../utils/historicalPreload.js');
+      const { prepareAgentsForRealtimePreload, prepareBenchmarksForRealtimePreload, getHistoricalPreloadSnapshotId } = await import('../utils/historicalPreload.js');
 
-      const preloadSnapshotId = process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'historical-preload';
+      const typedPreloadSnapshotId = getHistoricalPreloadSnapshotId(this.simulationType.id);
+      const fallbackPreloadSnapshotId = getHistoricalPreloadSnapshotId();
 
       try {
         logger.logSimulationEvent('Loading historical preload snapshot for realtime mode', {
-          snapshotId: preloadSnapshotId,
+          snapshotId: typedPreloadSnapshotId,
           simulationType: this.simulationType.id
         });
 
-        const historicalSnapshot = await loadSnapshot(preloadSnapshotId);
+        let historicalSnapshot = await loadSnapshot(typedPreloadSnapshotId);
+
+        if (!historicalSnapshot && fallbackPreloadSnapshotId !== typedPreloadSnapshotId) {
+          logger.log(LogLevel.INFO, LogCategory.SYSTEM,
+            'Typed preload snapshot not found, falling back to default preload ID', {
+              typedPreloadSnapshotId,
+              fallbackPreloadSnapshotId,
+              simulationType: this.simulationType.id
+            });
+          historicalSnapshot = await loadSnapshot(fallbackPreloadSnapshotId);
+        }
 
         if (historicalSnapshot && historicalSnapshot.historicalPreloadMetadata) {
           const metadata = historicalSnapshot.historicalPreloadMetadata;
