@@ -87,37 +87,33 @@ const getDateFromDay = (day: number, startDate?: string): Date | null => {
 // Helper to calculate previous Monday-Friday week
 const getPreviousWeekMondayFriday = (currentDay: number, startDate?: string): { mondayDay: number; fridayDay: number } | null => {
   if (!startDate) return null;
-  
-  const currentDate = getDateFromDay(currentDay, startDate);
-  if (!currentDate) return null;
-  
-  // Get day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
-  const dayOfWeek = currentDate.getDay();
-  
-  // Calculate how many days to go back to get to the previous Monday
-  // If today is Monday (1), go back 7 days to get previous Monday
-  // If today is Tuesday (2), go back 8 days
-  // If today is Wednesday (3), go back 9 days
-  // etc.
-  let daysToPreviousMonday: number;
-  if (dayOfWeek === 0) {
-    // Sunday - go back 6 days to get to previous Monday
-    daysToPreviousMonday = 6;
-  } else if (dayOfWeek === 1) {
-    // Monday - go back 7 days to get previous Monday
-    daysToPreviousMonday = 7;
-  } else {
-    // Tuesday-Saturday - go back (dayOfWeek - 1 + 7) days
-    daysToPreviousMonday = dayOfWeek - 1 + 7;
+  try {
+    const start = new Date(startDate);
+    const currentDate = addTradingDays(start, currentDay);
+    const currentDayOfWeek = currentDate.getDay();
+
+    // Determine Monday of the current week (0 for Sunday, so adjust)
+    const daysSinceMonday = (currentDayOfWeek + 6) % 7;
+    const currentWeekMonday = new Date(currentDate);
+    currentWeekMonday.setDate(currentDate.getDate() - daysSinceMonday);
+
+    // Previous week's Monday and Friday
+    const previousMondayDate = new Date(currentWeekMonday);
+    previousMondayDate.setDate(previousMondayDate.getDate() - 7);
+    const previousFridayDate = new Date(previousMondayDate);
+    previousFridayDate.setDate(previousFridayDate.getDate() + 4);
+
+    const mondayDay = getTradingDayIndexForDate(start, previousMondayDate);
+    const fridayDay = getTradingDayIndexForDate(start, previousFridayDate);
+
+    if (mondayDay < 0 || fridayDay < 0) {
+      return null;
+    }
+
+    return { mondayDay, fridayDay };
+  } catch {
+    return null;
   }
-  
-  const previousMondayDay = currentDay - daysToPreviousMonday;
-  const previousFridayDay = previousMondayDay + 4; // Friday is 4 days after Monday
-  
-  // Make sure we don't go negative
-  if (previousMondayDay < 0) return null;
-  
-  return { mondayDay: previousMondayDay, fridayDay: previousFridayDay };
 };
 
 export const InfoPanel: React.FC<InfoPanelProps> = ({

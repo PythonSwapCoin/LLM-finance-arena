@@ -5,6 +5,7 @@ import { INITIAL_CASH } from '../constants';
 import { formatTimestampToDate } from '../utils/timeFormatting';
 import { getTradingDateFromStart } from '../shared/tradingDays';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
+import { addTradingDays, getNextTradingDay, isWeekend } from '../utils/tradingDays';
 
 type Participant = Agent | Benchmark;
 
@@ -179,47 +180,6 @@ const isWithinMarketHours = (
     // On error, assume valid
     return true;
   }
-};
-
-// Helper function to check if a date is a weekend (Saturday = 6, Sunday = 0)
-const isWeekend = (date: Date, timeZone?: string): boolean => {
-  try {
-    if (timeZone) {
-      // Get day of week in the specified timezone by formatting and parsing
-      // Use a formatter to get the weekday name, then check if it's Saturday or Sunday
-      const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        weekday: 'long'
-      });
-      const weekday = formatter.format(date).toLowerCase();
-      return weekday === 'saturday' || weekday === 'sunday';
-    } else {
-      // Use UTC day of week (0 = Sunday, 6 = Saturday)
-      const dayOfWeek = date.getUTCDay();
-      return dayOfWeek === 0 || dayOfWeek === 6;
-    }
-  } catch {
-    // Fallback: use UTC
-    const dayOfWeek = date.getUTCDay();
-    return dayOfWeek === 0 || dayOfWeek === 6;
-  }
-};
-
-// Helper function to get the next trading day (skip weekends)
-const getNextTradingDay = (date: Date, timeZone?: string): Date => {
-  const nextDay = new Date(date);
-  let daysToAdd = 1;
-  
-  // Keep adding days until we find a weekday
-  while (true) {
-    nextDay.setTime(date.getTime() + (daysToAdd * 24 * 60 * 60 * 1000));
-    if (!isWeekend(nextDay, timeZone)) {
-      break;
-    }
-    daysToAdd++;
-  }
-  
-  return nextDay;
 };
 
 // Helper function to get date from timestamp
