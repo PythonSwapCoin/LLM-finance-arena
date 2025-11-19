@@ -83,7 +83,12 @@ const saveHistoricalPreloadSnapshot = async (
   const preloadSnapshotId = getHistoricalPreloadSnapshotId(simulationTypeId);
   const realtimeTickIntervalMs = parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10);
   const historicalTickIntervalMs = parseInt(process.env.SIM_INTERVAL_MS || '30000', 10);
-  const metadataMode = mode === 'hybrid' && hasHybridModeTransitioned() ? 'hybrid' : mode;
+  const metadataMode: SimulationSnapshot['historicalPreloadMetadata']['mode'] =
+    mode === 'historical'
+      ? 'historical'
+      : mode === 'hybrid' && hasHybridModeTransitioned()
+        ? 'hybrid'
+        : 'realtime';
 
   logger.logSimulationEvent('Saving historical preload snapshot', {
     snapshotId: preloadSnapshotId,

@@ -8,6 +8,7 @@ import { exportLogs } from '../services/logExportService.js';
 import { priceLogService } from '../services/priceLogService.js';
 import { isMarketOpen, getNextMarketOpen, getETTime } from './marketHours.js';
 import { getHistoricalPreloadSnapshotId } from '../utils/historicalPreload.js';
+import type { SimulationSnapshot } from '../types.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -101,7 +102,12 @@ const saveHistoricalPreloadSnapshot = async (
   const preloadSnapshotId = getHistoricalPreloadSnapshotId(simulationTypeId);
   const realtimeTickIntervalMs = parseInt(process.env.REALTIME_SIM_INTERVAL_MS || '600000', 10);
   const historicalTickIntervalMs = parseInt(process.env.SIM_INTERVAL_MS || '30000', 10);
-  const metadataMode = mode === 'hybrid' && hasHybridModeTransitioned() ? 'hybrid' : mode;
+  const metadataMode: SimulationSnapshot['historicalPreloadMetadata']['mode'] =
+    mode === 'historical'
+      ? 'historical'
+      : mode === 'hybrid' && hasHybridModeTransitioned()
+        ? 'hybrid'
+        : 'realtime';
 
   logger.logSimulationEvent('Saving historical preload snapshot', {
     snapshotId: preloadSnapshotId,

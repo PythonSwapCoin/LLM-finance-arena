@@ -150,7 +150,7 @@ class SimulationInstance {
         } else {
           logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
             'Historical preload snapshot not found or missing metadata, starting fresh', {
-              snapshotId: preloadSnapshotId,
+              snapshotId: typedPreloadSnapshotId,
               simulationType: this.simulationType.id
             });
 
