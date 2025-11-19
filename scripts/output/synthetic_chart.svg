@@ -1,0 +1,30 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='900' height='420' viewBox='0 0 900 420'>
+  <rect width='100%' height='100%' fill='#0b1120' rx='16' />
+  <g stroke='#1f2937' stroke-width='1'>
+    <line x1='60' y1='60.00' x2='840' y2='60.00' stroke-opacity='0.4' />
+    <line x1='60' y1='135.00' x2='840' y2='135.00' stroke-opacity='0.4' />
+    <line x1='60' y1='210.00' x2='840' y2='210.00' stroke-opacity='0.4' />
+    <line x1='60' y1='285.00' x2='840' y2='285.00' stroke-opacity='0.4' />
+    <line x1='60' y1='360.00' x2='840' y2='360.00' stroke-opacity='0.4' />
+  </g>
+  <path d='M 60.00 360.00 L 216.00 287.11 L 372.00 223.87 L 528.00 171.06 L 684.00 119.87 L 840.00 60.00' fill='none' stroke='#38bdf8' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' />
+  <circle cx='60.00' cy='360.00' r='5' fill='#f97316' stroke='#fff' stroke-width='2' />
+  <text x='60.00' y='390.00' fill='#e2e8f0' font-size='14' text-anchor='middle'>Mon, Nov 10</text>
+  <text x='60.00' y='348.00' fill='#38bdf8' font-size='12' text-anchor='middle'>$1,000,000</text>
+  <circle cx='216.00' cy='287.11' r='5' fill='#f97316' stroke='#fff' stroke-width='2' />
+  <text x='216.00' y='390.00' fill='#e2e8f0' font-size='14' text-anchor='middle'>Tue, Nov 11</text>
+  <text x='216.00' y='275.11' fill='#38bdf8' font-size='12' text-anchor='middle'>$1,029,207</text>
+  <circle cx='372.00' cy='223.87' r='5' fill='#f97316' stroke='#fff' stroke-width='2' />
+  <text x='372.00' y='390.00' fill='#e2e8f0' font-size='14' text-anchor='middle'>Wed, Nov 12</text>
+  <text x='372.00' y='211.87' fill='#38bdf8' font-size='12' text-anchor='middle'>$1,054,546</text>
+  <circle cx='528.00' cy='171.06' r='5' fill='#f97316' stroke='#fff' stroke-width='2' />
+  <text x='528.00' y='390.00' fill='#e2e8f0' font-size='14' text-anchor='middle'>Thu, Nov 13</text>
+  <text x='528.00' y='159.06' fill='#38bdf8' font-size='12' text-anchor='middle'>$1,075,706</text>
+  <circle cx='684.00' cy='119.87' r='5' fill='#f97316' stroke='#fff' stroke-width='2' />
+  <text x='684.00' y='390.00' fill='#e2e8f0' font-size='14' text-anchor='middle'>Fri, Nov 14</text>
+  <text x='684.00' y='107.87' fill='#38bdf8' font-size='12' text-anchor='middle'>$1,096,216</text>
+  <circle cx='840.00' cy='60.00' r='5' fill='#f97316' stroke='#fff' stroke-width='2' />
+  <text x='840.00' y='390.00' fill='#e2e8f0' font-size='14' text-anchor='middle'>Mon, Nov 17</text>
+  <text x='840.00' y='48.00' fill='#38bdf8' font-size='12' text-anchor='middle'>$1,120,205</text>
+  <text x="450.0" y="30.0" fill="#e2e8f0" font-size="16" font-weight="bold">Synthetic trading performance (weekends skipped)</text>
+</svg>

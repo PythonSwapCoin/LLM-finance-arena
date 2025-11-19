@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { Agent, PerformanceMetrics } from '../types';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
+import { getTradingDateFromStart } from '../shared/tradingDays';
 
 interface InfoPanelProps {
   agents: Agent[];
@@ -66,9 +67,7 @@ const formatDateForDisplay = (day: number, startDate?: string, simulationMode?: 
   }
   
   try {
-    const start = new Date(startDate);
-    const date = new Date(start);
-    date.setDate(start.getDate() + day);
+    const date = getTradingDateFromStart(startDate, day);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   } catch {
     return `Day ${day}`;
@@ -79,10 +78,7 @@ const formatDateForDisplay = (day: number, startDate?: string, simulationMode?: 
 const getDateFromDay = (day: number, startDate?: string): Date | null => {
   if (!startDate) return null;
   try {
-    const start = new Date(startDate);
-    const date = new Date(start);
-    date.setDate(start.getDate() + day);
-    return date;
+    return getTradingDateFromStart(startDate, day);
   } catch {
     return null;
   }
