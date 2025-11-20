@@ -1495,33 +1495,19 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
 
       if (dayData) {
         // Get previous day's historical data to calculate the change correctly
+        // Anchor the new day to the actual historical close to avoid cumulative drift
+        // from intraday simulation noise. This ensures each historical day starts
+        // from the real market close for that date.
         const previousDayData = currentHistoricalDay > 0 ? historicalDays[currentHistoricalDay - 1] : null;
-        const previousDayClose = previousDayData?.price || previousMarketData[ticker]?.price || dayData.price;
-        
-        // Use simulation's current price for day opening to prevent execution slippage
-        // This ensures trades at day boundaries execute at the simulation's current price,
-        // not the historical cache's stale price
-        const dayOpenPrice = previousMarketData[ticker]?.price || dayData.price;
-        
-        // Calculate daily change from previous day's close to current day's open
-        // Use historical data's change if available, otherwise calculate from prices
-        const historicalChange = dayData.change || 0;
-        const historicalChangePercent = dayData.changePercent || 0;
-        
-        // Calculate change: if using simulation price, calculate from previous close
-        // Otherwise use historical change values
-        const dailyChange = previousMarketData[ticker]?.price 
-          ? (dayOpenPrice - previousDayClose)
-          : historicalChange;
-        const dailyChangePercent = previousMarketData[ticker]?.price && previousDayClose > 0
-          ? (dailyChange / previousDayClose)
-          : historicalChangePercent;
-        
+        const previousDayClose = previousDayData?.price || dayData.price;
+
         marketData[ticker] = {
           ticker,
-          price: dayOpenPrice,
-          dailyChange,
-          dailyChangePercent,
+          price: dayData.price,
+          dailyChange: dayData.change ?? dayData.price - previousDayClose,
+          dailyChangePercent: dayData.changePercent ?? (previousDayClose > 0
+            ? (dayData.price - previousDayClose) / previousDayClose
+            : 0),
         };
       } else {
         // No data for this day - use last available data
