@@ -7,7 +7,7 @@ import { logger, LogLevel, LogCategory } from '../services/logger.js';
  */
 
 export interface HistoricalPreloadMetadata {
-  mode: 'historical' | 'realtime' | 'hybrid';
+  mode: 'historical' | 'realtime' | 'hybrid' | 'simulated';
   startDate: string; // ISO date string
   endDate: string; // ISO date string
   endDay: number;
@@ -107,10 +107,10 @@ export const interpolatePerformanceHistory = (
 
   logger.log(LogLevel.INFO, LogCategory.SYSTEM,
     'Interpolating performance history', {
-      originalPoints: historicalMetrics.length,
-      historicalMarketMinutesPerTick,
-      realtimeIntervalMinutes
-    });
+    originalPoints: historicalMetrics.length,
+    historicalMarketMinutesPerTick,
+    realtimeIntervalMinutes
+  });
 
   for (let i = 0; i < historicalMetrics.length; i++) {
     const metric = historicalMetrics[i];
@@ -151,9 +151,9 @@ export const interpolatePerformanceHistory = (
 
   logger.log(LogLevel.INFO, LogCategory.SYSTEM,
     'Performance history interpolated', {
-      originalPoints: historicalMetrics.length,
-      interpolatedPoints: interpolatedMetrics.length
-    });
+    originalPoints: historicalMetrics.length,
+    interpolatedPoints: interpolatedMetrics.length
+  });
 
   return interpolatedMetrics;
 };
@@ -190,11 +190,11 @@ export const fillGapMetrics = (
 
   logger.log(LogLevel.INFO, LogCategory.SYSTEM,
     'Filling gap between historical and realtime', {
-      historicalEndDate,
-      realtimeStartDate,
-      gapDays: timeDiff / (1000 * 60 * 60 * 24),
-      realtimeIntervalMinutes: realtimeIntervalMs / (60 * 1000)
-    });
+    historicalEndDate,
+    realtimeStartDate,
+    gapDays: timeDiff / (1000 * 60 * 60 * 24),
+    realtimeIntervalMinutes: realtimeIntervalMs / (60 * 1000)
+  });
 
   // Start from the day after historical end
   const current = new Date(endDate);
@@ -228,8 +228,8 @@ export const fillGapMetrics = (
 
   logger.log(LogLevel.INFO, LogCategory.SYSTEM,
     'Gap filled with constant values', {
-      gapPoints: gapMetrics.length
-    });
+    gapPoints: gapMetrics.length
+  });
 
   return gapMetrics;
 };

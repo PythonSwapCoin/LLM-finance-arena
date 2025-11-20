@@ -96,7 +96,7 @@ const saveHistoricalPreloadSnapshot = async (
   const preloadSnapshot = {
     ...snapshot,
     historicalPreloadMetadata: {
-      mode: metadataMode,
+      mode: metadataMode as "historical" | "realtime" | "hybrid" | "simulated",
       startDate: snapshot.startDate || snapshot.currentDate || new Date().toISOString(),
       endDate: snapshot.currentDate || new Date().toISOString(),
       endDay: snapshot.day,
@@ -178,8 +178,8 @@ const stepSimulation = async (simulationTypeId: string, newMarketData: MarketDat
     } catch (error) {
       logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
         `Failed to save snapshot after step for ${simulationTypeId}`, {
-          error: error instanceof Error ? error.message : String(error)
-        });
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
@@ -234,15 +234,15 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
     } catch (error) {
       logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
         `Failed to save snapshot after trade window for ${simulationTypeId}`, {
-          error: error instanceof Error ? error.message : String(error)
-        });
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
       `Failed to execute trade window for simulation ${simulationTypeId}`, {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
   }
 };
 
@@ -277,7 +277,7 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       const start = new Date(snapshot.startDate);
       let tradingDaysAdvanced = 0;
       let currentDate = new Date(start);
-      
+
       // Advance to the next trading day (skip weekends)
       while (tradingDaysAdvanced < newDay) {
         currentDate.setUTCDate(currentDate.getUTCDate() + 1);
@@ -335,22 +335,22 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
     const sp500Price = sp500Data?.price || 0;
     const sp500Change = sp500Data?.dailyChange || 0;
     const sp500ChangePercent = sp500Data?.dailyChangePercent || 0;
-    const sp500Info = sp500Price > 0 
+    const sp500Info = sp500Price > 0
       ? ` | S&P 500: $${sp500Price.toFixed(2)} (${sp500Change >= 0 ? '+' : ''}${sp500Change.toFixed(2)}, ${sp500ChangePercent >= 0 ? '+' : ''}${(sp500ChangePercent * 100).toFixed(2)}%)`
       : '';
 
     logger.log(LogLevel.INFO, LogCategory.SIMULATION,
       `📅 Day ${newDay} started${marketStatus}${sp500Info}`, {
-        simulationType: simulationTypeId,
-        day: newDay,
-        currentDate: newCurrentDate,
-        marketOpen: isSimulatedMode ? isMarketOpen(new Date(newCurrentDate)) : undefined,
-        sp500: sp500Price > 0 ? {
-          price: sp500Price.toFixed(2),
-          dailyChange: sp500Change.toFixed(2),
-          dailyChangePercent: (sp500ChangePercent * 100).toFixed(2) + '%'
-        } : undefined
-      });
+      simulationType: simulationTypeId,
+      day: newDay,
+      currentDate: newCurrentDate,
+      marketOpen: isSimulatedMode ? isMarketOpen(new Date(newCurrentDate)) : undefined,
+      sp500: sp500Price > 0 ? {
+        price: sp500Price.toFixed(2),
+        dailyChange: sp500Change.toFixed(2),
+        dailyChangePercent: (sp500ChangePercent * 100).toFixed(2) + '%'
+      } : undefined
+    });
 
     // Log prices and portfolio values at start of new day to ensure previousValue is correct
     try {
@@ -368,9 +368,9 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
     } catch (error) {
       logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
         'Failed to log prices after day advancement', {
-          simulationType: simulationTypeId,
-          error: error instanceof Error ? error.message : String(error)
-        });
+        simulationType: simulationTypeId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
 
     // Save snapshot after day advancement
@@ -380,15 +380,15 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
     } catch (error) {
       logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
         `Failed to save snapshot after day advancement for ${simulationTypeId}`, {
-          error: error instanceof Error ? error.message : String(error)
-        });
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   } catch (error) {
     logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
       `Failed to advance day for simulation ${simulationTypeId}`, {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
   }
 };
 
@@ -475,7 +475,7 @@ export const startMultiSimScheduler = async (): Promise<void> => {
       if (mode === 'hybrid' && !hasHybridModeTransitioned()) {
         const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
         const minutesPerTick = getSimulatedMinutesPerTick();
-        
+
         // Check if we should transition (including checking if next tick would overshoot)
         if (shouldHybridModeTransition(currentDate, snapshot.day, snapshot.intradayHour, minutesPerTick)) {
           logger.logSimulationEvent('Hybrid mode transitioning from accelerated to realtime (multi-sim)', {
@@ -520,28 +520,28 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
         const dateObj = new Date(currentDate);
         const marketOpen = isMarketOpen(dateObj);
-        
+
         if (!marketOpen && mode === 'simulated') {
           // Skip price ticks when market is closed (weekends/holidays)
           const dayOfWeek = dateObj.getUTCDay();
           const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
           const lastSkipLog = (global as any).lastMarketClosedSkipLog;
           const skipKey = `${snapshot.day}-${dayOfWeek}`;
-          
+
           // Only log once per day to reduce noise
           if (lastSkipLog !== skipKey) {
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               `⏸️ Skipping price tick - Market closed (${dayNames[dayOfWeek]}, Day ${snapshot.day})`, {
-                day: snapshot.day,
-                dayOfWeek: dayNames[dayOfWeek],
-                currentDate: currentDate,
-                marketOpen: false
-              });
+              day: snapshot.day,
+              dayOfWeek: dayNames[dayOfWeek],
+              currentDate: currentDate,
+              marketOpen: false
+            });
             (global as any).lastMarketClosedSkipLog = skipKey;
           }
           return; // Skip processing when market is closed
         }
-        
+
         const minutesPerTick = getSimulatedMinutesPerTick();
         const newIntradayHour = snapshot.intradayHour + (minutesPerTick / 60);
 
@@ -558,7 +558,7 @@ export const startMultiSimScheduler = async (): Promise<void> => {
             const start = new Date(snapshot.startDate);
             let tradingDaysAdvanced = 0;
             let checkDate = new Date(start);
-            
+
             // Calculate what date the next day would be
             while (tradingDaysAdvanced < nextDay) {
               checkDate.setUTCDate(checkDate.getUTCDate() + 1);
@@ -567,7 +567,7 @@ export const startMultiSimScheduler = async (): Promise<void> => {
                 tradingDaysAdvanced++;
               }
             }
-            
+
             // Check if this date is a weekend
             const dayOfWeek = checkDate.getUTCDay();
             if (dayOfWeek === 0 || dayOfWeek === 6) {
@@ -575,15 +575,15 @@ export const startMultiSimScheduler = async (): Promise<void> => {
               const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
               logger.log(LogLevel.INFO, LogCategory.SIMULATION,
                 `⏸️ Skipping day advancement - Weekend (${dayNames[dayOfWeek]}, would be Day ${nextDay})`, {
-                  day: snapshot.day,
-                  nextDay,
-                  date: checkDate.toISOString(),
-                  dayOfWeek: dayNames[dayOfWeek]
-                });
+                day: snapshot.day,
+                nextDay,
+                date: checkDate.toISOString(),
+                dayOfWeek: dayNames[dayOfWeek]
+              });
               return; // Skip processing - wait for next trading day
             }
           }
-          
+
           // Advance to next day
           const nextDayData = await generateNextDayMarketData(currentMarketData);
           simulationManager.updateSharedMarketData(nextDayData);
@@ -620,9 +620,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
             const etTime = getETTime(now);
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               '[MARKET STATUS] MARKET CLOSED - Skipping price tick', {
-                etTime: etTime.toISOString(),
-                mode,
-              });
+              etTime: etTime.toISOString(),
+              mode,
+            });
             (global as any).lastPriceTickMarketStatus = 'closed';
           }
           return; // Skip price tick when market is closed
@@ -633,9 +633,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
             const etTime = getETTime(now);
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               '[MARKET STATUS] MARKET OPEN - Processing price tick', {
-                etTime: etTime.toISOString(),
-                mode,
-              });
+              etTime: etTime.toISOString(),
+              mode,
+            });
             (global as any).lastPriceTickMarketStatus = 'open';
           }
         }
@@ -647,21 +647,21 @@ export const startMultiSimScheduler = async (): Promise<void> => {
         const etMinutes = etTime.getUTCMinutes();
         const marketOpenHour = 9;
         const marketOpenMinute = 30;
-        
+
         // Calculate hours since market open
         const totalMinutesSinceOpen = (etHours - marketOpenHour) * 60 + (etMinutes - marketOpenMinute);
         const calculatedIntradayHour = Math.max(0, totalMinutesSinceOpen / 60);
-        
+
         // Cap at 6.5 hours (market closes at 4:00 PM ET = 9:30 AM + 6.5 hours)
         const newIntradayHour = Math.min(calculatedIntradayHour, 6.5);
 
         // Update currentDate and currentTimestamp for realtime mode
         const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
         const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
-        
+
         let newCurrentDate: string;
         let newCurrentTimestamp: number | undefined;
-        
+
         if (USE_DELAYED_DATA) {
           const dataTime = new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000));
           newCurrentDate = dataTime.toISOString();
@@ -673,7 +673,7 @@ export const startMultiSimScheduler = async (): Promise<void> => {
 
         // Update intradayHour, currentDate, and currentTimestamp for all simulations
         for (const [_, instance] of simulations) {
-          instance.updateSnapshot({ 
+          instance.updateSnapshot({
             intradayHour: newIntradayHour,
             currentDate: newCurrentDate,
             currentTimestamp: newCurrentTimestamp
@@ -712,11 +712,11 @@ export const startMultiSimScheduler = async (): Promise<void> => {
   };
 
   // Trade window handler
-    const tradeWindowHandler = async () => {
-      try {
-        // Check market status for realtime mode and hybrid mode (after transition)
-        const isRealtimeModeForTrades = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
-        if (isRealtimeModeForTrades) {
+  const tradeWindowHandler = async () => {
+    try {
+      // Check market status for realtime mode and hybrid mode (after transition)
+      const isRealtimeModeForTrades = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+      if (isRealtimeModeForTrades) {
         const now = new Date();
         const isOpen = checkMarketOpen(now);
         if (!isOpen) {
@@ -726,9 +726,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
             const etTime = getETTime(now);
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               '[MARKET STATUS] MARKET CLOSED - Skipping trade window', {
-                etTime: etTime.toISOString(),
-                mode,
-              });
+              etTime: etTime.toISOString(),
+              mode,
+            });
             (global as any).lastMarketStatus = 'closed';
           }
           return;
@@ -739,9 +739,9 @@ export const startMultiSimScheduler = async (): Promise<void> => {
             const etTime = getETTime(now);
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               '[MARKET STATUS] MARKET OPEN', {
-                etTime: etTime.toISOString(),
-                mode,
-              });
+              etTime: etTime.toISOString(),
+              mode,
+            });
             (global as any).lastMarketStatus = 'open';
           }
         }
@@ -756,7 +756,7 @@ export const startMultiSimScheduler = async (): Promise<void> => {
           });
           return;
         }
-        
+
         const firstSim = simulations.values().next().value;
         if (firstSim) {
           const snapshot = firstSim.getSnapshot();
@@ -792,8 +792,8 @@ export const startMultiSimScheduler = async (): Promise<void> => {
 
   // Start intervals
   // Use realtime loop for realtime mode OR hybrid mode after transition
-    const isRealtimeModeForScheduler = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
-    if (isRealtimeModeForScheduler) {
+  const isRealtimeModeForScheduler = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+  if (isRealtimeModeForScheduler) {
     // Real-time mode with prefetching
     realtimeLoopAbortController = { stop: false };
     const abortController = realtimeLoopAbortController;

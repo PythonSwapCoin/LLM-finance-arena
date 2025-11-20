@@ -114,7 +114,7 @@ const saveHistoricalPreloadSnapshot = async (
   const preloadSnapshot = {
     ...snapshot,
     historicalPreloadMetadata: {
-      mode: metadataMode,
+      mode: metadataMode as "historical" | "realtime" | "hybrid" | "simulated",
       startDate: snapshot.startDate || snapshot.currentDate || new Date().toISOString(),
       endDate: snapshot.currentDate || new Date().toISOString(),
       endDay: snapshot.day,
@@ -182,7 +182,7 @@ export const startScheduler = async (): Promise<void> => {
   const priceTickHandler = async (prefetchedRealtimeData?: RealtimePrefetchResult | null) => {
     try {
       const snapshot = simulationState.getSnapshot();
-      
+
       // Check if historical simulation is complete
       if (isHistoricalSimulationComplete(snapshot.day)) {
         logger.logSimulationEvent('Historical simulation complete, stopping scheduler', {
@@ -226,7 +226,7 @@ export const startScheduler = async (): Promise<void> => {
       if (mode === 'hybrid' && !hasHybridModeTransitioned()) {
         const currentDate = snapshot.currentDate || snapshot.startDate || new Date().toISOString();
         const minutesPerTick = getSimulatedMinutesPerTick();
-        
+
         // Check if we should transition (including checking if next tick would overshoot)
         if (shouldHybridModeTransition(currentDate, snapshot.day, snapshot.intradayHour, minutesPerTick)) {
           logger.logSimulationEvent('Hybrid mode transitioning from accelerated to realtime', {
@@ -281,7 +281,7 @@ export const startScheduler = async (): Promise<void> => {
         const day = utc.getUTCDate();
         const hour = utc.getUTCHours();
         const minute = utc.getUTCMinutes();
-        
+
         // Calculate DST
         const march1 = new Date(Date.UTC(year, 2, 1));
         const march1Day = march1.getUTCDay();
@@ -291,7 +291,7 @@ export const startScheduler = async (): Promise<void> => {
         const dstEnd = new Date(Date.UTC(year, 10, (8 - nov1Day) % 7 + 1));
         const isDST = utc >= dstStart && utc < dstEnd;
         const etOffsetHours = isDST ? -4 : -5;
-        
+
         // Calculate ET time
         const etTotalMinutes = (hour * 60 + minute) + (etOffsetHours * 60);
         const etDayOffset = etTotalMinutes < 0 ? -1 : etTotalMinutes >= 1440 ? 1 : 0;
@@ -299,41 +299,41 @@ export const startScheduler = async (): Promise<void> => {
         const etHour = Math.floor(etMinutesOfDay / 60);
         const etMinute = etMinutesOfDay % 60;
         const etDayOfWeek = (utc.getUTCDay() + etDayOffset + 7) % 7;
-        
+
         const etTimeString = `${etHour.toString().padStart(2, '0')}:${etMinute.toString().padStart(2, '0')} ET`;
-        
+
         // Create ET date object for day comparison
         const etDateObj = new Date(Date.UTC(year, month, day + etDayOffset));
-        
+
         // Log market status
         logger.log(LogLevel.INFO, LogCategory.SIMULATION,
           `Price tick check: marketOpen=${marketOpen}, delayedData=${USE_DELAYED_DATA}, ET time=${etTimeString}`, {
-            localTime: now.toISOString(),
-            effectiveTime: effectiveTime.toISOString(),
-            etTime: etTimeString,
-            marketOpen,
-            realtimeMarketOpen,
-            useDelayedData: USE_DELAYED_DATA
-          });
-        
+          localTime: now.toISOString(),
+          effectiveTime: effectiveTime.toISOString(),
+          etTime: etTimeString,
+          marketOpen,
+          realtimeMarketOpen,
+          useDelayedData: USE_DELAYED_DATA
+        });
+
         // Check if we need to advance to a new trading day
         // Use ET date for day comparison
         const shouldAdvanceDay = lastMarketDay && lastMarketDay.getTime() !== etDateObj.getTime() && (marketOpen || USE_DELAYED_DATA);
-        
+
         if (shouldAdvanceDay) {
           // Market opened for a new day (or new day in ET timezone)
-          logger.logSimulationEvent(`Market opened - advancing to day ${snapshot.day + 1}`, { 
-            currentDay: snapshot.day, 
+          logger.logSimulationEvent(`Market opened - advancing to day ${snapshot.day + 1}`, {
+            currentDay: snapshot.day,
             nextDay: snapshot.day + 1,
             marketDate: etDateObj.toISOString(),
             etTime: etTimeString
           });
-          
+
           lastMarketDay = etDateObj;
-          
+
           const newMarketData = await generateNextDayMarketData(snapshot.marketData);
           const updatedSnapshot = await advanceDay(snapshot, newMarketData);
-          
+
           // Reset intraday hour to 0 for new day
           // Reset firstTradeExecuted flag for new day
           firstTradeExecuted = false;
@@ -341,20 +341,20 @@ export const startScheduler = async (): Promise<void> => {
             ...updatedSnapshot,
             intradayHour: 0,
           });
-          
+
           // Persist after day advance
           await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to persist snapshot after day advance', { error: err });
           });
           return;
         }
-        
+
         // Initialize lastMarketDay if not set
         if (!lastMarketDay && (marketOpen || USE_DELAYED_DATA)) {
           lastMarketDay = etDateObj;
         }
-        
+
         // Process only if market is open
         // Even with delayed data, stop processing when market is closed
         // Exception: On the very first tick, if market is closed (e.g., Sunday), 
@@ -363,10 +363,10 @@ export const startScheduler = async (): Promise<void> => {
           if (USE_DELAYED_DATA) {
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               `Market closed (ET time: ${etTimeString}) but processing delayed data tick`, {
-                etTime: etTimeString,
-                marketOpen,
-                useDelayedData: USE_DELAYED_DATA
-              });
+              etTime: etTimeString,
+              marketOpen,
+              useDelayedData: USE_DELAYED_DATA
+            });
           } else {
             // Check if this is the first tick and market is closed (e.g., weekend)
             // In this case, we should wait for the next market open
@@ -378,21 +378,21 @@ export const startScheduler = async (): Promise<void> => {
               const msUntilOpen = nextOpen.getTime() - effectiveTime.getTime();
               logger.log(LogLevel.INFO, LogCategory.SIMULATION,
                 `Market closed on first tick (ET time: ${etTimeString}), waiting for next market open`, {
-                  etTime: etTimeString,
-                  nextMarketOpen: nextOpen.toISOString(),
-                  waitTimeMinutes: Math.round(msUntilOpen / 60000)
-                });
+                etTime: etTimeString,
+                nextMarketOpen: nextOpen.toISOString(),
+                waitTimeMinutes: Math.round(msUntilOpen / 60000)
+              });
               return; // Skip processing - will retry when market opens
             }
             logger.log(LogLevel.INFO, LogCategory.SIMULATION,
               `Skipping price tick: market closed (ET time: ${etTimeString})`, {
-                etTime: etTimeString,
-                marketOpen
-              });
+              etTime: etTimeString,
+              marketOpen
+            });
             return; // Skip processing when market is closed
           }
         }
-        
+
         // Map effective market time (real or delayed) to intraday hours (9:30 AM - 4:00 PM ET = 6.5 hours)
         // Market opens at 9:30 AM ET and closes at 4:00 PM ET
         const marketOpenHour = 9.5; // 9:30 AM ET
@@ -400,7 +400,7 @@ export const startScheduler = async (): Promise<void> => {
         const currentHourET = etHour + (etMinute / 60);
         const minutesSinceOpen = (currentHourET - marketOpenHour) * 60;
         let intradayHour = Math.min(Math.max(minutesSinceOpen / 60, 0), 6.5);
-        
+
         // For delayed data mode, if market appears closed but we're in market hours (ET),
         // calculate intraday hour properly
         // Also handle case where we're starting fresh
@@ -417,7 +417,7 @@ export const startScheduler = async (): Promise<void> => {
             intradayHour = Math.min(snapshot.intradayHour + (simInterval / (60 * 60 * 1000)), 6.5);
           }
         }
-        
+
         logger.logSimulationEvent(`Price tick: real-time market data`, {
           day: snapshot.day,
           intradayHour: intradayHour.toFixed(2),
@@ -426,14 +426,14 @@ export const startScheduler = async (): Promise<void> => {
           marketOpen: marketOpen,
           useDelayedData: USE_DELAYED_DATA
         });
-        
+
         if (prefetchedRealtimeData) {
           logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
             'Using prefetched market data for real-time tick', {
-              receivedTickers: Object.keys(prefetchedRealtimeData.marketData).length,
-              missingTickers: prefetchedRealtimeData.missingTickers.length,
-              prefetchDurationMs: prefetchedRealtimeData.durationMs,
-            });
+            receivedTickers: Object.keys(prefetchedRealtimeData.marketData).length,
+            missingTickers: prefetchedRealtimeData.missingTickers.length,
+            prefetchDurationMs: prefetchedRealtimeData.durationMs,
+          });
         } else {
           logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
             'No prefetched market data available, fetching synchronously', {});
@@ -448,16 +448,16 @@ export const startScheduler = async (): Promise<void> => {
             missingTickers: prefetchedRealtimeData?.missingTickers,
           }
         );
-        
+
         if (!newMarketData || Object.keys(newMarketData).length === 0) {
-          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
-            'No market data generated for real-time update', { 
-              day: snapshot.day, 
-              intradayHour 
-            });
+          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+            'No market data generated for real-time update', {
+            day: snapshot.day,
+            intradayHour
+          });
           return;
         }
-        
+
         // Update currentDate and currentTimestamp for delayed data mode
         let newCurrentDate: string;
         let currentTimestamp: number;
@@ -477,7 +477,7 @@ export const startScheduler = async (): Promise<void> => {
           newCurrentDate = etDateObj.toISOString();
           currentTimestamp = etDateObj.getTime();
         }
-        
+
         const updatedSnapshot = await step({
           ...snapshot,
           mode: snapshot.mode,
@@ -489,7 +489,7 @@ export const startScheduler = async (): Promise<void> => {
           currentDate: newCurrentDate,
           currentTimestamp,
         });
-        
+
         // Persist after price tick
         await saveSnapshot(simulationState.getSnapshot()).catch(err => {
           logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
@@ -500,12 +500,12 @@ export const startScheduler = async (): Promise<void> => {
 
         logger.log(LogLevel.INFO, LogCategory.SIMULATION,
           `Price tick completed: updated ${Object.keys(newMarketData).length} tickers`, {
-            day: updatedSnapshot.day,
-            intradayHour: intradayHour.toFixed(2),
-            currentDate: newCurrentDate,
-            currentTimestamp: currentTimestamp,
-            timestampSeconds: (currentTimestamp / 1000).toFixed(0)
-          });
+          day: updatedSnapshot.day,
+          intradayHour: intradayHour.toFixed(2),
+          currentDate: newCurrentDate,
+          currentTimestamp: currentTimestamp,
+          timestampSeconds: (currentTimestamp / 1000).toFixed(0)
+        });
         return;
       }
 
@@ -515,17 +515,17 @@ export const startScheduler = async (): Promise<void> => {
       const minutesPerTick = getSimulatedMinutesPerTick();
       const nextHour = currentHour + (minutesPerTick / 60);
       const shouldAdvanceDay = nextHour >= 6.5;
-      
+
       if (shouldAdvanceDay) {
         // Advance to next day
-        logger.logSimulationEvent(`Advancing to day ${snapshot.day + 1}`, { 
-          currentDay: snapshot.day, 
-          nextDay: snapshot.day + 1 
+        logger.logSimulationEvent(`Advancing to day ${snapshot.day + 1}`, {
+          currentDay: snapshot.day,
+          nextDay: snapshot.day + 1
         });
-        
+
         const newMarketData = await generateNextDayMarketData(snapshot.marketData);
         const updatedSnapshot = await advanceDay(snapshot, newMarketData);
-        
+
         // Reset intraday hour to 0 for new day
         // Reset firstTradeExecuted flag for new day
         // Update currentDate for the new day
@@ -539,7 +539,7 @@ export const startScheduler = async (): Promise<void> => {
           // For real-time mode, update currentDate
           const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
           const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
-          
+
           if (USE_DELAYED_DATA) {
             // For delayed data: use (current time - delay)
             const now = new Date();
@@ -560,41 +560,41 @@ export const startScheduler = async (): Promise<void> => {
           intradayHour: 0,
           currentDate: newCurrentDate,
         });
-        
+
         // Persist after day advance
         await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-          logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+          logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
             'Failed to persist snapshot after day advance', { error: err });
         });
       } else {
         // Intraday update
         const canTrade = isTradingAllowed();
-        logger.logSimulationEvent(`Price tick: intraday hour ${nextHour}`, { 
-          day: snapshot.day, 
-          hour: nextHour, 
-          canTrade 
+        logger.logSimulationEvent(`Price tick: intraday hour ${nextHour}`, {
+          day: snapshot.day,
+          hour: nextHour,
+          canTrade
         });
-        
+
         const newMarketData = await generateNextIntradayMarketData(
-          snapshot.marketData, 
-          snapshot.day, 
+          snapshot.marketData,
+          snapshot.day,
           nextHour
         );
-        
+
         if (!newMarketData || Object.keys(newMarketData).length === 0) {
-          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA, 
-            'No market data generated for intraday update', { 
-              day: snapshot.day, 
-              hour: nextHour 
-            });
+          logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+            'No market data generated for intraday update', {
+            day: snapshot.day,
+            hour: nextHour
+          });
           return;
         }
-        
+
         const updatedSnapshot = await step({
           ...snapshot,
           intradayHour: nextHour >= 6.5 ? 0 : nextHour, // Reset if advancing day
         }, newMarketData);
-        
+
         // Update currentDate based on intraday hour
         const currentSnapshot = simulationState.getSnapshot();
         let newCurrentDate: string = currentSnapshot.currentDate || currentSnapshot.startDate || new Date().toISOString();
@@ -633,12 +633,12 @@ export const startScheduler = async (): Promise<void> => {
           intradayHour: nextHour >= 6.5 ? 0 : nextHour,
           currentDate: newCurrentDate,
         });
-        
+
         // Check if we should execute trades at this hour (for simulated/historical mode)
         const firstTradeHour = getFirstTradeHour();
         const tradeIntervalHours = getTradeInterval() / (60 * 60 * 1000); // Convert ms to hours
         const currentHour = nextHour;
-        
+
         // Check if we're at a trade window
         let shouldTrade = false;
         if (!firstTradeExecuted) {
@@ -652,54 +652,54 @@ export const startScheduler = async (): Promise<void> => {
           const hoursSinceFirstTrade = currentHour - firstTradeHour;
           const tradeWindowNumber = Math.floor(hoursSinceFirstTrade / tradeIntervalHours);
           const expectedHour = firstTradeHour + (tradeWindowNumber * tradeIntervalHours);
-          
+
           // Check if we're at a trading window (within 0.5 hours = 30 minutes)
           if (Math.abs(currentHour - expectedHour) < 0.5 && currentHour <= 6.5) {
             shouldTrade = true;
           }
         }
-        
+
         if (shouldTrade) {
-          logger.logSimulationEvent('Trade window: executing trades (simulated/historical)', { 
-            day: snapshot.day, 
+          logger.logSimulationEvent('Trade window: executing trades (simulated/historical)', {
+            day: snapshot.day,
             hour: currentHour.toFixed(2),
             firstTradeHour: firstTradeHour.toFixed(2),
             tradeIntervalHours: tradeIntervalHours.toFixed(2)
           });
-          
+
           try {
             const tradeSnapshot = simulationState.getSnapshot();
             const tradeUpdatedSnapshot = await tradeWindow(tradeSnapshot);
             simulationState.updateSnapshot(tradeUpdatedSnapshot);
-            
+
             // Persist after trade window
             await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-              logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+              logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
                 'Failed to persist snapshot after trade window', { error: err });
             });
           } catch (error) {
-            logger.log(LogLevel.ERROR, LogCategory.SIMULATION, 
-              'Error in trade window', { 
-                error: error instanceof Error ? error.message : String(error) 
-              });
+            logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+              'Error in trade window', {
+              error: error instanceof Error ? error.message : String(error)
+            });
           }
         }
-        
+
         // Persist after price tick
         await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-          logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+          logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
             'Failed to persist snapshot after price tick', { error: err });
         });
       }
     } catch (error) {
-      logger.log(LogLevel.ERROR, LogCategory.SIMULATION, 
-        'Error in price tick handler', { 
-          error: error instanceof Error ? error.message : String(error) 
-        });
+      logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+        'Error in price tick handler', {
+        error: error instanceof Error ? error.message : String(error)
+      });
       // Continue running even if one tick fails
     }
   };
-  
+
   if (mode === 'realtime') {
     const guardMs = parseInt(process.env.REALTIME_FETCH_GUARD_MS || '5000', 10);
     const batchSize = parseInt(process.env.REALTIME_FETCH_BATCH_SIZE || '8', 10);
@@ -728,8 +728,8 @@ export const startScheduler = async (): Promise<void> => {
           } catch (error) {
             logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
               'Real-time prefetch failed to resolve before tick', {
-                error: error instanceof Error ? error.message : String(error),
-              });
+              error: error instanceof Error ? error.message : String(error),
+            });
             prefetchedResult = null;
           }
           pendingPrefetch = null;
@@ -752,8 +752,8 @@ export const startScheduler = async (): Promise<void> => {
           }).catch(error => {
             logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
               'Real-time prefetch encountered an error', {
-                error: error instanceof Error ? error.message : String(error),
-              });
+              error: error instanceof Error ? error.message : String(error),
+            });
             return {
               marketData: {},
               missingTickers: tickers,
@@ -782,8 +782,8 @@ export const startScheduler = async (): Promise<void> => {
         } catch (error) {
           logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
             'Pending prefetch rejected during realtime loop shutdown', {
-              error: error instanceof Error ? error.message : String(error),
-            });
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     };
@@ -791,8 +791,8 @@ export const startScheduler = async (): Promise<void> => {
     realtimePriceLoopPromise = runRealtimePriceLoop().catch(error => {
       logger.log(LogLevel.ERROR, LogCategory.MARKET_DATA,
         'Real-time price loop terminated unexpectedly', {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
 
     priceTickInterval = null;
@@ -805,158 +805,158 @@ export const startScheduler = async (): Promise<void> => {
   // For real-time: every 30 minutes (first trade after 30 minutes) - use interval
   // For simulated/historical: check in price tick handler (already done above)
   firstTradeExecuted = false;
-  
+
   // Only set up trade window interval for real-time mode
   // For simulated/historical, trade windows are checked in the price tick handler
   const modeForTradeWindow = getSimulationMode();
   if (modeForTradeWindow === 'realtime') {
     // Real-time mode: use interval-based checking
     tradeWindowInterval = setInterval(async () => {
-    try {
-      const snapshot = simulationState.getSnapshot();
-      
-      // Check if historical simulation is complete
-      if (isHistoricalSimulationComplete(snapshot.day)) {
-        // Export final data and logs
-        await Promise.all([
-          exportSimulationData(simulationState.getSnapshot()).catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-              'Failed to export simulation data on completion', { error: err });
-          }),
-          exportLogs().catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-              'Failed to export logs on completion', { error: err });
-          })
-        ]);
-        stopScheduler();
-        return;
-      }
+      try {
+        const snapshot = simulationState.getSnapshot();
 
-      const now = new Date();
-      const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
-      const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
-      const effectiveTime = USE_DELAYED_DATA
-        ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000))
-        : now;
-      const realtimeMarketOpen = isMarketOpen(now);
-      const marketOpen = isMarketOpen(effectiveTime);
+        // Check if historical simulation is complete
+        if (isHistoricalSimulationComplete(snapshot.day)) {
+          // Export final data and logs
+          await Promise.all([
+            exportSimulationData(simulationState.getSnapshot()).catch(err => {
+              logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+                'Failed to export simulation data on completion', { error: err });
+            }),
+            exportLogs().catch(err => {
+              logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+                'Failed to export logs on completion', { error: err });
+            })
+          ]);
+          stopScheduler();
+          return;
+        }
 
-      // Calculate ET time for logging (needed before market check)
-      const utc = new Date(effectiveTime.toISOString());
-      const year = utc.getUTCFullYear();
-      const hour = utc.getUTCHours();
-      const minute = utc.getUTCMinutes();
-      const march1 = new Date(Date.UTC(year, 2, 1));
-      const march1Day = march1.getUTCDay();
-      const dstStart = new Date(Date.UTC(year, 2, (8 - march1Day) % 7 + 8));
-      const nov1 = new Date(Date.UTC(year, 10, 1));
-      const nov1Day = nov1.getUTCDay();
-      const dstEnd = new Date(Date.UTC(year, 10, (8 - nov1Day) % 7 + 1));
-      const isDST = utc >= dstStart && utc < dstEnd;
-      const etOffsetHours = isDST ? -4 : -5;
-      const etTotalMinutes = (hour * 60 + minute) + (etOffsetHours * 60);
-      const etMinutesOfDay = ((etTotalMinutes % 1440) + 1440) % 1440;
-      const etHour = Math.floor(etMinutesOfDay / 60);
-      const etMinute = etMinutesOfDay % 60;
-      const etTimeString = `${etHour.toString().padStart(2, '0')}:${etMinute.toString().padStart(2, '0')} ET`;
+        const now = new Date();
+        const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
+        const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+        const effectiveTime = USE_DELAYED_DATA
+          ? new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000))
+          : now;
+        const realtimeMarketOpen = isMarketOpen(now);
+        const marketOpen = isMarketOpen(effectiveTime);
 
-      // Only allow trading if market is open
-      if (!marketOpen) {
-        if (USE_DELAYED_DATA) {
-          logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-            'Market closed but executing delayed data trade window', {
+        // Calculate ET time for logging (needed before market check)
+        const utc = new Date(effectiveTime.toISOString());
+        const year = utc.getUTCFullYear();
+        const hour = utc.getUTCHours();
+        const minute = utc.getUTCMinutes();
+        const march1 = new Date(Date.UTC(year, 2, 1));
+        const march1Day = march1.getUTCDay();
+        const dstStart = new Date(Date.UTC(year, 2, (8 - march1Day) % 7 + 8));
+        const nov1 = new Date(Date.UTC(year, 10, 1));
+        const nov1Day = nov1.getUTCDay();
+        const dstEnd = new Date(Date.UTC(year, 10, (8 - nov1Day) % 7 + 1));
+        const isDST = utc >= dstStart && utc < dstEnd;
+        const etOffsetHours = isDST ? -4 : -5;
+        const etTotalMinutes = (hour * 60 + minute) + (etOffsetHours * 60);
+        const etMinutesOfDay = ((etTotalMinutes % 1440) + 1440) % 1440;
+        const etHour = Math.floor(etMinutesOfDay / 60);
+        const etMinute = etMinutesOfDay % 60;
+        const etTimeString = `${etHour.toString().padStart(2, '0')}:${etMinute.toString().padStart(2, '0')} ET`;
+
+        // Only allow trading if market is open
+        if (!marketOpen) {
+          if (USE_DELAYED_DATA) {
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              'Market closed but executing delayed data trade window', {
               marketOpen,
               realtimeMarketOpen,
               etTime: etTimeString,
               effectiveTime: effectiveTime.toISOString(),
             });
-        } else {
-          logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-            'Skipping trade window: market closed', {
+          } else {
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              'Skipping trade window: market closed', {
               marketOpen,
               realtimeMarketOpen,
               etTime: etTimeString,
             });
-          return; // Skip trading when market is closed
+            return; // Skip trading when market is closed
+          }
         }
-      }
 
-      // Calculate intraday hour for reference
-      const marketOpenHour = 9.5; // 9:30 AM ET
-      const currentHourET = etHour + (etMinute / 60);
-      const minutesSinceOpen = (currentHourET - marketOpenHour) * 60;
-      const intradayHour = Math.max(0, minutesSinceOpen / 60);
-      
-      // For real-time mode: the interval itself defines the trade window
-      // First trade happens after firstTradeHour, subsequent trades happen every interval
-      const firstTradeHour = getFirstTradeHour();
-      const tradeIntervalMs = getTradeInterval();
-      
-      // Check if we should execute the first trade
-      if (!firstTradeExecuted) {
-        // First trade: must be at least firstTradeHour after market open (or immediately if delayed data)
-        if (intradayHour < firstTradeHour && !USE_DELAYED_DATA) {
-          logger.log(LogLevel.INFO, LogCategory.SIMULATION, 
-            `Waiting for first trade: need ${firstTradeHour.toFixed(3)}h (${(firstTradeHour * 60).toFixed(1)}min), have ${intradayHour.toFixed(3)}h (${(intradayHour * 60).toFixed(1)}min)`, {
+        // Calculate intraday hour for reference
+        const marketOpenHour = 9.5; // 9:30 AM ET
+        const currentHourET = etHour + (etMinute / 60);
+        const minutesSinceOpen = (currentHourET - marketOpenHour) * 60;
+        const intradayHour = Math.max(0, minutesSinceOpen / 60);
+
+        // For real-time mode: the interval itself defines the trade window
+        // First trade happens after firstTradeHour, subsequent trades happen every interval
+        const firstTradeHour = getFirstTradeHour();
+        const tradeIntervalMs = getTradeInterval();
+
+        // Check if we should execute the first trade
+        if (!firstTradeExecuted) {
+          // First trade: must be at least firstTradeHour after market open (or immediately if delayed data)
+          if (intradayHour < firstTradeHour && !USE_DELAYED_DATA) {
+            logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+              `Waiting for first trade: need ${firstTradeHour.toFixed(3)}h (${(firstTradeHour * 60).toFixed(1)}min), have ${intradayHour.toFixed(3)}h (${(intradayHour * 60).toFixed(1)}min)`, {
               intradayHour: intradayHour.toFixed(3),
               firstTradeHour: firstTradeHour.toFixed(3),
               etTime: etTimeString
             });
+            return;
+          }
+          // Execute first trade
+          logger.logSimulationEvent('First trade window: executing trades', {
+            day: snapshot.day,
+            intradayHour: intradayHour.toFixed(3),
+            marketTime: effectiveTime.toISOString(),
+            etTime: etTimeString,
+            tradeIntervalMinutes: (tradeIntervalMs / 60000).toFixed(1)
+          });
+          firstTradeExecuted = true;
+        } else {
+          // Subsequent trades: since the interval fires every tradeIntervalMs,
+          // we just execute the trade (the interval itself is the window)
+          logger.logSimulationEvent('Trade window: executing trades', {
+            day: snapshot.day,
+            intradayHour: intradayHour.toFixed(3),
+            marketTime: effectiveTime.toISOString(),
+            etTime: etTimeString
+          });
+        }
+
+        // Don't trade if market is closed (intraday hour > 6.5 means past 4:00 PM ET)
+        if (intradayHour > 6.5) {
+          logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+            'Skipping trade: market closed for the day', { intradayHour: intradayHour.toFixed(2) });
           return;
         }
-        // Execute first trade
-        logger.logSimulationEvent('First trade window: executing trades', {
-          day: snapshot.day,
-          intradayHour: intradayHour.toFixed(3),
-          marketTime: effectiveTime.toISOString(),
-          etTime: etTimeString,
-          tradeIntervalMinutes: (tradeIntervalMs / 60000).toFixed(1)
-        });
-        firstTradeExecuted = true;
-      } else {
-        // Subsequent trades: since the interval fires every tradeIntervalMs,
-        // we just execute the trade (the interval itself is the window)
-        logger.logSimulationEvent('Trade window: executing trades', {
-          day: snapshot.day,
-          intradayHour: intradayHour.toFixed(3),
-          marketTime: effectiveTime.toISOString(),
-          etTime: etTimeString
-        });
-      }
-      
-      // Don't trade if market is closed (intraday hour > 6.5 means past 4:00 PM ET)
-      if (intradayHour > 6.5) {
-        logger.log(LogLevel.INFO, LogCategory.SIMULATION, 
-          'Skipping trade: market closed for the day', { intradayHour: intradayHour.toFixed(2) });
-        return;
-      }
 
-      // Get current timestamp for real-time mode
-      const currentTimestamp = effectiveTime.getTime();
-      
-      const updatedSnapshot = await tradeWindow({
-        ...snapshot,
-        mode: snapshot.mode,
-        currentTimestamp,
-      });
-      simulationState.updateSnapshot({
-        ...updatedSnapshot,
-        currentTimestamp,
-      });
-      
-      // Persist after trade window
-      await saveSnapshot(simulationState.getSnapshot()).catch(err => {
-        logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-          'Failed to persist snapshot after trade window', { error: err });
-      });
-    } catch (error) {
-      logger.log(LogLevel.ERROR, LogCategory.SIMULATION, 
-        'Error in trade window', { 
-          error: error instanceof Error ? error.message : String(error) 
+        // Get current timestamp for real-time mode
+        const currentTimestamp = effectiveTime.getTime();
+
+        const updatedSnapshot = await tradeWindow({
+          ...snapshot,
+          mode: snapshot.mode,
+          currentTimestamp,
         });
-      // Continue running even if one trade window fails
-    }
-  }, getTradeInterval());
+        simulationState.updateSnapshot({
+          ...updatedSnapshot,
+          currentTimestamp,
+        });
+
+        // Persist after trade window
+        await saveSnapshot(simulationState.getSnapshot()).catch(err => {
+          logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+            'Failed to persist snapshot after trade window', { error: err });
+        });
+      } catch (error) {
+        logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+          'Error in trade window', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Continue running even if one trade window fails
+      }
+    }, getTradeInterval());
   } else {
     // Simulated/Historical mode: trade windows are checked in price tick handler
     // No separate interval needed
@@ -973,24 +973,24 @@ export const startScheduler = async (): Promise<void> => {
         logger.logSimulationEvent('Daily export triggered', { day: snapshot.day });
         await Promise.all([
           exportSimulationData(snapshot).catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to export simulation data', { error: err });
           }),
           exportLogs().catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to export logs', { error: err });
           }),
           priceLogService.exportLogs().catch(err => {
-            logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
               'Failed to export price logs', { error: err });
           })
         ]);
       }
     } catch (error) {
-      logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 
-        'Error in periodic export', { 
-          error: error instanceof Error ? error.message : String(error) 
-        });
+      logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+        'Error in periodic export', {
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }, EXPORT_INTERVAL_MS);
 };

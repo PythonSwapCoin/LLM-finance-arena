@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { MarketDataTelemetry } from '../types';
+import { getApiBaseUrl } from '../utils/apiConfig';
 
 interface HeaderProps {
   simulationState?: any;
@@ -40,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
   // - boolean (true/false): for realtime/hybrid (after transition) - show actual market status
   // - null/undefined: fallback case (show "LIVE" as default until status is fetched)
   const isMarketOpen = connectionStatus?.backendInfo?.simulation?.isMarketOpen;
-  
+
   // Always show market status indicator when we have a simulation mode
   // Show "MARKET CLOSED" only when explicitly false, otherwise show "LIVE"
   const shouldShowMarketStatus = simulationMode !== undefined;
@@ -49,7 +50,6 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
   useEffect(() => {
     const fetchCompetitions = async () => {
       try {
-        const { getApiBaseUrl } = await import('../utils/apiConfig');
         const API_BASE_URL = getApiBaseUrl();
         const response = await fetch(`${API_BASE_URL}/api/simulations/types`);
         if (response.ok) {
@@ -159,23 +159,21 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
                         key={competition.id}
                         onClick={() => handleCompetitionSelect(competition.id, isEnabled)}
                         disabled={!isEnabled}
-                        className={`w-full text-left px-4 py-3 transition-colors ${
-                          !isEnabled
+                        className={`w-full text-left px-4 py-3 transition-colors ${!isEnabled
                             ? 'opacity-50 cursor-not-allowed'
                             : isCurrent
-                            ? 'bg-blue-500/10 border-l-2 border-blue-500 hover:bg-arena-bg'
-                            : 'hover:bg-arena-bg'
-                        }`}
+                              ? 'bg-blue-500/10 border-l-2 border-blue-500 hover:bg-arena-bg'
+                              : 'hover:bg-arena-bg'
+                          }`}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0">
-                            <div className={`font-medium ${
-                              !isEnabled
+                            <div className={`font-medium ${!isEnabled
                                 ? 'text-arena-text-tertiary'
                                 : isCurrent
-                                ? 'text-blue-400'
-                                : 'text-arena-text-primary'
-                            }`}>
+                                  ? 'text-blue-400'
+                                  : 'text-arena-text-primary'
+                              }`}>
                               {competition.name}
                               {isCurrent && (
                                 <span className="ml-2 text-xs text-blue-400">(Current)</span>
@@ -184,9 +182,8 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
                                 <span className="ml-2 text-xs text-arena-text-tertiary italic">(Coming Soon)</span>
                               )}
                             </div>
-                            <div className={`text-xs mt-1 line-clamp-2 ${
-                              !isEnabled ? 'text-arena-text-tertiary' : 'text-arena-text-secondary'
-                            }`}>
+                            <div className={`text-xs mt-1 line-clamp-2 ${!isEnabled ? 'text-arena-text-tertiary' : 'text-arena-text-secondary'
+                              }`}>
                               {competition.description}
                             </div>
                           </div>

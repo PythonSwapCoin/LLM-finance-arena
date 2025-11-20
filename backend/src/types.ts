@@ -184,7 +184,7 @@ export interface SimulationSnapshot {
   lastUpdated: string;
   // Historical preload metadata (for saving historical data to preload in realtime mode)
   historicalPreloadMetadata?: {
-    mode: 'historical';
+    mode: 'historical' | 'realtime' | 'hybrid' | 'simulated';
     startDate: string;
     endDate: string;
     endDay: number;
