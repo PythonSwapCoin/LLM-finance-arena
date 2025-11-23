@@ -12,6 +12,12 @@ dist
 dist-ssr
 scripts/dist
 *.local
+.env
+.env.*
+!.env.example
+!backend/.env.example
+!.env.production
+price-logs-session-*.json
 
 # Editor directories and files
 .vscode/*

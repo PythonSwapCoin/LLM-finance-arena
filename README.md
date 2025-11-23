@@ -1,7 +1,7 @@
 # LLM Finance Arena
 
 ## Overview
-LLM Finance Arena is a full-stack benchmarking platform that evaluates large-language models acting as autonomous equity portfolio managers. The React frontend renders leaderboards, telemetry, and agent drill-downs, while a Fastify-based backend runs the trading simulation loop, fetches market data, orchestrates LLM calls, and persists state for long-running seasons.
+LLM Finance Arena is a full-stack benchmarking platform that evaluates large-language models acting as autonomous equity portfolio managers. The React frontend renders leaderboards, telemetry, and agent drill-downs, while a Fastify-based backend runs the trading simulation loop, fetches market data, orchestrates LLM calls, and persists state for long-running seasons. The repository is open-sourced under the MIT License so you can self-host, extend, and remix it freely.
 
 ## Highlights
 - **Multiple agent roster** – Compete LLMs such as Gemini, Claude, Grok, DeepSeek, and Qwen with identical prompts, color-coded performance histories, and leaderboard comparisons.
@@ -45,7 +45,12 @@ LLM Finance Arena is a full-stack benchmarking platform that evaluates large-lan
    npm install
    ```
 4. **Create backend configuration**
-   - Duplicate the root `.env` file or create `backend/.env` with values for `OPENROUTER_API_KEY`, `MODE`, rate intervals, and persistence paths (see [Backend Setup](./BACKEND_SETUP.md)).
+   - Copy the backend example and fill in your secrets privately (never commit keys):
+   ```bash
+   cd backend
+   cp .env.example .env
+   ```
+   - Provide values for `OPENROUTER_API_KEY`, `MODE`, rate intervals, and persistence paths (see [Backend Setup](./BACKEND_SETUP.md)).
 5. **Run the backend** (new terminal)
    ```bash
    cd backend
@@ -85,6 +90,16 @@ Key endpoints exposed by `backend/src/api/routes.ts`:
 
 The frontend’s `services/apiClient.ts` wraps these endpoints; you can reuse the same client in external dashboards or automation scripts.
 
+## Security & Privacy
+- Keep API keys in `backend/.env` or your hosting provider's secret manager; `.env` files are git-ignored to prevent accidental leaks.
+- Price log exports (`price-logs-session-*.json`) are also ignored so you can safely generate them locally without committing large or sensitive artifacts.
+- No personal data is required to run the simulator.
+
+## Community & Support
+- 🌟 If you find LLM Finance Arena helpful, please star the repository—stars signal that the project is useful and help others discover it.
+- 🤝 Questions or ideas? Open a GitHub issue or discussion so we can collaborate in the open.
+- ☕ Want to support ongoing maintenance? [Buy me a coffee](https://www.buymeacoffee.com/financearena).
+
 ## Additional Documentation
 - [QUICK_START.md](./QUICK_START.md) – Screenshot-driven setup walkthrough.
 - [ENV_SETUP.md](./ENV_SETUP.md) – Exhaustive description of frontend `.env` flags and deployment settings.
@@ -93,4 +108,4 @@ The frontend’s `services/apiClient.ts` wraps these endpoints; you can reuse th
 - [POSTGRES_SETUP.md](./POSTGRES_SETUP.md) – How to provision Render Postgres and wire it into the backend.
 
 ## License
-All trades are simulated and not financial advice.
+LLM Finance Arena is released under the [MIT License](./LICENSE). Trading activity is simulated and provided for educational purposes only—nothing here is financial advice.

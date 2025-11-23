@@ -28,7 +28,7 @@ cd backend
 npm install
 ```
 
-3. Create a `.env` file (copy from `.env.example`):
+3. Create a `.env` file (copy from `.env.example` — the file is git-ignored so secrets stay private):
 ```bash
 cp .env.example .env
 ```

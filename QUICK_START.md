@@ -3,122 +3,88 @@
 ## How to Run LLM Finance Arena
 
 ### Prerequisites
-- Node.js installed (v18 or higher recommended)
-- OpenRouter API key (for LLM access)
+- Node.js 18+ and npm
+- OpenRouter API key (for backend LLM calls)
 
 ### Step 1: Install Dependencies
 ```bash
 npm install
+cd backend && npm install && cd ..
 ```
 
-### Step 2: Configure Environment
-1. Copy the example environment file:
+### Step 2: Configure Environments
+1. Frontend: copy the example file and set the API base if your backend runs elsewhere.
    ```bash
-   # Windows (PowerShell)
-   Copy-Item .env.example .env.local
-   
-   # Windows (CMD) or Mac/Linux
    cp .env.example .env.local
    ```
 
-2. Edit `.env.local` and add your OpenRouter API key:
-   ```env
-   VITE_OPENROUTER_API_KEY=your_openrouter_api_key_here
+2. Backend: copy the new backend example and add your keys (keep this file private and out of git).
+   ```bash
+   cd backend
+   cp .env.example .env
+   # edit .env to set OPENROUTER_API_KEY and any market-data keys
+   cd ..
    ```
 
-3. Choose your mode (see below)
-
 ### Step 3: Choose Your Mode
+Set `MODE` in `backend/.env`:
 
-#### Mode 1: Simulated Data (Default - Fast Testing)
-- No additional configuration needed
-- Uses randomly generated market data
-- Perfect for testing the UI and functionality
-- Runs fast (3 seconds per update)
-
-#### Mode 2: Real-Time Market Data
-Add to `.env.local`:
-```env
-VITE_USE_REAL_DATA=true
-```
-- Fetches real market data from Yahoo Finance (no API key needed)
-- Falls back to Alpha Vantage or Polygon.io if you have keys
-- Updates every 30 minutes (when running in real-time mode)
-- LLMs trade every 2 hours (at market open, 10 AM, 12 PM, 2 PM ET)
-
-#### Mode 3: Historical Simulation
-Add to `.env.local`:
-```env
-VITE_USE_HISTORICAL_SIMULATION=true
-```
-- Uses real historical data for a specific week
-- Default: First week of 2025 (Jan 6-10)
-- Automatically stops after 5 days
-- Perfect for backtesting
+- `MODE=simulated` (default): generates ticks locally for fast demos, no API keys needed beyond the LLM key.
+- `MODE=realtime`: fetches live quotes; add Alpha Vantage or Polygon keys for better coverage.
+- `MODE=historical`: replays a specific week at accelerated speed; set `HISTORICAL_SIMULATION_START_DATE`.
+- `MODE=hybrid`: replays history until caught up, then switches to live trading.
 
 ### Step 4: Run the Application
+Start the backend in one terminal:
+```bash
+cd backend
+npm run dev
+```
+
+Start the frontend from the project root in another terminal:
 ```bash
 npm run dev
 ```
 
-The app will start at `http://localhost:3000`
+The app will start at `http://localhost:3000` and poll the backend at `http://localhost:8080/api` by default.
 
 ### Step 5: Start the Simulation
-1. Click the "Start Live" button in the header
-2. Watch the agents make trading decisions
-3. View performance on the leaderboard
-4. Click on any agent to see detailed metrics
+1. Click the "Start Live" button in the header.
+2. Watch the agents make trading decisions.
+3. View performance on the leaderboard.
+4. Click on any agent to see detailed metrics.
 
 ### Important Notes
-
-**For Real-Time Mode:**
-- The simulation currently runs at 3-second intervals (fast mode)
-- For actual 30-minute intervals, you'll need to modify `App.tsx` line 43
-- Keep your browser/computer running for the entire week
-- State is NOT persisted - if you close the browser, you'll lose progress
-
-**For Historical Mode:**
-- Runs automatically through 5 days
-- Exports data when complete
-- No need to keep running for a week
-
-**Exporting Data:**
-- Click "Stop & Export" to download simulation results
-- Click "Logs" button to download system logs
-- Files are saved to your Downloads folder
+- Keep API keys in `backend/.env` or your hosting provider's secret store—never commit secrets.
+- Price log exports (`price-logs-session-*.json`) are git-ignored so you can save local runs safely.
+- The MIT License applies to the codebase; trading activity is simulated and not financial advice.
 
 ### Troubleshooting
 
 **"No API key configured"**
-- Make sure `VITE_OPENROUTER_API_KEY` is set in `.env.local`
-- Restart the dev server after changing `.env.local`
+- Ensure `OPENROUTER_API_KEY` is set in `backend/.env`.
+- Restart the backend after changing environment variables.
 
 **Rate limit errors**
-- Free tier APIs have rate limits
-- Use simulated mode for testing
-- Consider upgrading API plans for production
+- Use `MODE=simulated` while iterating to avoid external API usage.
+- Provide Alpha Vantage or Polygon keys for more resilient real-time data.
 
 **CORS errors**
-- Make sure you're using `npm run dev`, not opening HTML directly
-- The app must run through the Vite dev server
+- Run the frontend with `npm run dev` instead of opening `index.html` directly.
+- Confirm `ALLOWED_ORIGINS` in `backend/.env` includes your frontend URL.
 
 ### File Structure
 ```
-├── App.tsx                    # Main application component
-├── hooks/
-│   └── useSimulation.ts      # Simulation logic
-├── services/
-│   ├── marketDataService.ts  # Market data fetching
-│   ├── geminiService.ts      # LLM API calls
-│   ├── logger.ts              # Logging system
-│   └── yfinanceService.ts    # Yahoo Finance integration
-├── components/               # UI components
-├── constants.ts              # Configuration
-└── types.ts                 # TypeScript types
+├── App.tsx                    # Root React application
+├── hooks/                     # Frontend hooks
+├── services/                  # API client and helpers
+├── components/                # UI components
+├── backend/                   # Fastify backend
+└── shared/                    # Shared types and utilities
 ```
 
 ### Next Steps
-- See [ENV_SETUP.md](./ENV_SETUP.md) for detailed environment configuration
-- See [README.md](./README.md) for full documentation
+- See [ENV_SETUP.md](./ENV_SETUP.md) for detailed environment configuration.
+- See [README.md](./README.md) for full documentation and community links.
 
 
