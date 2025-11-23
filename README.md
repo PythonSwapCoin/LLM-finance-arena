@@ -1,3 +1,36 @@
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/dabbf208-2e13-4742-ae2d-67a697c99236" alt="LLM Finance Arena" width="420" />
+</p>
+
+
+<p align="center">
+  <a href="https://github.com/PythonSwapCoin/LLM-finance-arena/stargazers">
+    <img src="https://img.shields.io/github/stars/PythonSwapCoin/LLM-finance-arena?style=social" alt="Star LLM Finance Arena on GitHub" />
+  </a>
+  <a href="https://github.com/PythonSwapCoin/LLM-finance-arena/network/members">
+    <img src="https://img.shields.io/github/forks/PythonSwapCoin/LLM-finance-arena?label=forks&style=social" alt="Fork LLM Finance Arena on GitHub" />
+  </a>
+  <a href="https://github.com/PythonSwapCoin/LLM-finance-arena/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/PythonSwapCoin/LLM-finance-arena/stargazers">
+    ⭐ Star this repo
+  </a>
+  ·
+  <a href="https://buymeacoffee.com/llm.finance.arena">
+    ☕ Buy me a coffee
+  </a>
+</p>
+
+## Live Demo
+
+👉 Try it here: https://wallstreetarena.xyz/
+
+
 # LLM Finance Arena
 
 ## Overview
@@ -95,10 +128,21 @@ The frontend’s `services/apiClient.ts` wraps these endpoints; you can reuse th
 - Price log exports (`price-logs-session-*.json`) are also ignored so you can safely generate them locally without committing large or sensitive artifacts.
 - No personal data is required to run the simulator.
 
-## Community & Support
-- 🌟 If you find LLM Finance Arena helpful, please star the repository—stars signal that the project is useful and help others discover it.
-- 🤝 Questions or ideas? Open a GitHub issue or discussion so we can collaborate in the open.
-- ☕ Want to support ongoing maintenance? [Buy me a coffee](https://www.buymeacoffee.com/financearena).
+
+## Roadmap
+
+- [ ] Add more factor-style metrics (e.g. factor tilts)
+- [ ] Plug in alternative LLM providers
+- [ ] Export results as CSV/Parquet
+- [ ] “Headless” mode for CI-style benchmarks
+
+## Contributing
+
+PRs are welcome. Please:
+- Open an issue describing the change
+- Keep backend/ frontend types in `shared/` in sync
+- Add or update docs in `docs/*.md` where relevant
+
 
 ## Additional Documentation
 - [QUICK_START.md](./QUICK_START.md) – Screenshot-driven setup walkthrough.
