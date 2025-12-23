@@ -24,6 +24,7 @@ interface PositionLog {
 }
 
 interface PortfolioValueLog {
+  simulationId?: string;
   agentId: string;
   agentName: string;
   day: number;
@@ -38,6 +39,7 @@ interface PortfolioValueLog {
 }
 
 interface PriceLogEntry {
+  simulationId?: string;
   timestamp: number;
   day: number;
   intradayHour: number;
@@ -50,6 +52,10 @@ class PriceLogService {
   private previousPortfolioValues: Map<string, number> = new Map();
   private maxLogs = 10000; // Keep more logs for price tracking
 
+  private getSimulationKey(simulationId?: string): string {
+    return simulationId ?? 'default';
+  }
+
   /**
    * Log stock prices and portfolio values for a given time step
    */
@@ -58,9 +64,12 @@ class PriceLogService {
     agents: Agent[],
     day: number,
     intradayHour: number,
-    timestamp: number
+    timestamp: number,
+    simulationId?: string
   ): void {
     try {
+      const simulationKey = this.getSimulationKey(simulationId);
+
       // Validate inputs
       if (!marketData || Object.keys(marketData).length === 0) {
         logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
@@ -118,7 +127,8 @@ class PriceLogService {
             });
         }
         
-        const previousValue = this.previousPortfolioValues.get(agent.id);
+        const previousKey = `${simulationKey}:${agent.id}`;
+        const previousValue = this.previousPortfolioValues.get(previousKey);
         const valueChange = previousValue !== undefined ? totalValue - previousValue : undefined;
         // Store as decimal (0.01 = 1%), not percentage, to match dailyReturn format
         const valueChangePercent = previousValue !== undefined && previousValue > 0 
@@ -126,9 +136,10 @@ class PriceLogService {
           : undefined;
 
         // Update previous value
-        this.previousPortfolioValues.set(agent.id, totalValue);
+        this.previousPortfolioValues.set(previousKey, totalValue);
 
         return {
+          simulationId: simulationKey,
           agentId: agent.id,
           agentName: agent.name,
           day,
@@ -144,6 +155,7 @@ class PriceLogService {
       });
 
       const logEntry: PriceLogEntry = {
+        simulationId: simulationKey,
         timestamp,
         day,
         intradayHour,
@@ -281,6 +293,22 @@ class PriceLogService {
   clearLogs(): void {
     this.logs = [];
     this.previousPortfolioValues.clear();
+  }
+
+  /**
+   * Clear logs for a specific simulation (or all if no simulationId provided)
+   */
+  clearLogsForSimulation(simulationId?: string): void {
+    if (!simulationId) {
+      this.clearLogs();
+      return;
+    }
+
+    const simulationKey = this.getSimulationKey(simulationId);
+    this.logs = this.logs.filter(log => (log.simulationId ?? 'default') !== simulationKey);
+    Array.from(this.previousPortfolioValues.keys())
+      .filter(key => key.startsWith(`${simulationKey}:`))
+      .forEach(key => this.previousPortfolioValues.delete(key));
   }
 
   /**

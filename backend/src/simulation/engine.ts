@@ -641,7 +641,8 @@ export const step = async (
     mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
     currentTimestamp?: number;
   },
-  newMarketData: MarketData
+  newMarketData: MarketData,
+  context?: { simulationId?: string }
 ): Promise<{
   day: number;
   intradayHour: number;
@@ -677,7 +678,7 @@ export const step = async (
   // Log prices and portfolio values for debugging
   try {
     if (newMarketData && Object.keys(newMarketData).length > 0 && updatedAgents.length > 0) {
-      priceLogService.logPricesAndPortfolios(newMarketData, updatedAgents, day, intradayHour, timestamp);
+      priceLogService.logPricesAndPortfolios(newMarketData, updatedAgents, day, intradayHour, timestamp, context?.simulationId);
     }
   } catch (error) {
     // Log error but don't break the simulation
@@ -806,7 +807,8 @@ export const tradeWindow = async (
     chat: ChatState;
     mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
     currentTimestamp?: number;
-  }
+  },
+  context?: { simulationId?: string }
 ): Promise<{
   day: number;
   intradayHour: number;
@@ -968,7 +970,7 @@ export const tradeWindow = async (
   });
 
   // Validate portfolio calculations and run tests
-  validatePortfolioCalculations(updatedAgents, marketData, day, intradayHour);
+  validatePortfolioCalculations(updatedAgents, marketData, day, intradayHour, context?.simulationId);
   
   // Validate price movements for anomalies
   validatePriceMovements(currentSnapshot.marketData, marketData, day, intradayHour);
@@ -994,7 +996,8 @@ export const advanceDay = async (
     chat: ChatState;
     mode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   },
-  newMarketData: MarketData
+  newMarketData: MarketData,
+  context?: { simulationId?: string }
 ): Promise<{
   day: number;
   intradayHour: number;
@@ -1072,7 +1075,7 @@ export const advanceDay = async (
   });
 
   // Validate portfolio calculations and run tests
-  validatePortfolioCalculations(updatedAgents, newMarketData, nextDay, 0);
+  validatePortfolioCalculations(updatedAgents, newMarketData, nextDay, 0, context?.simulationId);
   
   // Validate price movements for anomalies (day transition)
   validatePriceMovements(currentSnapshot.marketData, newMarketData, nextDay, 0);

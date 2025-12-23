@@ -8,6 +8,7 @@
     "rebuild": "npm run clean && npm run build",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
+    "snapshot:tool": "tsx scripts/snapshotTool.ts",
     "worker": "node dist/worker.js",
     "worker:dev": "tsx watch src/worker.ts"
   },

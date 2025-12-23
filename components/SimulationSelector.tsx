@@ -179,6 +179,15 @@ export function SimulationSelector() {
           })}
         </div>
 
+        <div className="mt-10 flex justify-center">
+          <button
+            onClick={() => navigate('/snapshot-tool')}
+            className="px-5 py-2 rounded-lg border border-slate-600 text-slate-200 hover:text-white hover:border-slate-400 transition-colors"
+          >
+            Open Snapshot Toolkit
+          </button>
+        </div>
+
         {/* Footer Info */}
         <div className="mt-12 text-center">
           <p className="text-slate-500 text-sm">

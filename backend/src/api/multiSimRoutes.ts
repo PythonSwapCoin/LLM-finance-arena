@@ -6,6 +6,8 @@ import { createInitialMarketData, getMarketDataTelemetry } from '../services/mar
 import { S_P500_TICKERS } from '../constants.js';
 import { addUserMessageToSimulation } from '../services/multiSimChatService.js';
 import { getTimerState } from '../services/timerService.js';
+import { priceLogService } from '../services/priceLogService.js';
+import { clearPortfolioValidationCache, clearPortfolioValidationCacheForSimulation } from '../utils/portfolioValidator.js';
 import type { ChatMessageResponse } from './dto.js';
 
 export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<void> => {
@@ -88,6 +90,8 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
     const { typeId } = request.params;
 
     try {
+      priceLogService.clearLogsForSimulation(typeId);
+      clearPortfolioValidationCacheForSimulation(typeId);
       // Clear snapshot from persistence
       const { clearSnapshot } = await import('../store/persistence.js');
       await clearSnapshot(typeId).catch(err => {
@@ -142,6 +146,9 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
             `Failed to clear snapshot for ${simType.id}`, { error: err });
         });
       }
+
+      priceLogService.clearLogs();
+      clearPortfolioValidationCache();
 
       // Reset all simulations (this will create fresh ones)
       const { createInitialMarketData } = await import('../services/marketDataService.js');

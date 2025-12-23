@@ -12,6 +12,7 @@ import {
 import { exportSimulationData } from '../services/exportService.js';
 import { exportLogs } from '../services/logExportService.js';
 import { priceLogService } from '../services/priceLogService.js';
+import { clearPortfolioValidationCache } from '../utils/portfolioValidator.js';
 import { S_P500_TICKERS } from '../constants.js';
 import {
   getPersistenceDriver,
@@ -398,6 +399,8 @@ export const registerRoutes = async (fastify: FastifyInstance): Promise<void> =>
   fastify.post('/api/simulation/reset', async (request, reply) => {
     try {
       stopScheduler();
+      priceLogService.clearLogs();
+      clearPortfolioValidationCache();
 
       const persistenceDriver = getPersistenceDriver();
       const persistenceTarget = getPersistenceTargetDescription();

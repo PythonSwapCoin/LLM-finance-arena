@@ -204,8 +204,17 @@ interface AgentSnapshot {
   currentValue: number;
 }
 
-// Cache key format: "agentId:day:intradayHour" to prevent cross-day contamination
+// Cache key format: "simulationId:agentId:day:intradayHour" to prevent cross-day contamination
 const previousPortfolioValues = new Map<string, number>();
+const latestPortfolioValues = new Map<string, number>();
+
+const getSimulationKey = (simulationId?: string): string => simulationId ?? 'default';
+
+const buildCacheKey = (simulationId: string, agentId: string, day: number, intradayHour: number): string =>
+  `${simulationId}:${agentId}:${day}:${intradayHour}`;
+
+const buildLatestKey = (simulationId: string, agentId: string): string =>
+  `${simulationId}:${agentId}`;
 
 /**
  * Validates portfolio calculations and logs validation results
@@ -215,16 +224,18 @@ export const validatePortfolioCalculations = (
   agents: Agent[],
   marketData: MarketData,
   day: number,
-  intradayHour: number
+  intradayHour: number,
+  simulationId?: string
 ): void => {
   const results: { agent: string; result: PortfolioValidationResult }[] = [];
   const INITIAL_CASH = 1000000; // Should match constants
+  const simulationKey = getSimulationKey(simulationId);
 
   // Run detailed validation tests at market close (hour 6) or every 2 hours
   const shouldRunTests = intradayHour === 6 || intradayHour % 2 === 0;
 
   for (const agent of agents) {
-    const result = validateSinglePortfolio(agent, marketData);
+    const result = validateSinglePortfolio(agent, marketData, simulationKey);
     const portfolioValue = calculatePortfolioValue(agent.portfolio, marketData);
     
     // Always check for errors/warnings
@@ -308,7 +319,7 @@ export const validatePortfolioCalculations = (
       // Use a cache key that includes day and hour to prevent cross-day contamination
       // For same-day comparisons, use the previous validation point's value
       // For day transitions (hour 0), compare against the last value of previous day (hour 6)
-      const currentCacheKey = `${agent.id}:${day}:${intradayHour}`;
+      const currentCacheKey = buildCacheKey(simulationKey, agent.id, day, intradayHour);
       
       // Find the most recent previous value for comparison
       let previousValue: number | undefined;
@@ -316,7 +327,7 @@ export const validatePortfolioCalculations = (
         // At start of day, try to find the last value from previous day (hour 6, then 4, then 2, then 0)
         const previousDayHours = [6, 4, 2, 0];
         for (const prevHour of previousDayHours) {
-          const prevKey = `${agent.id}:${day - 1}:${prevHour}`;
+          const prevKey = buildCacheKey(simulationKey, agent.id, day - 1, prevHour);
           const cachedValue = previousPortfolioValues.get(prevKey);
           if (cachedValue !== undefined) {
             previousValue = cachedValue;
@@ -335,7 +346,7 @@ export const validatePortfolioCalculations = (
           }
         }
         if (foundPreviousHour >= 0) {
-          const prevKey = `${agent.id}:${day}:${foundPreviousHour}`;
+          const prevKey = buildCacheKey(simulationKey, agent.id, day, foundPreviousHour);
           previousValue = previousPortfolioValues.get(prevKey);
         }
       }
@@ -469,14 +480,15 @@ export const validatePortfolioCalculations = (
 
     // Track value changes for next validation (store after validation for next call)
     // Use cache key that includes day and hour to prevent cross-day contamination
-    const cacheKey = `${agent.id}:${day}:${intradayHour}`;
+    const cacheKey = buildCacheKey(simulationKey, agent.id, day, intradayHour);
     previousPortfolioValues.set(cacheKey, portfolioValue);
+    latestPortfolioValues.set(buildLatestKey(simulationKey, agent.id), portfolioValue);
     
     // Clean up old entries to prevent memory leak (keep only last 10 days worth)
     if (previousPortfolioValues.size > 1000) {
       const keysToDelete: string[] = [];
       for (const key of previousPortfolioValues.keys()) {
-        const keyDay = parseInt(key.split(':')[1]);
+        const keyDay = parseInt(key.split(':')[2]);
         if (keyDay < day - 10) {
           keysToDelete.push(key);
         }
@@ -505,7 +517,8 @@ export const validatePortfolioCalculations = (
  */
 const validateSinglePortfolio = (
   agent: Agent,
-  marketData: MarketData
+  marketData: MarketData,
+  simulationId?: string
 ): PortfolioValidationResult => {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -553,7 +566,8 @@ const validateSinglePortfolio = (
   // Note: This function doesn't have day/hour context, so we can't use the day-aware cache
   // This is a simplified check that may not be as accurate in multi-sim scenarios
   // The main validation in validatePortfolioCalculations uses the day-aware cache
-  const previousValue = previousPortfolioValues.get(agent.id);
+  const simulationKey = getSimulationKey(simulationId);
+  const previousValue = latestPortfolioValues.get(buildLatestKey(simulationKey, agent.id));
   if (previousValue !== undefined && previousValue > 0) {
     const valueChange = portfolioValue - previousValue;
     const valueChangePercent = (valueChange / previousValue) * 100;
@@ -617,4 +631,20 @@ const calculateExpectedValue = (
  */
 export const clearPortfolioValidationCache = (): void => {
   previousPortfolioValues.clear();
+  latestPortfolioValues.clear();
+};
+
+export const clearPortfolioValidationCacheForSimulation = (simulationId?: string): void => {
+  if (!simulationId) {
+    clearPortfolioValidationCache();
+    return;
+  }
+
+  const simulationKey = getSimulationKey(simulationId);
+  Array.from(previousPortfolioValues.keys())
+    .filter(key => key.startsWith(`${simulationKey}:`))
+    .forEach(key => previousPortfolioValues.delete(key));
+  Array.from(latestPortfolioValues.keys())
+    .filter(key => key.startsWith(`${simulationKey}:`))
+    .forEach(key => latestPortfolioValues.delete(key));
 };

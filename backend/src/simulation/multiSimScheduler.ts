@@ -75,6 +75,38 @@ let realtimeLoopAbortController: { stop: boolean } | null = null;
 let isRunning = false;
 let firstTradeExecuted = false;
 let lastHistoricalPreloadSaveTime: number | null = null;
+let isPriceTickRunning = false;
+let isTradeWindowRunning = false;
+let lastPriceTickSkipLog = 0;
+let lastTradeWindowSkipLog = 0;
+
+const simulationLocks = new Map<string, Promise<void>>();
+
+const withSimulationLock = async <T>(
+  simulationTypeId: string,
+  task: () => Promise<T>
+): Promise<T> => {
+  const previous = simulationLocks.get(simulationTypeId) ?? Promise.resolve();
+  let release: (() => void) | null = null;
+  const next = new Promise<void>(resolve => {
+    release = resolve;
+  });
+
+  const queuePromise = previous.then(() => next).catch(() => next);
+  simulationLocks.set(simulationTypeId, queuePromise);
+
+  await previous;
+  try {
+    return await task();
+  } finally {
+    if (release) {
+      release();
+    }
+    if (simulationLocks.get(simulationTypeId) === queuePromise) {
+      simulationLocks.delete(simulationTypeId);
+    }
+  }
+};
 
 const shouldSaveHistoricalPreloadSnapshot = (mode: string): boolean => {
   if (process.env.SAVE_HISTORICAL_PRELOAD === 'false') {
@@ -161,14 +193,74 @@ const maybeSaveRealtimeHistoricalPreload = async (
  * Update portfolio valuations for a simulation instance
  */
 const stepSimulation = async (simulationTypeId: string, newMarketData: MarketData): Promise<void> => {
-  const instance = simulationManager.getSimulation(simulationTypeId);
-  if (!instance) return;
+  return withSimulationLock(simulationTypeId, async () => {
+    const instance = simulationManager.getSimulation(simulationTypeId);
+    if (!instance) return;
 
-  const snapshot = instance.getSnapshot();
+    const snapshot = instance.getSnapshot();
 
-  try {
-    const result = await step(
-      {
+    try {
+      const result = await step(
+        {
+          day: snapshot.day,
+          intradayHour: snapshot.intradayHour,
+          marketData: snapshot.marketData,
+          agents: snapshot.agents,
+          benchmarks: snapshot.benchmarks,
+          chat: snapshot.chat,
+          mode: snapshot.mode,
+          currentTimestamp: snapshot.currentTimestamp,
+        },
+        newMarketData,
+        { simulationId: simulationTypeId }
+      );
+
+      instance.updateSnapshot({
+        agents: result.agents,
+        benchmarks: result.benchmarks,
+        marketData: result.marketData,
+        chat: result.chat,
+      });
+
+      // Save snapshot after step
+      try {
+        const snapshot = instance.getSnapshot();
+        await saveSnapshot(snapshot, simulationTypeId);
+      } catch (error) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          `Failed to save snapshot after step for ${simulationTypeId}`, {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    } catch (error) {
+      logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+        `Failed to step simulation ${simulationTypeId}`, { error });
+    }
+  });
+};
+
+/**
+ * Execute trading window for a simulation instance
+ */
+const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> => {
+  return withSimulationLock(simulationTypeId, async () => {
+    const instance = simulationManager.getSimulation(simulationTypeId);
+    if (!instance) return;
+
+    let snapshot = instance.getSnapshot();
+    const simType = instance.getSimulationType();
+
+    // Update chat message status to "delivered" for this round (only for chat-enabled simulations)
+    if (simType.chatEnabled) {
+      updateChatMessagesStatusForSimulation(simulationTypeId, snapshot.day, snapshot.intradayHour);
+      // Get fresh snapshot after updating message status so agents see "delivered" messages
+      snapshot = instance.getSnapshot();
+    }
+
+    // Removed verbose "Trade window starting" log - only errors will be logged
+
+    try {
+      const result = await tradeWindow({
         day: snapshot.day,
         intradayHour: snapshot.intradayHour,
         marketData: snapshot.marketData,
@@ -177,96 +269,42 @@ const stepSimulation = async (simulationTypeId: string, newMarketData: MarketDat
         chat: snapshot.chat,
         mode: snapshot.mode,
         currentTimestamp: snapshot.currentTimestamp,
-      },
-      newMarketData
-    );
+      }, { simulationId: simulationTypeId });
 
-    instance.updateSnapshot({
-      agents: result.agents,
-      benchmarks: result.benchmarks,
-      marketData: result.marketData,
-      chat: result.chat,
-    });
+      instance.updateSnapshot({
+        agents: result.agents,
+        benchmarks: result.benchmarks,
+        chat: result.chat,
+        marketData: result.marketData,
+      });
 
-    // Save snapshot after step
-    try {
-      const snapshot = instance.getSnapshot();
-      await saveSnapshot(snapshot, simulationTypeId);
+      // Removed verbose "Trade window completed" log - only errors will be logged
+
+      // Save snapshot after trade window
+      try {
+        const updatedSnapshot = instance.getSnapshot();
+        await saveSnapshot(updatedSnapshot, simulationTypeId);
+      } catch (error) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          `Failed to save snapshot after trade window for ${simulationTypeId}`, {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     } catch (error) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        `Failed to save snapshot after step for ${simulationTypeId}`, {
-        error: error instanceof Error ? error.message : String(error)
+      logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+        `Failed to execute trade window for simulation ${simulationTypeId}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
     }
-  } catch (error) {
-    logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
-      `Failed to step simulation ${simulationTypeId}`, { error });
-  }
-};
-
-/**
- * Execute trading window for a simulation instance
- */
-const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> => {
-  const instance = simulationManager.getSimulation(simulationTypeId);
-  if (!instance) return;
-
-  let snapshot = instance.getSnapshot();
-  const simType = instance.getSimulationType();
-
-  // Update chat message status to "delivered" for this round (only for chat-enabled simulations)
-  if (simType.chatEnabled) {
-    updateChatMessagesStatusForSimulation(simulationTypeId, snapshot.day, snapshot.intradayHour);
-    // Get fresh snapshot after updating message status so agents see "delivered" messages
-    snapshot = instance.getSnapshot();
-  }
-
-  // Removed verbose "Trade window starting" log - only errors will be logged
-
-  try {
-    const result = await tradeWindow({
-      day: snapshot.day,
-      intradayHour: snapshot.intradayHour,
-      marketData: snapshot.marketData,
-      agents: snapshot.agents,
-      benchmarks: snapshot.benchmarks,
-      chat: snapshot.chat,
-      mode: snapshot.mode,
-      currentTimestamp: snapshot.currentTimestamp,
-    });
-
-    instance.updateSnapshot({
-      agents: result.agents,
-      benchmarks: result.benchmarks,
-      chat: result.chat,
-      marketData: result.marketData,
-    });
-
-    // Removed verbose "Trade window completed" log - only errors will be logged
-
-    // Save snapshot after trade window
-    try {
-      const updatedSnapshot = instance.getSnapshot();
-      await saveSnapshot(updatedSnapshot, simulationTypeId);
-    } catch (error) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        `Failed to save snapshot after trade window for ${simulationTypeId}`, {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  } catch (error) {
-    logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
-      `Failed to execute trade window for simulation ${simulationTypeId}`, {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-  }
+  });
 };
 
 /**
  * Advance to next day for a simulation instance
  */
 const advanceDaySimulation = async (simulationTypeId: string, newMarketData: MarketData): Promise<void> => {
+  return withSimulationLock(simulationTypeId, async () => {
   const instance = simulationManager.getSimulation(simulationTypeId);
   if (!instance) return;
 
@@ -284,7 +322,8 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
         chat: snapshot.chat,
         mode: snapshot.mode,
       },
-      newMarketData
+      newMarketData,
+      { simulationId: simulationTypeId }
     );
 
     // Calculate new currentDate for the advanced day
@@ -368,7 +407,8 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
           updatedSnapshot.agents,
           newDay,
           0, // intradayHour
-          timestamp
+          timestamp,
+          simulationTypeId
         );
       }
     } catch (error) {
@@ -396,6 +436,7 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
       stack: error instanceof Error ? error.stack : undefined,
     });
   }
+  });
 };
 
 /**
@@ -408,6 +449,10 @@ export const startMultiSimScheduler = async (): Promise<void> => {
   }
 
   isRunning = true;
+  isPriceTickRunning = false;
+  isTradeWindowRunning = false;
+  lastPriceTickSkipLog = 0;
+  lastTradeWindowSkipLog = 0;
   lastHistoricalPreloadSaveTime = null;
   const simInterval = getSimInterval();
   const tradeInterval = getTradeInterval();
@@ -431,6 +476,17 @@ export const startMultiSimScheduler = async (): Promise<void> => {
 
   // Price tick handler
   const priceTickHandler = async (prefetchedRealtimeData?: RealtimePrefetchResult | null) => {
+    if (isPriceTickRunning) {
+      const now = Date.now();
+      if (now - lastPriceTickSkipLog > 60000) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          'Skipping price tick - previous tick still running', {});
+        lastPriceTickSkipLog = now;
+      }
+      return;
+    }
+
+    isPriceTickRunning = true;
     try {
       // Get current market data (shared across all simulations)
       const currentMarketData = simulationManager.getSharedMarketData();
@@ -714,11 +770,24 @@ export const startMultiSimScheduler = async (): Promise<void> => {
       }
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 'Price tick handler error', { error });
+    } finally {
+      isPriceTickRunning = false;
     }
   };
 
   // Trade window handler
   const tradeWindowHandler = async () => {
+    if (isTradeWindowRunning) {
+      const now = Date.now();
+      if (now - lastTradeWindowSkipLog > 60000) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          'Skipping trade window - previous window still running', {});
+        lastTradeWindowSkipLog = now;
+      }
+      return;
+    }
+
+    isTradeWindowRunning = true;
     try {
       // Check market status for realtime mode and hybrid mode (after transition)
       const isRealtimeModeForTrades = mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
@@ -793,6 +862,8 @@ export const startMultiSimScheduler = async (): Promise<void> => {
       updateTimerState();
     } catch (error) {
       logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 'Trade window handler error', { error });
+    } finally {
+      isTradeWindowRunning = false;
     }
   };
 
