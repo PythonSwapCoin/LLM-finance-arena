@@ -43,6 +43,7 @@ MODE=simulated
 
 # Historical Simulation (only used if MODE=historical or MODE=hybrid)
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
+HISTORICAL_SIMULATION_END_DATE=
 
 # Optional: Maximum number of simulation days before auto-stop (works for all modes)
 # If not set, simulation runs indefinitely until manually stopped
@@ -215,6 +216,7 @@ Returns log entries. Query parameters:
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
 - `MODE`: Simulation mode - `simulated`, `realtime`, `historical`, or `hybrid` (default: `simulated`)
 - `HISTORICAL_SIMULATION_START_DATE`: Start date for historical or hybrid mode (YYYY-MM-DD)
+- `HISTORICAL_SIMULATION_END_DATE`: End date for historical or hybrid mode (YYYY-MM-DD, optional)
 - `MAX_SIMULATION_DAYS`: Maximum number of simulation days before auto-stop (works for all modes). If not set or set to a non-numeric value, the simulation runs indefinitely until manually stopped. Default: none (runs forever)
 - `ALPHA_VANTAGE_API_KEY`: Alpha Vantage API key (fallback data source)
 - `POLYGON_API_KEY`: Polygon.io API key (fallback data source)
@@ -246,9 +248,9 @@ Returns log entries. Query parameters:
 - Runs indefinitely until manually stopped (or until `MAX_SIMULATION_DAYS` if configured)
 
 ### Historical Mode
-- Uses real historical data from a specified week (Mon-Fri)
+- Uses real historical data from a specified date range (trading days only)
 - Runs at accelerated speed (configurable via `SIM_MARKET_MINUTES_PER_TICK`)
-- Can be configured to auto-stop after a set number of days via `MAX_SIMULATION_DAYS`, or run indefinitely if not set
+- Can be configured to auto-stop after a set number of days via `MAX_SIMULATION_DAYS`, or by setting `HISTORICAL_SIMULATION_END_DATE`
 - Requires Yahoo Finance access (no API key needed)
 
 ### Hybrid Mode

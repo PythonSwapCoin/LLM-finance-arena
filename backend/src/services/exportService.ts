@@ -24,7 +24,7 @@ export const exportSimulationData = async (snapshot: SimulationSnapshot): Promis
           historicalPeriod: {
             start: historicalPeriod.start.toISOString().split('T')[0],
             end: historicalPeriod.end.toISOString().split('T')[0],
-            description: `Historical simulation using real market data from ${historicalPeriod.start.toISOString().split('T')[0]} to ${historicalPeriod.end.toISOString().split('T')[0]} (Mon-Fri)`,
+            description: `Historical simulation using real market data from ${historicalPeriod.start.toISOString().split('T')[0]} to ${historicalPeriod.end.toISOString().split('T')[0]} (trading days)`,
             note: `Simulation processed days 0-${snapshot.day} (${snapshot.day + 1} trading days total)`
           }
         } : {}),

@@ -61,9 +61,9 @@ const shutdown = async ({ reason, exitCode, error }: { reason: string; exitCode:
 
 // Verify environment variables are loaded
 if (process.env.OPENROUTER_API_KEY) {
-  console.log('✅ OPENROUTER_API_KEY loaded successfully');
+  console.log('OPENROUTER_API_KEY loaded successfully.');
 } else {
-  console.warn('⚠️ OPENROUTER_API_KEY not found in environment variables');
+  console.warn('OPENROUTER_API_KEY not found in environment variables.');
 }
 
 const fastify = Fastify({
@@ -209,9 +209,9 @@ const start = async (): Promise<void> => {
       port: PORT,
       origins: ALLOWED_ORIGINS
     });
-    console.log(`🚀 Backend server running on http://localhost:${PORT}`);
-    console.log(`📊 Multi-simulation framework initialized`);
-    console.log(`🔒 CORS allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+    console.log(`Backend server running on http://localhost:${PORT}`);
+    console.log('Multi-simulation framework initialized');
+    console.log(`CORS allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   } catch (err) {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
       'Error starting server', {

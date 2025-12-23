@@ -9,7 +9,7 @@ interface InfoPanelProps {
   isStopped: boolean;
   day: number;
   intradayHour?: number;
-  simulationMode?: 'simulated' | 'realtime' | 'historical';
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   isHistoricalComplete?: boolean;
   variant?: 'desktop' | 'mobile';
   className?: string;

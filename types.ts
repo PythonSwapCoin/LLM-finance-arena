@@ -36,6 +36,8 @@ export interface MarketData {
   [ticker: string]: TickerData;
 }
 
+export type SimulationMode = 'simulated' | 'realtime' | 'historical' | 'hybrid';
+
 export type TradeAction = 'buy' | 'sell' | 'hold';
 
 export interface Trade {

@@ -3,27 +3,79 @@ import { MAX_POSITION_SIZE_PERCENT, UNIFIED_SYSTEM_PROMPT, TRADING_FEE_RATE, MIN
 import { sanitizeOutgoingMessage } from '../utils/chatUtils.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
 const ENABLE_LLM = (process.env.ENABLE_LLM ?? 'true').toLowerCase() === 'true';
 const USE_UNIFIED_MODEL = (process.env.USE_UNIFIED_MODEL ?? 'false').toLowerCase() === 'true';
 const UNIFIED_MODEL = process.env.UNIFIED_MODEL || 'google/gemini-2.5-flash-lite';
 const SIMPLE_BOT_PROMPTS = (process.env.SIMPLE_BOT_PROMPTS ?? 'false').toLowerCase() === 'true';
 
-if (!OPENROUTER_API_KEY && ENABLE_LLM) {
-  console.warn('OPENROUTER_API_KEY is not set. LLM agents will not be able to make trading decisions.');
+const isPlaceholderOpenRouterKey = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  if (normalized === 'sk-or-v1-your-key-here') {
+    return true;
+  }
+  if (normalized.includes('your_openrouter_api_key')) {
+    return true;
+  }
+  if (normalized.includes('your-openrouter-api-key')) {
+    return true;
+  }
+  if (normalized.includes('your_key_here') || normalized.includes('your-key-here')) {
+    return true;
+  }
+  return false;
+};
+
+const hasUsableOpenRouterKey = Boolean(OPENROUTER_API_KEY) && !isPlaceholderOpenRouterKey(OPENROUTER_API_KEY);
+
+let llmAuthDisabled = false;
+let missingKeyWarned = false;
+let authDisabledWarned = false;
+
+const warnMissingKeyOnce = (): void => {
+  if (missingKeyWarned) {
+    return;
+  }
+  missingKeyWarned = true;
+  logger.log(
+    LogLevel.WARNING,
+    LogCategory.LLM,
+    'OPENROUTER_API_KEY is missing or looks like a placeholder. Using synthetic trades.',
+    {}
+  );
+};
+
+const warnAuthDisabledOnce = (message?: string): void => {
+  if (authDisabledWarned) {
+    return;
+  }
+  authDisabledWarned = true;
+  logger.log(
+    LogLevel.ERROR,
+    LogCategory.LLM,
+    'Disabling LLM calls due to OpenRouter auth/credits error. Using synthetic trades.',
+    { error: message }
+  );
+};
+
+if (!hasUsableOpenRouterKey && ENABLE_LLM) {
+  console.warn('OPENROUTER_API_KEY is not set or looks like a placeholder. LLM agents will use synthetic trades.');
 }
 
 if (!ENABLE_LLM) {
-  console.log('⚠️ LLM mode is DISABLED. Using synthetic/simulated trades for testing.');
+  console.log('LLM mode is DISABLED. Using synthetic/simulated trades for testing.');
 }
 
 if (USE_UNIFIED_MODEL) {
-  console.log(`⚠️ Unified model mode ENABLED. All agents will use: ${UNIFIED_MODEL}`);
+  console.log(`Unified model mode ENABLED. All agents will use: ${UNIFIED_MODEL}`);
   console.log('   (Frontend will still show original model names for display purposes)');
 }
 
 if (SIMPLE_BOT_PROMPTS) {
-  console.log('⚠️ Simple bot prompts ENABLED. Using JSON format with ticker and price only to reduce token usage.');
+  console.log('Simple bot prompts ENABLED. Using JSON format with ticker and price only to reduce token usage.');
 }
 
 const getAgentPrompt = (agent: Agent): string => {
@@ -287,9 +339,9 @@ const generateSyntheticTrades = (
   let reply: string | undefined;
   if (chatContext?.enabled && chatContext.messages.length > 0) {
     const genericReplies = [
-      'Thanks for the update—staying focused on our strategy.',
-      'Appreciate the feedback—keeping our positions aligned with market conditions.',
-      'Noted—maintaining our disciplined approach to portfolio management.',
+      'Thanks for the update - staying focused on our strategy.',
+      'Appreciate the feedback - keeping our positions aligned with market conditions.',
+      'Noted - maintaining our disciplined approach to portfolio management.',
     ];
     reply = genericReplies[Math.floor(Math.random() * genericReplies.length)];
   }
@@ -307,24 +359,34 @@ export const getTradeDecisions = async (
 ): Promise<{ trades: Omit<Trade, 'price' | 'timestamp'>[]; rationale: string; reply?: string }> => {
   // Determine which model will be used (for logging)
   const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
-  const displayModel = USE_UNIFIED_MODEL ? `${agent.model} (→ ${UNIFIED_MODEL})` : agent.model;
+  const displayModel = USE_UNIFIED_MODEL ? `${agent.model} (via ${UNIFIED_MODEL})` : agent.model;
   // Removed verbose logging - only errors will be logged
+
+  const logSyntheticReason = (reason: string) => {
+    logger.log(
+      LogLevel.INFO,
+      LogCategory.LLM,
+      `Using synthetic trades for ${agent.name} (${reason})`,
+      { agent: agent.name }
+    );
+  };
 
   // If LLM is disabled, use synthetic trades
   if (!ENABLE_LLM) {
-    // Synthetic trades in use (LLM disabled)
-    logger.log(LogLevel.INFO, LogCategory.LLM,
-      `Using synthetic trades for ${agent.name} (ENABLE_LLM=false)`, { agent: agent.name });
+    logSyntheticReason('ENABLE_LLM=false');
     return generateSyntheticTrades(agent, marketData, day, chatContext);
   }
-  
-  if (!OPENROUTER_API_KEY) {
-    // Return empty trades gracefully instead of throwing
-    logger.log(LogLevel.WARNING, LogCategory.LLM,
-      `OPENROUTER_API_KEY not set for ${agent.name}, returning empty trades`, { agent: agent.name });
-    const communityMessages = chatContext?.messages ?? [];
-    const fallbackReply = (chatContext?.enabled && communityMessages.length > 0) ? 'Unable to respond right now.' : undefined;
-    return { trades: [], rationale: 'API key not configured - holding positions.', reply: fallbackReply };
+
+  if (!hasUsableOpenRouterKey) {
+    warnMissingKeyOnce();
+    logSyntheticReason('OPENROUTER_API_KEY missing/placeholder');
+    return generateSyntheticTrades(agent, marketData, day, chatContext);
+  }
+
+  if (llmAuthDisabled) {
+    warnAuthDisabledOnce();
+    logSyntheticReason('OpenRouter auth/credits error');
+    return generateSyntheticTrades(agent, marketData, day, chatContext);
   }
 
   const portfolioValue = Object.values(agent.portfolio.positions).reduce((acc, pos) => 
@@ -641,6 +703,14 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
       }
       
       const responseTime = Date.now() - startTime;
+
+      if (response.status === 401 || response.status === 402 || response.status === 403) {
+        const error = new Error(`OpenRouter API error: ${response.status} - ${errorMessage}`);
+        logger.logLLMCall(agent.name, modelToUse, false, undefined, responseTime, error);
+        llmAuthDisabled = true;
+        warnAuthDisabledOnce(error.message);
+        throw error;
+      }
       
       if (response.status === 429) {
         const retryAfter = response.headers.get('retry-after');
@@ -930,6 +1000,10 @@ ${agent.memory.pastRationales.slice(-3).map((r, i) => `- ${r}`).join('\n') || 'N
     const modelToUse = USE_UNIFIED_MODEL ? UNIFIED_MODEL : agent.model;
     logger.logLLMCall(agent.name, modelToUse, false, undefined, responseTime, errorMessage);
     console.error("Error fetching trade decisions:", error);
+    if (llmAuthDisabled) {
+      logSyntheticReason('OpenRouter auth/credits error');
+      return generateSyntheticTrades(agent, marketData, day, chatContext);
+    }
     // Never throw past the service boundary - return empty trades instead
     const communityMessages = chatContext?.messages ?? [];
     const fallbackReply = (chatContext?.enabled && communityMessages.length > 0) ? 'Unable to respond right now.' : undefined;

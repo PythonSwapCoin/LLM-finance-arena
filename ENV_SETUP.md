@@ -21,7 +21,7 @@
 
 ```env
 # Backend API URL
-VITE_API_BASE=http://localhost:8080/api
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 **Note**: API keys are no longer needed in the frontend. They are configured server-side only.
@@ -92,30 +92,32 @@ HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload  # Default snapshot ID
 
 ```env
 MODE=historical
-# Optional: Set custom start date (must be a Monday, defaults to first week of 2025)
+# Optional: Set custom start date (YYYY-MM-DD, defaults to first week of 2025)
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
+# Optional: Set custom end date (YYYY-MM-DD)
+HISTORICAL_SIMULATION_END_DATE=
 
 # Optional: Save snapshot for preloading in realtime mode (default: true)
 SAVE_HISTORICAL_PRELOAD=true
 HISTORICAL_PRELOAD_SNAPSHOT_ID=historical-preload  # Default snapshot ID
 
-# IMPORTANT: Set maximum simulation days (counts WEEKDAYS only, max 5 for one week)
-MAX_SIMULATION_DAYS=5  # 5 weekdays = Mon-Fri (one trading week)
-# MAX_SIMULATION_DAYS=6  # Would be Mon-Mon (6 weekdays across two weeks)
+# Optional: Set maximum simulation days (counts trading days only, weekends skipped)
+MAX_SIMULATION_DAYS=20
 ```
 
 **What it does:**
-- Fetches real market data for a specific week (Mon-Fri)
-- Default: First week of 2025 (Jan 6-10, 2025)
-- Simulates trading as if starting at the beginning of that week
+- Fetches real market data for a historical date range (trading days only)
+- Default: First week of 2025 (Jan 6-10, 2025) when no end date or max days are provided
+- Simulates trading as if starting at the beginning of that range
 - Uses actual historical prices from Yahoo Finance
-- **IMPORTANT:** MAX_SIMULATION_DAYS counts **weekdays only** (Sat/Sun are automatically skipped)
-- Recommended: Set MAX_SIMULATION_DAYS to 5 or less for best results with historical data
+- **IMPORTANT:** MAX_SIMULATION_DAYS counts trading days only (weekends are automatically skipped)
+- If both HISTORICAL_SIMULATION_END_DATE and MAX_SIMULATION_DAYS are set, the shorter window is used
 
 **Custom Date:**
-- Set `HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different week
-- The date will be adjusted to the nearest Monday
-- Example: `HISTORICAL_SIMULATION_START_DATE=2024-06-03` (will use June 3-7, 2024)
+- Set `HISTORICAL_SIMULATION_START_DATE=YYYY-MM-DD` to use a different start date
+- Optionally set `HISTORICAL_SIMULATION_END_DATE=YYYY-MM-DD` to cap the range
+- Dates are adjusted to the nearest trading day when they fall on weekends or holidays
+- Example: `HISTORICAL_SIMULATION_START_DATE=2024-06-03` and `HISTORICAL_SIMULATION_END_DATE=2024-07-31`
 
 ## Historical Data Preload Feature
 
@@ -127,11 +129,11 @@ MAX_SIMULATION_DAYS=5  # 5 weekdays = Mon-Fri (one trading week)
    ```env
    MODE=historical
    HISTORICAL_SIMULATION_START_DATE=2025-11-10
-   MAX_SIMULATION_DAYS=5
+   HISTORICAL_SIMULATION_END_DATE=2025-12-06
    SAVE_HISTORICAL_PRELOAD=true
    ```
 
-   - The simulation will run for 5 days using historical data
+   - The simulation will run for the configured historical range using real data
    - When complete, it automatically saves a snapshot for preloading
    - Snapshot is saved to `./data/snapshot_historical-preload.json` (or database)
 
@@ -179,8 +181,8 @@ If there's a time gap between historical end and realtime start:
 ### Example Workflow
 
 ```bash
-# Step 1: Run historical simulation for last week
-# Set MODE=historical and HISTORICAL_SIMULATION_START_DATE=2025-11-10
+# Step 1: Run historical simulation for a custom range
+# Set MODE=historical, HISTORICAL_SIMULATION_START_DATE=2025-11-10, HISTORICAL_SIMULATION_END_DATE=2025-12-06
 npm run dev  # Frontend
 npm run dev  # Backend (in backend directory)
 
@@ -190,7 +192,7 @@ npm run dev  # Backend (in backend directory)
 # Update .env: MODE=realtime, REALTIME_PRELOAD_HISTORICAL=true
 # Restart backend server
 
-# Result: Charts show last week's data + current realtime data
+# Result: Charts show historical range data + current realtime data
 ```
 
 ### Configuration Options
@@ -215,7 +217,7 @@ npm run dev  # Backend (in backend directory)
 
 ### Frontend `.env.local`
 ```env
-VITE_API_BASE=http://localhost:8080/api
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 ### Backend `.env` (Simulated Mode)

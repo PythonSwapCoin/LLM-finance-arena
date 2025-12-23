@@ -52,6 +52,21 @@ const getSimulatedMinutesPerTick = (): number => {
   return 30;
 };
 
+const advanceTradingDays = (start: Date, tradingDays: number): Date => {
+  const result = new Date(start);
+  if (tradingDays <= 0) {
+    return result;
+  }
+  let advanced = 0;
+  while (advanced < tradingDays) {
+    result.setUTCDate(result.getUTCDate() + 1);
+    if (isMarketOpen(result)) {
+      advanced += 1;
+    }
+  }
+  return result;
+};
+
 // Get the first trade hour based on trade interval
 const getFirstTradeHour = (): number => {
   const mode = getSimulationMode();
@@ -83,7 +98,7 @@ const shouldSaveHistoricalPreloadSnapshot = (mode: string): boolean => {
   if (process.env.SAVE_HISTORICAL_PRELOAD === 'false') {
     return false;
   }
-  if (mode === 'historical' || mode === 'realtime') {
+  if (mode === 'historical' || mode === 'realtime' || mode === 'simulated') {
     return true;
   }
   if (mode === 'hybrid') {
@@ -119,7 +134,9 @@ const saveHistoricalPreloadSnapshot = async (
       endDate: snapshot.currentDate || new Date().toISOString(),
       endDay: snapshot.day,
       endIntradayHour: snapshot.intradayHour,
-      tickIntervalMs: metadataMode === 'historical' ? historicalTickIntervalMs : realtimeTickIntervalMs,
+      tickIntervalMs: metadataMode === 'historical' || metadataMode === 'simulated'
+        ? historicalTickIntervalMs
+        : realtimeTickIntervalMs,
       marketMinutesPerTick: parseInt(process.env.SIM_MARKET_MINUTES_PER_TICK || '30', 10),
       realtimeTickIntervalMs
     }
@@ -531,10 +548,10 @@ export const startScheduler = async (): Promise<void> => {
         // Update currentDate for the new day
         firstTradeExecuted = false;
         let newCurrentDate: string;
-        if ((snapshot.mode === 'historical' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
+        if ((snapshot.mode === 'historical' || snapshot.mode === 'simulated' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
           const start = new Date(snapshot.startDate);
-          start.setDate(start.getDate() + updatedSnapshot.day);
-          newCurrentDate = start.toISOString();
+          const currentDate = advanceTradingDays(start, updatedSnapshot.day);
+          newCurrentDate = currentDate.toISOString();
         } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
           // For real-time mode, update currentDate
           const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
@@ -550,10 +567,10 @@ export const startScheduler = async (): Promise<void> => {
             newCurrentDate = new Date().toISOString();
           }
         } else {
-          // Simulated
+          // Simulated fallback without a start date.
           const start = snapshot.startDate ? new Date(snapshot.startDate) : new Date();
-          start.setDate(start.getDate() + updatedSnapshot.day);
-          newCurrentDate = start.toISOString();
+          const currentDate = advanceTradingDays(start, updatedSnapshot.day);
+          newCurrentDate = currentDate.toISOString();
         }
         simulationState.updateSnapshot({
           ...updatedSnapshot,
@@ -621,11 +638,11 @@ export const startScheduler = async (): Promise<void> => {
             }
           } else {
             // For simulated/historical or hybrid (pre-transition), calculate from start date
-            start.setDate(start.getDate() + currentSnapshot.day);
+            const tradingDate = advanceTradingDays(start, currentSnapshot.day);
             const hours = Math.floor(nextHour);
             const minutes = Math.round((nextHour - hours) * 60);
-            start.setHours(9 + hours, 30 + minutes, 0, 0);
-            newCurrentDate = start.toISOString();
+            tradingDate.setHours(9 + hours, 30 + minutes, 0, 0);
+            newCurrentDate = tradingDate.toISOString();
           }
         }
         simulationState.updateSnapshot({

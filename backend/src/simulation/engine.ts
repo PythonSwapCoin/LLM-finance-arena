@@ -7,6 +7,7 @@ import { applyAgentRepliesToChat, type AgentReplyInput } from '../services/chatS
 import { createRoundId } from '../utils/chatUtils.js';
 import { priceLogService } from '../services/priceLogService.js';
 import { validatePortfolioCalculations, validatePriceMovements } from '../utils/portfolioValidator.js';
+import { hasHybridModeTransitioned } from '../services/marketDataService.js';
 
 const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
   if (value === undefined) {
@@ -24,6 +25,9 @@ const maxConcurrentRequests = Math.max(0, parseIntWithDefault(process.env.LLM_MA
 const realtimeIntervalMs = Math.max(0, parseIntWithDefault(process.env.REALTIME_SIM_INTERVAL_MS, 600000));
 const simulatedIntervalMs = Math.max(0, parseIntWithDefault(process.env.SIM_INTERVAL_MS, 30000));
 
+const isRealtimeMode = (mode: 'simulated' | 'realtime' | 'historical' | 'hybrid' | undefined): boolean =>
+  mode === 'realtime' || (mode === 'hybrid' && hasHybridModeTransitioned());
+
 const getRequestSpacingMs = (mode: 'simulated' | 'realtime' | 'historical' | 'hybrid' | undefined, agentCount: number): number => {
   if (manualSpacingMs >= 0) {
     return manualSpacingMs;
@@ -31,7 +35,7 @@ const getRequestSpacingMs = (mode: 'simulated' | 'realtime' | 'historical' | 'hy
   if (!autoSpacingEnabled) {
     return 0;
   }
-  const interval = mode === 'realtime' ? realtimeIntervalMs : simulatedIntervalMs;
+  const interval = isRealtimeMode(mode) ? realtimeIntervalMs : simulatedIntervalMs;
   if (interval <= 0) {
     return minSpacingMs;
   }
@@ -193,7 +197,7 @@ const handleTradeWindowAgent = async (
     const trimmedReply = rawReply?.trim();
     const hasUserMessagesThisRound = Boolean(chatContext?.messages && chatContext.messages.length > 0);
     const shouldProvideFallbackReply = !trimmedReply && chatContext?.enabled && hasUserMessagesThisRound;
-    const fallbackReply = 'Appreciate the update—keeping our strategy on track.';
+    const fallbackReply = 'Appreciate the update - keeping our strategy on track.';
     const reply = shouldProvideFallbackReply ? fallbackReply : trimmedReply;
 
     if (shouldProvideFallbackReply) {
@@ -360,7 +364,7 @@ const handleTradeWindowAgent = async (
     });
 
     const intradayTrades = newTradeHistory.filter(t => {
-      if (mode === 'realtime' && currentTimestamp !== undefined) {
+      if (isRealtimeMode(mode) && currentTimestamp !== undefined) {
         const tradeTimestamp = currentTimestamp / 1000;
         return Math.abs(t.timestamp - tradeTimestamp) < 60;
       }
@@ -652,7 +656,7 @@ export const step = async (
   // Always initialize timestamp to ensure it's never undefined
   let timestamp: number = day + (intradayHour / 10); // Default: day-based timestamp
   
-  if (mode === 'realtime' && currentTimestamp !== undefined) {
+  if (isRealtimeMode(mode) && currentTimestamp !== undefined) {
     // For real-time mode: use actual timestamp (milliseconds since epoch)
     // Convert to seconds for consistency with performance history
     timestamp = currentTimestamp / 1000; // Convert to seconds
@@ -817,7 +821,7 @@ export const tradeWindow = async (
   // Always initialize timestamp to ensure it's never undefined
   let timestamp: number = day + (intradayHour / 10); // Default: day-based timestamp
 
-  if (mode === 'realtime' && currentTimestamp !== undefined) {
+  if (isRealtimeMode(mode) && currentTimestamp !== undefined) {
     // For real-time mode: use actual timestamp (milliseconds since epoch)
     // Convert to seconds for consistency with performance history
     timestamp = currentTimestamp / 1000; // Convert to seconds

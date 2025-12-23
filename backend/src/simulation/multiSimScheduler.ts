@@ -37,6 +37,21 @@ const getSimulatedMinutesPerTick = (): number => {
   return 30;
 };
 
+const advanceTradingDays = (start: Date, tradingDays: number): Date => {
+  const result = new Date(start);
+  if (tradingDays <= 0) {
+    return result;
+  }
+  let advanced = 0;
+  while (advanced < tradingDays) {
+    result.setUTCDate(result.getUTCDate() + 1);
+    if (isMarketOpen(result)) {
+      advanced += 1;
+    }
+  }
+  return result;
+};
+
 // Track price ticks (yfinance rounds) to delay first trade
 let priceTickCount = 0;
 const REQUIRED_PRICE_TICKS_BEFORE_FIRST_TRADE = 3;
@@ -65,7 +80,7 @@ const shouldSaveHistoricalPreloadSnapshot = (mode: string): boolean => {
   if (process.env.SAVE_HISTORICAL_PRELOAD === 'false') {
     return false;
   }
-  if (mode === 'historical' || mode === 'realtime') {
+  if (mode === 'historical' || mode === 'realtime' || mode === 'simulated') {
     return true;
   }
   if (mode === 'hybrid') {
@@ -101,7 +116,9 @@ const saveHistoricalPreloadSnapshot = async (
       endDate: snapshot.currentDate || new Date().toISOString(),
       endDay: snapshot.day,
       endIntradayHour: snapshot.intradayHour,
-      tickIntervalMs: metadataMode === 'historical' ? historicalTickIntervalMs : realtimeTickIntervalMs,
+      tickIntervalMs: metadataMode === 'historical' || metadataMode === 'simulated'
+        ? historicalTickIntervalMs
+        : realtimeTickIntervalMs,
       marketMinutesPerTick: parseInt(process.env.SIM_MARKET_MINUTES_PER_TICK || '30', 10),
       realtimeTickIntervalMs
     }
@@ -272,21 +289,10 @@ const advanceDaySimulation = async (simulationTypeId: string, newMarketData: Mar
 
     // Calculate new currentDate for the advanced day
     let newCurrentDate: string;
-    if ((snapshot.mode === 'historical' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
-      // For historical/hybrid mode, skip weekends - only advance to trading days
+    if ((snapshot.mode === 'historical' || snapshot.mode === 'simulated' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
+      // For historical/simulated/hybrid pre-transition, advance in trading days.
       const start = new Date(snapshot.startDate);
-      let tradingDaysAdvanced = 0;
-      let currentDate = new Date(start);
-
-      // Advance to the next trading day (skip weekends)
-      while (tradingDaysAdvanced < newDay) {
-        currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-        const dayOfWeek = currentDate.getUTCDay();
-        // Skip weekends (0 = Sunday, 6 = Saturday)
-        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-          tradingDaysAdvanced++;
-        }
-      }
+      const currentDate = advanceTradingDays(start, newDay);
       newCurrentDate = currentDate.toISOString();
     } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
       // For real-time mode, update currentDate to account for data delay

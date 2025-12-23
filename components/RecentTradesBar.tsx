@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Agent, Trade } from '../types';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
 import { getTradingDateFromStart } from '../shared/tradingDays';
+import { isUnixTimestamp, toUnixSeconds } from '../utils/marketTime';
 
 interface TradeWithAgent extends Trade {
   agentName: string;
@@ -13,7 +14,7 @@ interface RecentTradesBarProps {
   agents: Agent[];
   startDate?: string;
   currentDate?: string;
-  simulationMode?: 'simulated' | 'realtime' | 'historical';
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   day?: number;
   intradayHour?: number;
   simulationTypeName?: string;
@@ -24,7 +25,7 @@ const getTimeAgo = (
   tradeTimestamp: number,
   startDate?: string,
   currentDate?: string,
-  simulationMode?: 'simulated' | 'realtime' | 'historical',
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid',
   currentDay?: number,
   currentIntradayHour?: number
 ): string => {
@@ -32,9 +33,9 @@ const getTimeAgo = (
     let tradeDate: Date;
     let currentTime: Date;
 
-    if (simulationMode === 'realtime' && tradeTimestamp > 1000000000) {
+    if (isUnixTimestamp(tradeTimestamp)) {
       // Unix timestamp
-      tradeDate = new Date(tradeTimestamp * 1000);
+      tradeDate = new Date(toUnixSeconds(tradeTimestamp) * 1000);
       currentTime = currentDate ? new Date(currentDate) : new Date();
     } else if (startDate) {
       // Calculate trade date from startDate
@@ -81,7 +82,7 @@ const TradeItem: React.FC<{
   trade: TradeWithAgent;
   startDate?: string;
   currentDate?: string;
-  simulationMode?: 'simulated' | 'realtime' | 'historical';
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   day?: number;
   intradayHour?: number;
   isHovered: boolean;
@@ -193,16 +194,6 @@ export const RecentTradesBar: React.FC<RecentTradesBarProps> = ({
   const sortedTrades = recentTrades
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 15);
-
-  // Debug logging
-  if (sortedTrades.length > 0) {
-    console.log('Recent trades (first 3):', sortedTrades.slice(0, 3).map(t => ({
-      timestamp: t.timestamp,
-      action: t.action,
-      symbol: t.symbol,
-      agent: t.agentName
-    })));
-  }
 
   if (sortedTrades.length === 0) {
     return <div className="h-10 bg-arena-bg border-b border-arena-border" />;

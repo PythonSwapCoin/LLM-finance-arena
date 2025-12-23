@@ -85,6 +85,7 @@ MODE=realtime
 
 # Historical Simulation (only used if MODE=historical)
 HISTORICAL_SIMULATION_START_DATE=2025-01-06
+HISTORICAL_SIMULATION_END_DATE=
 
 # API Keys
 OPENROUTER_API_KEY=sk-or-v1-your-key-here

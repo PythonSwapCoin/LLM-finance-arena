@@ -249,7 +249,8 @@ export const prepareAgentsForRealtimePreload = (
   metadata: HistoricalPreloadMetadata,
   realtimeStartDate: string
 ): Agent[] => {
-  const isHistoricalSource = metadata.mode === 'historical' || metadata.mode === 'hybrid';
+  const isHistoricalSource = metadata.mode === 'historical' || metadata.mode === 'hybrid' || metadata.mode === 'simulated';
+  const realtimeStartMs = new Date(realtimeStartDate).getTime();
 
   return historicalAgents.map(agent => {
     // Interpolate performance history
@@ -262,12 +263,19 @@ export const prepareAgentsForRealtimePreload = (
       )
       : agent.performanceHistory;
 
+    if (isHistoricalSource && Number.isFinite(realtimeStartMs)) {
+      interpolated = interpolated.filter(metric => metric.timestamp <= realtimeStartMs);
+    }
+
     // Fill gap between historical end and realtime start
     if (interpolated.length > 0) {
       const lastMetric = interpolated[interpolated.length - 1];
+      const effectiveEndDate = Number.isFinite(lastMetric.timestamp)
+        ? new Date(lastMetric.timestamp).toISOString()
+        : metadata.endDate;
       const gapMetrics = fillGapMetrics(
         lastMetric,
-        metadata.endDate,
+        effectiveEndDate,
         realtimeStartDate,
         metadata.realtimeTickIntervalMs
       );
@@ -275,12 +283,16 @@ export const prepareAgentsForRealtimePreload = (
     }
 
     // Convert trade history timestamps
-    const convertedTrades = isHistoricalSource
+    let convertedTrades = isHistoricalSource
       ? agent.tradeHistory.map(trade => ({
         ...trade,
         timestamp: convertHistoricalTimestampToRealtime(trade.timestamp, metadata.startDate)
       }))
       : agent.tradeHistory;
+
+    if (isHistoricalSource && Number.isFinite(realtimeStartMs)) {
+      convertedTrades = convertedTrades.filter(trade => trade.timestamp <= realtimeStartMs);
+    }
 
     // Update memory with interpolated performance
     const memory = agent.memory ? {
@@ -310,7 +322,8 @@ export const prepareBenchmarksForRealtimePreload = (
   metadata: HistoricalPreloadMetadata,
   realtimeStartDate: string
 ): Benchmark[] => {
-  const isHistoricalSource = metadata.mode === 'historical' || metadata.mode === 'hybrid';
+  const isHistoricalSource = metadata.mode === 'historical' || metadata.mode === 'hybrid' || metadata.mode === 'simulated';
+  const realtimeStartMs = new Date(realtimeStartDate).getTime();
 
   return historicalBenchmarks.map(benchmark => {
     // Interpolate performance history
@@ -323,12 +336,19 @@ export const prepareBenchmarksForRealtimePreload = (
       )
       : benchmark.performanceHistory;
 
+    if (isHistoricalSource && Number.isFinite(realtimeStartMs)) {
+      interpolated = interpolated.filter(metric => metric.timestamp <= realtimeStartMs);
+    }
+
     // Fill gap between historical end and realtime start
     if (interpolated.length > 0) {
       const lastMetric = interpolated[interpolated.length - 1];
+      const effectiveEndDate = Number.isFinite(lastMetric.timestamp)
+        ? new Date(lastMetric.timestamp).toISOString()
+        : metadata.endDate;
       const gapMetrics = fillGapMetrics(
         lastMetric,
-        metadata.endDate,
+        effectiveEndDate,
         realtimeStartDate,
         metadata.realtimeTickIntervalMs
       );

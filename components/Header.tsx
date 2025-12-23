@@ -212,6 +212,24 @@ export const Header: React.FC<HeaderProps> = ({ simulationState, connectionStatu
 
         {/* Status badges - Right side (hidden on mobile, visible on md+) */}
         <div className="hidden md:flex items-center space-x-2 lg:space-x-4 flex-shrink-0">
+          <div className="flex items-center space-x-2">
+            <a
+              href="https://github.com/PythonSwapCoin/LLM-finance-arena"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-semibold text-arena-text-secondary hover:text-arena-text-primary border border-arena-border/60 px-2.5 py-1 rounded-md transition-colors"
+            >
+              GitHub
+            </a>
+            <a
+              href="https://buymeacoffee.com/llm.finance.arena"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-semibold text-arena-text-secondary hover:text-arena-text-primary border border-arena-border/60 px-2.5 py-1 rounded-md transition-colors"
+            >
+              Buy me a coffee
+            </a>
+          </div>
           {/* Live indicator with market status */}
           {shouldShowMarketStatus && (
             <div className="text-arena-text-primary flex items-center space-x-2">

@@ -31,7 +31,7 @@ Set `MODE` in `backend/.env`:
 
 - `MODE=simulated` (default): generates ticks locally for fast demos, no API keys needed beyond the LLM key.
 - `MODE=realtime`: fetches live quotes; add Alpha Vantage or Polygon keys for better coverage.
-- `MODE=historical`: replays a specific week at accelerated speed; set `HISTORICAL_SIMULATION_START_DATE`.
+- `MODE=historical`: replays a historical date range at accelerated speed; set `HISTORICAL_SIMULATION_START_DATE` (optionally `HISTORICAL_SIMULATION_END_DATE` or `MAX_SIMULATION_DAYS`).
 - `MODE=hybrid`: replays history until caught up, then switches to live trading.
 
 ### Step 4: Run the Application

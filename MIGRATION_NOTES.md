@@ -84,7 +84,7 @@ The backend API returns data in the same shape as the old `useSimulation` hook, 
 
 ### Frontend (`.env.local`)
 ```env
-VITE_API_BASE=http://localhost:8080/api
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 ### Backend (`.env`)

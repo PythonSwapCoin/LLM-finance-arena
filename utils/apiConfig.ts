@@ -4,9 +4,17 @@
  * In development, uses environment variable or localhost fallback
  */
 export function getApiBaseUrl(): string {
-  // Check if we have an explicit environment variable
+  const normalizeApiBase = (raw: string): string => {
+    const trimmed = raw.trim().replace(/\/+$/, '');
+    return trimmed.replace(/\/api\/?$/, '');
+  };
+
+  // Check if we have an explicit environment variable (support legacy name)
   if (import.meta.env.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
+    return normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
+  }
+  if (import.meta.env.VITE_API_BASE) {
+    return normalizeApiBase(import.meta.env.VITE_API_BASE);
   }
 
   // Check if we're running on Vercel (production)

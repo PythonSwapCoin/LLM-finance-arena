@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import type { PerformanceMetrics } from '../types';
 import { INITIAL_CASH } from '../constants';
 import { formatTimestampToDate } from '../utils/timeFormatting';
+import { normalizeTimestampToUnixSeconds } from '../utils/marketTime';
 
 interface PerformanceChartProps {
   data: PerformanceMetrics[];
@@ -10,7 +11,7 @@ interface PerformanceChartProps {
   color: string;
   startDate?: string;
   currentDate?: string;
-  simulationMode?: 'simulated' | 'realtime' | 'historical';
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
 }
 
 export const PerformanceChart: React.FC<PerformanceChartProps> = ({
@@ -25,10 +26,19 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
     return <div className="flex items-center justify-center h-full text-arena-text-secondary">No data available</div>;
   }
 
+  const chartData = React.useMemo(
+    () =>
+      data.map(point => ({
+        ...point,
+        chartTimestamp: normalizeTimestampToUnixSeconds(point.timestamp, startDate) ?? point.timestamp
+      })),
+    [data, startDate]
+  );
+
   return (
     <ResponsiveContainer width="100%" height="100%" minHeight={200}>
       <LineChart
-        data={data}
+        data={chartData}
         margin={{
           top: 5,
           right: 20,
@@ -38,16 +48,14 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
       >
         <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
         <XAxis
-          dataKey="timestamp"
+          dataKey="chartTimestamp"
           stroke="#A3A3A3"
           tick={{ fill: '#A3A3A3', fontSize: 12 }}
           tickFormatter={(value) => {
             const numericValue = typeof value === 'number' ? value : Number(value);
             // Find the actual data point that matches this timestamp
-            const sourcePoint = data.find(d => {
-              const tolerance = numericValue > 1000000000 ? 60 : 0.01; // Unix timestamp tolerance vs day-based
-              return Math.abs((d.timestamp as number) - numericValue) < tolerance;
-            }) || data.find(d => Math.abs((d.timestamp as number) - numericValue) < 1);
+            const sourcePoint = chartData.find(d => Math.abs((d.chartTimestamp as number) - numericValue) < 60)
+              || chartData.find(d => Math.abs((d.chartTimestamp as number) - numericValue) < 1);
             
             return formatTimestampToDate(
               numericValue,

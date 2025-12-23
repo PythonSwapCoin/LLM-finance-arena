@@ -10,7 +10,7 @@ interface AgentDetailViewProps {
   marketData?: { [ticker: string]: { price: number; longName?: string } } | { [ticker: string]: import('../types').TickerData }; // Optional market data for current prices
   startDate?: string;
   currentDate?: string;
-  simulationMode?: 'simulated' | 'realtime' | 'historical';
+  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid';
   showModelName?: boolean;
   simulationTypeName?: string;
 }

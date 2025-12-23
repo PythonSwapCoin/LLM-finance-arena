@@ -3,9 +3,16 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import type { Agent, Benchmark } from '../types';
 import { INITIAL_CASH } from '../constants';
 import { formatTimestampToDate } from '../utils/timeFormatting';
-import { getTradingDateFromStart } from '../shared/tradingDays';
 import { getAgentDisplayName } from '../utils/modelNameFormatter';
-import { addTradingDays, getNextTradingDay, isWeekend } from '../utils/tradingDays';
+import {
+  MARKET_OPEN_MINUTES,
+  formatEtDate,
+  formatEtTime,
+  getEtDayKey,
+  getEtMinutes,
+  isWithinMarketHoursSeconds,
+  normalizeTimestampToUnixSeconds
+} from '../utils/marketTime';
 
 type Participant = Agent | Benchmark;
 
@@ -39,12 +46,13 @@ const CustomTooltip = ({
     const filteredPayload = selectedParticipantId 
       ? payload.filter((pld: any) => pld.dataKey === selectedParticipantId)
       : payload;
+    const numericPayload = filteredPayload.filter((pld: any) => typeof pld.value === 'number' && Number.isFinite(pld.value));
     
     return (
       <div className="bg-arena-surface p-4 rounded-md border border-arena-border shadow-lg">
         <p className="label text-arena-text-primary font-semibold">{timeLabel}</p>
         <div className="mt-2 space-y-1">
-          {filteredPayload.sort((a: any, b: any) => b.value - a.value).map((pld: any, idx: number) => {
+          {numericPayload.sort((a: any, b: any) => b.value - a.value).map((pld: any, idx: number) => {
             // Get the participant to check if it's an agent or benchmark
             const participant = participants?.find((p: any) => p.id === pld.dataKey);
             const displayName = participant && 'model' in participant
@@ -134,599 +142,67 @@ const EndOfLineLabel = ({ points, data, color, name, isBenchmark }: any) => {
 };
 
 
-// Helper function to check if a timestamp is within market hours (9:30 AM - 4:00 PM ET)
-// For real-time mode, we assume timestamps are already in the correct timezone context
-const isWithinMarketHours = (
-  timestamp: number,
-  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid',
-  startDate?: string
-): boolean => {
-  try {
-    let date: Date;
-    
-    if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
-      // Unix timestamp (seconds) - this should already be in UTC
-      // The timestamp represents the actual time the data was collected
-      // For delayed data, it's 30 minutes ago, but still within market hours
-      date = new Date(timestamp * 1000);
-      
-      // Convert UTC to ET (simplified: ET is UTC-5 or UTC-4)
-      // For market hours check, we need to know the hour in ET
-      // Since the backend is already calculating this correctly, 
-      // we can check if the UTC hour (when converted to ET) is within market hours
-      // Market hours: 9:30 AM - 4:00 PM ET
-      // ET offset: UTC-5 (EST) or UTC-4 (EDT)
-      
-      // Simple approximation: check if hour is between 13:30 and 20:00 UTC (9:30-16:00 ET in EST)
-      // Or between 14:30 and 21:00 UTC (9:30-16:00 ET in EDT)
-      // For simplicity, we'll check a wider range: 13:00-21:00 UTC covers both cases
-      const utcHour = date.getUTCHours();
-      const utcMinute = date.getUTCMinutes();
-      const utcMinutes = utcHour * 60 + utcMinute;
-      
-      // EST: 9:30 AM ET = 14:30 UTC, 4:00 PM ET = 21:00 UTC
-      // EDT: 9:30 AM ET = 13:30 UTC, 4:00 PM ET = 20:00 UTC
-      // Use a conservative range that covers both: 13:00-21:30 UTC
-      return utcMinutes >= (13 * 60) && utcMinutes < (21 * 60 + 30);
-    } else if (startDate) {
-      // For simulated/historical: timestamps are day-based, assume all are valid
-      // (they're only generated during market hours anyway)
-      return true;
-    } else {
-      // Can't determine, assume it's valid
-      return true;
-    }
-  } catch {
-    // On error, assume valid
-    return true;
-  }
+type TimePeriod = '24h' | '1w' | 'all';
+
+type AxisMeta = {
+  timestamps: number[];
+  dayKeys: string[];
+  dayIndices: number[];
+  totalDays: number;
+  showEveryNDays: number;
+  isGapIndices: Set<number>;
 };
 
-// Helper function to get date from timestamp
-const getDateFromTimestamp = (
-  timestamp: number,
-  startDate?: string,
-  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid'
-): Date | null => {
-  try {
-    // Handle realtime and hybrid mode (after transition) with Unix timestamps
-    if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
-      return new Date(timestamp * 1000);
-    } else if (startDate) {
-      if (simulationMode === 'historical' || simulationMode === 'simulated') {
-        const daysToAdd = Math.floor(timestamp);
-        const date = getTradingDateFromStart(startDate, daysToAdd);
-        const hourDecimal = timestamp - daysToAdd;
-        const hours = Math.floor(hourDecimal * 10);
-        const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-        date.setHours(9 + hours, 30 + minutes, 0, 0);
-        return date;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-};
+const MARKET_OPEN_LABEL_WINDOW_MINUTES = 45;
 
-// Helper function to format X-axis: show only hour, or day label at day boundaries
+// Helper function to format X-axis labels for market hours
 const formatXAxisLabel = (
   timestamp: number,
   index: number,
-  allTimestamps: number[],
-  startDate?: string,
-  currentDate?: string,
-  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid',
-  day?: number,
-  intradayHour?: number,
+  axisMeta: AxisMeta,
   timePeriod?: TimePeriod
 ): string => {
-  // Determine time span of the data
-  const timeSpan = allTimestamps.length > 0 
-    ? allTimestamps[allTimestamps.length - 1] - allTimestamps[0]
-    : 0;
-  
-  // For 'all' period, check if we should show days (if > 1 week) or hours
-  const shouldShowDays = timePeriod === '1w' || timePeriod === 'all' || 
-    (timePeriod === undefined && timeSpan > 7 * 24 * 60 * 60); // > 1 week in seconds
-  
-  // For 24h period, always show hours
-  const showHoursOnly = timePeriod === '24h' || (!shouldShowDays && timeSpan <= 24 * 60 * 60);
-  // For real-time mode with Unix timestamps, we need to format in ET timezone
-  // Also handle hybrid mode after transition (when timestamps become Unix timestamps)
-  const isRealtimeTimestamp = timestamp > 1000000000;
-  if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && isRealtimeTimestamp) {
-    const date = new Date(timestamp * 1000);
-    
-    // Check if this is the first data point of a new day in ET timezone
-    let isNewDay = false;
-    if (index === 0) {
-      isNewDay = true;
-    } else if (index > 0) {
-      const prevTimestamp = allTimestamps[index - 1];
-      if (prevTimestamp && prevTimestamp > 1000000000) {
-        const prevDate = new Date(prevTimestamp * 1000);
-        // Compare dates in ET timezone
-        try {
-          const currentDateStr = date.toLocaleDateString('en-US', { 
-            timeZone: 'America/New_York',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-          });
-          const prevDateStr = prevDate.toLocaleDateString('en-US', { 
-            timeZone: 'America/New_York',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-          });
-          isNewDay = currentDateStr !== prevDateStr;
-        } catch {
-          // Fallback: use UTC dates
-          const currentDay = date.getUTCDate();
-          const currentMonth = date.getUTCMonth();
-          const currentYear = date.getUTCFullYear();
-          const prevDay = prevDate.getUTCDate();
-          const prevMonth = prevDate.getUTCMonth();
-          const prevYear = prevDate.getUTCFullYear();
-          isNewDay = currentDay !== prevDay || currentMonth !== prevMonth || currentYear !== prevYear;
-        }
-      }
-    }
-    
-    // Check if this is around market open time (9:30 AM ET)
-    let isMarketOpenTime = false;
-    try {
-      // Get hour and minute in ET timezone using Intl.DateTimeFormat
-      const etFormatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      const parts = etFormatter.formatToParts(date);
-      const etHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
-      const etMinute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
-      const etMinutes = etHour * 60 + etMinute;
-      // Market open is 9:30 AM ET (570 minutes), check within first hour
-      isMarketOpenTime = etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30);
-    } catch {
-      // Fallback: use UTC approximation
-      const utcHour = date.getUTCHours();
-      const utcMinute = date.getUTCMinutes();
-      const utcMinutes = utcHour * 60 + utcMinute;
-      isMarketOpenTime = utcMinutes >= (13 * 60) && utcMinutes < (15 * 60);
-    }
-    
-    // For 24h period, show hours but also show date at beginning of each day
-    if (showHoursOnly) {
-      // Check if this is the first data point of a new day
-      let isNewDay = false;
-      if (index === 0) {
-        isNewDay = true;
-      } else if (index > 0) {
-        const prevTimestamp = allTimestamps[index - 1];
-        if (prevTimestamp && prevTimestamp > 1000000000) {
-          const prevDate = new Date(prevTimestamp * 1000);
-          try {
-            const currentDateStr = date.toLocaleDateString('en-US', { 
-              timeZone: 'America/New_York',
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit'
-            });
-            const prevDateStr = prevDate.toLocaleDateString('en-US', { 
-              timeZone: 'America/New_York',
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit'
-            });
-            isNewDay = currentDateStr !== prevDateStr;
-          } catch {
-            const currentDay = date.getUTCDate();
-            const currentMonth = date.getUTCMonth();
-            const currentYear = date.getUTCFullYear();
-            const prevDay = prevDate.getUTCDate();
-            const prevMonth = prevDate.getUTCMonth();
-            const prevYear = prevDate.getUTCFullYear();
-            isNewDay = currentDay !== prevDay || currentMonth !== prevMonth || currentYear !== prevYear;
-          }
-        }
-      }
-      
-      // Check if this is around market open time (9:30 AM ET)
-      let isMarketOpenTime = false;
-      try {
-        const etFormatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: 'America/New_York',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        });
-        const parts = etFormatter.formatToParts(date);
-        const etHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
-        const etMinute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
-        const etMinutes = etHour * 60 + etMinute;
-        // Market open is 9:30 AM ET (570 minutes), check within first hour
-        isMarketOpenTime = etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30);
-      } catch {
-        const utcHour = date.getUTCHours();
-        const utcMinute = date.getUTCMinutes();
-        const utcMinutes = utcHour * 60 + utcMinute;
-        isMarketOpenTime = utcMinutes >= (13 * 60) && utcMinutes < (15 * 60);
-      }
-      
-      // Show date label at the beginning of each day (new day + market open time)
-      if (isNewDay && isMarketOpenTime) {
-        try {
-          // If it's a weekend, show the next trading day's date instead
-          let displayDate = date;
-          if (isWeekend(date, 'America/New_York')) {
-            displayDate = getNextTradingDay(date, 'America/New_York');
-          }
-          
-          const dateStr = displayDate.toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric',
-            timeZone: 'America/New_York'
-          });
-          const timeStr = date.toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            hour12: false,
-            timeZone: 'America/New_York'
-          });
-          return `${dateStr} ${timeStr}`;
-        } catch {
-          // Fallback: check weekend using UTC
-          let displayDate = date;
-          if (isWeekend(date)) {
-            displayDate = getNextTradingDay(date);
-          }
-          
-          const dateStr = displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-          return `${dateStr} ${timeStr}`;
-        }
-      }
-      
-      // Otherwise show only the time
-      try {
-        return date.toLocaleTimeString('en-US', { 
-          hour: '2-digit', 
-          minute: '2-digit', 
-          hour12: false,
-          timeZone: 'America/New_York'
-        });
-      } catch {
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-      }
-    }
-    
-    // For longer periods, show days with smart spacing (max 2 labels per day)
-    // Only show day label at market open or market close
-    if (shouldShowDays) {
-      // Check if we should show this label (limit to 2 per day: market open and close)
-      const etMinutes = (() => {
-        try {
-          const etFormatter = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/New_York',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-          });
-          const parts = etFormatter.formatToParts(date);
-          const etHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
-          const etMinute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
-          return etHour * 60 + etMinute;
-        } catch {
-          const utcHour = date.getUTCHours();
-          const utcMinute = date.getUTCMinutes();
-          return (utcHour + 5) * 60 + utcMinute; // Approximate ET
-        }
-      })();
-      
-      // Calculate how many days are in the visible range
-      const totalDays = (() => {
-        if (allTimestamps.length === 0) return 0;
-        const firstTimestamp = allTimestamps[0];
-        const lastTimestamp = allTimestamps[allTimestamps.length - 1];
-        
-        if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && firstTimestamp > 1000000000 && lastTimestamp > 1000000000) {
-          const firstDate = new Date(firstTimestamp * 1000);
-          const lastDate = new Date(lastTimestamp * 1000);
-          const diffTime = Math.abs(lastDate.getTime() - firstDate.getTime());
-          return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        } else {
-          return Math.floor(lastTimestamp) - Math.floor(firstTimestamp) + 1;
-        }
-      })();
-      
-      // For shorter periods (e.g., 9 days), show every day
-      // For longer periods, show every few days
-      const showEveryNDays = totalDays <= 10 ? 1 : totalDays <= 30 ? 2 : 5;
-      
-      // Show label at market open (9:30 AM) for new days
-      const isMarketOpen = etMinutes >= (9 * 60 + 30) && etMinutes < (9 * 60 + 45);
-      
-      if (isNewDay && isMarketOpen) {
-        // Calculate day number to determine if we should show this label
-        const dayNumber = (() => {
-          if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
-            // For realtime, calculate day number from start
-            if (startDate) {
-              const start = new Date(startDate);
-              const current = new Date(timestamp * 1000);
-              const diffTime = current.getTime() - start.getTime();
-              return Math.floor(diffTime / (1000 * 60 * 60 * 24));
-            }
-            return 0;
-          } else {
-            return Math.floor(timestamp);
-          }
-        })();
-        
-        // Show label if it's a day we want to show, or if it's first/last point
-        if (dayNumber % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
-          try {
-            // If it's a weekend, show the next trading day's date instead
-            let displayDate = date;
-            if (isWeekend(date, 'America/New_York')) {
-              displayDate = getNextTradingDay(date, 'America/New_York');
-            }
-            
-            return displayDate.toLocaleDateString('en-US', { 
-              month: 'short', 
-              day: 'numeric',
-              timeZone: 'America/New_York'
-            });
-          } catch {
-            // Fallback: check weekend using UTC
-            let displayDate = date;
-            if (isWeekend(date)) {
-              displayDate = getNextTradingDay(date);
-            }
-            
-            return displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          }
-        }
-      }
-      
-      // For other times, show nothing to reduce clutter
-      return '';
-    }
-    
-    // Show day label only at the start of a new day at market open
-    if (isNewDay && isMarketOpenTime) {
-      // Format as "Nov 10" - use ET timezone for date
-      // If it's a weekend, show the next trading day's date instead
-      try {
-        let displayDate = date;
-        if (isWeekend(date, 'America/New_York')) {
-          displayDate = getNextTradingDay(date, 'America/New_York');
-        }
-        
-        return displayDate.toLocaleDateString('en-US', { 
-          month: 'short', 
-          day: 'numeric',
-          timeZone: 'America/New_York' // Use ET timezone
-        });
-      } catch {
-        // Fallback: check weekend using UTC
-        let displayDate = date;
-        if (isWeekend(date)) {
-          displayDate = getNextTradingDay(date);
-        }
-        
-        return displayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
-    }
-    
-    // Otherwise show only the hour in ET timezone
-    try {
-      return date.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        hour12: false,
-        timeZone: 'America/New_York' // Explicitly use ET timezone
-      });
-    } catch {
-      // Fallback if timezone is not supported
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-  }
-  
-  // For simulated or hybrid mode (before transition), use startDate to calculate actual dates
-  if (simulationMode === 'simulated' || simulationMode === 'hybrid') {
-    const dayNum = Math.floor(timestamp);
-    const hourDecimal = timestamp - dayNum;
-    const hours = Math.floor(hourDecimal * 10);
-    const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-    
-    // Check if this is a new day (compare day numbers) - declare outside if blocks so it's accessible everywhere
-    const isNewDay = index === 0 || Math.floor(allTimestamps[index - 1]) !== dayNum;
-    const isMarketOpen = hours === 0 && minutes === 0; // Market open is 9:30 AM = hour 0, minute 0
-    
-    // For 24h period, show hours but also show date at beginning of each day
-    if (showHoursOnly) {
-      // Show date label at the beginning of each day
-      if (isNewDay && isMarketOpen) {
-        if (startDate) {
-          const simulatedDate = getTradingDateFromStart(startDate, dayNum);
-          simulatedDate.setHours(9, 30, 0, 0);
-          
-          const dateStr = simulatedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-          return `${dateStr} ${timeStr}`;
-        } else {
-          const displayDay = dayNum + 1;
-          const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-          return `Day ${displayDay} ${timeStr}`;
-        }
-      }
-      
-      // Otherwise show only the time
-      const date = new Date(Date.UTC(2000, 0, 1, 9 + hours, 30 + minutes, 0, 0));
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-    
-    // For longer periods, show days with smart spacing
-    if (shouldShowDays) {
-      // Calculate total days in range
-      const totalDays = allTimestamps.length > 0 
-        ? Math.floor(allTimestamps[allTimestamps.length - 1]) - Math.floor(allTimestamps[0]) + 1
-        : 0;
-      
-      // For shorter periods (e.g., 9 days), show every day
-      const showEveryNDays = totalDays <= 10 ? 1 : totalDays <= 30 ? 2 : 5;
-      
-      if (isNewDay && isMarketOpen) {
-        // Show label if it's a day we want to show, or if it's first/last point
-        if (dayNum % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
-          if (startDate) {
-            const simulatedDate = getTradingDateFromStart(startDate, dayNum);
-            simulatedDate.setHours(9, 30, 0, 0);
-            
-            const day = simulatedDate.getDate();
-            const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
-            const month = monthFormatter.format(simulatedDate);
-            return `${day.toString().padStart(2, '0')}/${month}`;
-          } else {
-            const displayDay = dayNum + 1;
-            return `Day ${displayDay}`;
-          }
-        }
-      }
-      
-      // Otherwise, return empty to reduce clutter
-      return '';
-    }
-    
-    // Show date label at market open of a new day
-    if (isNewDay && isMarketOpen) {
-      if (startDate) {
-        // Calculate the actual date from startDate
-        const simulatedDate = getTradingDateFromStart(startDate, dayNum);
-        simulatedDate.setHours(9, 30, 0, 0);
-        
-        // Format as "06/Jan" style
-        const day = simulatedDate.getDate();
-        const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
-        const month = monthFormatter.format(simulatedDate);
-        return `${day.toString().padStart(2, '0')}/${month}`;
-      } else {
-        // Fallback: show "Day X" if no startDate
-        const displayDay = dayNum + 1;
-        return `Day ${displayDay}`;
-      }
-    }
-    
-    // Otherwise show just the time
-    const date = new Date(Date.UTC(2000, 0, 1, 9 + hours, 30 + minutes, 0, 0));
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  }
-  
-  // For historical/realtime mode, use date-based formatting
-  const date = getDateFromTimestamp(timestamp, startDate, simulationMode);
-  if (!date) {
-    // Fallback to simple format
-    const dayNum = Math.floor(timestamp);
-    const hourDecimal = timestamp - dayNum;
-    const hours = Math.floor(hourDecimal * 10);
-    const minutes = Math.round((hourDecimal * 10 - hours) * 60);
-    return `${hours}:${minutes.toString().padStart(2, '0')}`;
-  }
-  
-  // Check if this is the first data point of a new day
-  const currentDay = date.getDate();
-  const currentMonth = date.getMonth();
-  const currentYear = date.getFullYear();
-  const isNewDay = index === 0 || (() => {
-    const prevDate = getDateFromTimestamp(allTimestamps[index - 1], startDate, simulationMode);
-    if (!prevDate) return false;
-    return prevDate.getDate() !== currentDay || prevDate.getMonth() !== currentMonth || prevDate.getFullYear() !== currentYear;
-  })();
-  
-  // Check if this is the first data point of the day (market open - 9:30 AM)
-  const hour = date.getHours();
-  const minute = date.getMinutes();
-  const isMarketOpen = hour === 9 && minute === 30;
-  const isMarketClose = hour === 16 && minute === 0;
-  
-  // For 24h period, show hours but also show date at beginning of each day
-  if (showHoursOnly) {
-    // Show date label at the beginning of each day
-    if (isNewDay && isMarketOpen) {
-      // For historical mode, use startDate to show the actual historical date
-      if (simulationMode === 'historical' && startDate) {
-        const daysToAdd = Math.floor(timestamp);
-        const histDate = getTradingDateFromStart(startDate, daysToAdd);
-        const dateStr = histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-        return `${dateStr} ${timeStr}`;
-      }
-      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-      return `${dateStr} ${timeStr}`;
-    }
-    
-    // Otherwise show only the time
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  }
-  
-  // For longer periods, show days with smart spacing
-  if (shouldShowDays) {
-    // Calculate total days in range
-    const totalDays = allTimestamps.length > 0 
-      ? Math.floor(allTimestamps[allTimestamps.length - 1]) - Math.floor(allTimestamps[0]) + 1
-      : 0;
-    
-    // For shorter periods (e.g., 9 days), show every day
-    const showEveryNDays = totalDays <= 10 ? 1 : totalDays <= 30 ? 2 : 5;
-    
-    if (isNewDay && isMarketOpen) {
-      const dayNumber = Math.floor(timestamp);
-      // Show label if it's a day we want to show, or if it's first/last point
-      if (dayNumber % showEveryNDays === 0 || index === 0 || index === allTimestamps.length - 1) {
-        if (simulationMode === 'historical' && startDate) {
-          const daysToAdd = Math.floor(timestamp);
-          const histDate = getTradingDateFromStart(startDate, daysToAdd);
-          return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        }
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
-    }
-    
-    // Otherwise, return empty to reduce clutter
+  if (!Number.isFinite(timestamp) || axisMeta.isGapIndices.has(index)) {
     return '';
   }
-  
-  // Show day label only at the start of a new day at market open
-  if (isNewDay && isMarketOpen) {
-    // For historical mode, use startDate to show the actual historical date
-    if (simulationMode === 'historical' && startDate) {
-      const daysToAdd = Math.floor(timestamp);
-      const histDate = getTradingDateFromStart(startDate, daysToAdd);
-      return histDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const date = new Date(timestamp * 1000);
+  const dayKey = axisMeta.dayKeys[index];
+  const prevDayKey = index > 0 ? axisMeta.dayKeys[index - 1] : null;
+  const isNewDay = dayKey !== prevDayKey;
+  const isFirstPoint = index === 0;
+  const minutes = getEtMinutes(date);
+  const isMarketOpen = minutes >= MARKET_OPEN_MINUTES
+    && minutes < (MARKET_OPEN_MINUTES + MARKET_OPEN_LABEL_WINDOW_MINUTES);
+
+  const showHoursOnly = timePeriod === '24h' || axisMeta.totalDays <= 1;
+
+  if (showHoursOnly) {
+    if (isNewDay && (isMarketOpen || isFirstPoint || timePeriod === '24h')) {
+      return `${formatEtDate(date)} ${formatEtTime(date)}`;
     }
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (minutes % 60 === 0) {
+      return formatEtTime(date);
+    }
+    return '';
   }
 
-  // Otherwise show only the hour
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (isNewDay && (isMarketOpen || isFirstPoint)) {
+    const dayIndex = axisMeta.dayIndices[index];
+    if (dayIndex % axisMeta.showEveryNDays === 0 || isFirstPoint || index === axisMeta.timestamps.length - 1) {
+      return formatEtDate(date);
+    }
+  }
+
+  return '';
 };
 
-type TimePeriod = '24h' | '1w' | 'all';
 
 // Helper function to determine which ticks should be shown based on available space
 const getVisibleTickIndices = (
   chartData: any[],
   containerWidth: number,
-  startDate?: string,
-  currentDate?: string,
-  simulationMode?: 'simulated' | 'realtime' | 'historical' | 'hybrid',
-  day?: number,
-  intradayHour?: number,
+  axisMeta: AxisMeta,
   timePeriod?: TimePeriod
 ): Set<number> => {
   if (chartData.length === 0 || containerWidth === 0) {
@@ -736,21 +212,13 @@ const getVisibleTickIndices = (
   const visibleIndices = new Set<number>();
   const estimatedLabelWidth = 60; // Estimated width of a label in pixels (e.g., "14:30" or "Nov 10")
   
-  // Get all timestamps
-  const timestamps = chartData.map(d => d.timestamp as number);
-  
   // First, determine which indices have labels
   const indicesWithLabels: number[] = [];
   chartData.forEach((d, idx) => {
     const label = formatXAxisLabel(
       d.timestamp as number,
       idx,
-      timestamps,
-      startDate,
-      currentDate,
-      simulationMode,
-      day,
-      intradayHour,
+      axisMeta,
       timePeriod
     );
     if (label) {
@@ -854,368 +322,227 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
     [isCompactViewport]
   );
 
-  const { chartData, yAxisDomain, dayBoundaries } = useMemo(() => {
+  const { chartData, yAxisDomain } = useMemo(() => {
     if (!participants || !participants.length || !participants[0] || !participants[0].performanceHistory || participants[0].performanceHistory.length === 0) {
-      return { chartData: [], yAxisDomain: ['auto', 'auto'], dayBoundaries: [] };
+      return { chartData: [], yAxisDomain: ['auto', 'auto'] };
     }
-    
-    // Filter participants based on selection
-    const visibleParticipants = selectedParticipantId 
+
+    const visibleParticipants = selectedParticipantId
       ? participants.filter(p => p.id === selectedParticipantId)
       : participants;
-    
-    // Collect all unique timestamps (including intraday)
-    const allTimestamps = new Set<number>();
+
+    const seriesByParticipant = new Map<string, Array<{ timestamp: number; value: number }>>();
+    const timestampSet = new Set<number>();
+
     visibleParticipants.forEach(p => {
-      if (p.performanceHistory && Array.isArray(p.performanceHistory)) {
-        p.performanceHistory.forEach(metric => {
-          allTimestamps.add(metric.timestamp);
-        });
+      if (!p.performanceHistory || !Array.isArray(p.performanceHistory)) {
+        return;
       }
+
+      const series = p.performanceHistory
+        .map(metric => {
+          const normalized = normalizeTimestampToUnixSeconds(metric.timestamp, startDate);
+          if (normalized === null || !Number.isFinite(normalized)) {
+            return null;
+          }
+          return { timestamp: normalized, value: metric.totalValue };
+        })
+        .filter((point): point is { timestamp: number; value: number } => point !== null)
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (series.length === 0) {
+        return;
+      }
+
+      seriesByParticipant.set(p.id, series);
+      series.forEach(point => timestampSet.add(point.timestamp));
     });
-    
-    const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
-    
-    // Filter timestamps based on selected time period
-    let timeFilteredTimestamps = sortedTimestamps;
-    if (sortedTimestamps.length > 0) {
-      const latestTimestamp = sortedTimestamps[sortedTimestamps.length - 1];
-      
-      if (timePeriod === '24h') {
-        // Filter to last 24 hours
-        const cutoffTime = latestTimestamp - (24 * 60 * 60); // 24 hours in seconds for Unix timestamps
-        timeFilteredTimestamps = sortedTimestamps.filter(ts => {
-          if (ts > 1000000000) {
-            // Unix timestamp (seconds)
-            return ts >= cutoffTime;
-          } else {
-            // Day-based timestamp - approximate: 1 day = 1.0
-            return ts >= (latestTimestamp - 1.0);
-          }
-        });
-      } else if (timePeriod === '1w') {
-        // Filter to last 5 business days (1 week)
-        const cutoffTime = latestTimestamp - (5 * 24 * 60 * 60); // 5 days in seconds for Unix timestamps
-        timeFilteredTimestamps = sortedTimestamps.filter(ts => {
-          if (ts > 1000000000) {
-            // Unix timestamp (seconds)
-            return ts >= cutoffTime;
-          } else {
-            // Day-based timestamp - approximate: 5 days = 5.0
-            return ts >= (latestTimestamp - 5.0);
-          }
-        });
+
+    let timestamps = Array.from(timestampSet).sort((a, b) => a - b);
+    timestamps = timestamps.filter(ts => isWithinMarketHoursSeconds(ts));
+
+    if (timestamps.length === 0) {
+      return { chartData: [], yAxisDomain: ['auto', 'auto'] };
+    }
+
+    if (timePeriod === '24h') {
+      const latest = timestamps[timestamps.length - 1];
+      const cutoff = latest - (24 * 60 * 60);
+      timestamps = timestamps.filter(ts => ts >= cutoff);
+    } else if (timePeriod === '1w') {
+      const dayKeys = new Set<string>();
+      for (let i = timestamps.length - 1; i >= 0; i -= 1) {
+        dayKeys.add(getEtDayKey(new Date(timestamps[i] * 1000)));
+        if (dayKeys.size >= 5) {
+          break;
+        }
       }
-      // 'all' period: use all timestamps (no filtering)
+      timestamps = timestamps.filter(ts => dayKeys.has(getEtDayKey(new Date(ts * 1000))));
     }
-    
-    const data = [];
-    const boundaries: number[] = [];
 
-    // HARDCODED: Add Nov 17 boundary for hybrid->realtime transition
-    // Calculate Unix timestamp for Nov 17, 2025 at 9:30 AM ET
-    const nov17_2025 = new Date('2025-11-17T09:30:00-05:00').getTime() / 1000;
-
-    // Check if we're in hybrid mode and have realtime data
-    const hasRealtimeData = sortedTimestamps.some(ts => ts > 1000000000);
-
-    if (simulationMode === 'hybrid' && hasRealtimeData) {
-      console.log('Adding hardcoded Nov 17 boundaries at:', nov17_2025);
-      // Add Saturday line (visual marker for end of Friday)
-      boundaries.push(nov17_2025 - 86400 * 2); // 2 days before (Saturday)
-      // Add Monday Nov 17 line
-      boundaries.push(nov17_2025);
+    if (timestamps.length === 0) {
+      return { chartData: [], yAxisDomain: ['auto', 'auto'] };
     }
+
+    const diffs: number[] = [];
+    for (let i = 1; i < timestamps.length; i += 1) {
+      const diff = timestamps[i] - timestamps[i - 1];
+      if (diff > 0) {
+        diffs.push(diff);
+      }
+    }
+    const sortedDiffs = diffs.slice().sort((a, b) => a - b);
+    const medianDiff = sortedDiffs.length > 0 ? sortedDiffs[Math.floor(sortedDiffs.length / 2)] : 0;
+    const maxCarrySeconds = Math.max(medianDiff * 2.5, 5 * 60);
+
+    const timeline: Array<{ timestamp: number; isGap: boolean }> = timestamps.map(timestamp => ({
+      timestamp,
+      isGap: false,
+    }));
 
     let minValue = Infinity;
     let maxValue = -Infinity;
-    let lastDayKey: string | null = null; // Store "YYYY-MM-DD" for day comparison
 
-    // For realtime mode: filter out flat periods between market close and next day open
-    // This creates gaps in the chart similar to Yahoo Finance
-    // Also handle hybrid mode after transition
-    let filteredTimestamps = timeFilteredTimestamps;
-    const isRealtimeMode = simulationMode === 'realtime' || (simulationMode === 'hybrid' && timeFilteredTimestamps.length > 0 && timeFilteredTimestamps[0] > 1000000000);
-    if (isRealtimeMode) {
-      filteredTimestamps = [];
-      let lastTimestamp: number | null = null;
-      
-      timeFilteredTimestamps.forEach((timestamp, index) => {
-        if (!isWithinMarketHours(timestamp, simulationMode, startDate)) {
-          return; // Skip data points outside market hours
-        }
-        
-        // Check if this is a new trading day (gap between days)
-        if (lastTimestamp !== null && timestamp > 1000000000) {
-          const lastDate = new Date(lastTimestamp * 1000);
-          const currentDate = new Date(timestamp * 1000);
-          
-          // Check if dates are different in ET timezone
-          try {
-            const lastDateStr = lastDate.toLocaleDateString('en-US', { 
-              timeZone: 'America/New_York',
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit'
-            });
-            const currentDateStr = currentDate.toLocaleDateString('en-US', { 
-              timeZone: 'America/New_York',
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit'
-            });
-            
-            // If different days, we've already skipped the flat period (market closed hours)
-            // So we can add this point
-            if (lastDateStr !== currentDateStr) {
-              filteredTimestamps.push(timestamp);
-              lastTimestamp = timestamp;
-            } else {
-              // Same day, add it
-              filteredTimestamps.push(timestamp);
-              lastTimestamp = timestamp;
-            }
-          } catch {
-            // Fallback: add all timestamps
-            filteredTimestamps.push(timestamp);
-            lastTimestamp = timestamp;
-          }
-        } else {
-          // First timestamp or not a Unix timestamp
-          filteredTimestamps.push(timestamp);
-          lastTimestamp = timestamp;
-        }
-      });
-    }
-    
-    filteredTimestamps.forEach((timestamp, index) => {
-      // Find the original index in sortedTimestamps for boundary detection
-      const originalIndex = sortedTimestamps.indexOf(timestamp);
+    const data: Array<Record<string, any>> = [];
+    const seriesIndices = new Map<string, number>();
 
-      // Check for day boundaries
-      let currentDayKey: string | null = null;
-      if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
-        // Real-time: use Unix timestamp to get date in ET timezone
-        const date = new Date(timestamp * 1000);
+    timeline.forEach(entry => {
+      const row: Record<string, any> = { timestamp: entry.timestamp, isGap: entry.isGap };
 
-        // Get date string in ET timezone for day comparison
-        // Use Intl.DateTimeFormat to get ET date components
-        try {
-          const etDateStr = date.toLocaleDateString('en-US', {
-            timeZone: 'America/New_York',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-          });
-          // Format: "MM/DD/YYYY"
-          currentDayKey = etDateStr;
-        } catch {
-          // Fallback: use UTC date if timezone is not supported
-          currentDayKey = `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`;
-        }
-
-        // Check if this is a new day and market open time (9:30 AM ET)
-        // Include first data point (index === 0) as a day boundary
-        // Skip weekends - don't show boundaries for Saturday/Sunday
-        const isNewDay = lastDayKey === null || currentDayKey !== lastDayKey;
-        if (isNewDay) {
-          // Skip weekend days - don't show boundaries for them
-          if (isWeekend(date, 'America/New_York')) {
-            // Don't add boundary for weekend, but still update lastDayKey to track the day
-            lastDayKey = currentDayKey;
-            // Continue to next iteration - don't process this day further
-          } else {
-            // This is the first data point of a new day (or the very first data point)
-            // Check if it's around market open (within first hour of market)
-            // Get hour in ET timezone
-            try {
-              const etHour = parseInt(date.toLocaleTimeString('en-US', {
-                timeZone: 'America/New_York',
-                hour: '2-digit',
-                hour12: false
-              }).split(':')[0]);
-              const etMinute = parseInt(date.toLocaleTimeString('en-US', {
-                timeZone: 'America/New_York',
-                minute: '2-digit'
-              }).split(':')[1]);
-              const etMinutes = etHour * 60 + etMinute;
-              // Market open is 9:30 AM ET (570 minutes)
-              if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
-                // Check if this is Monday after a weekend (i.e., there was a gap from Friday)
-                // by checking if the previous trading day was more than 1 day ago
-                if (index > 0) {
-                  const prevTimestamp = filteredTimestamps[index - 1];
-                  const prevDate = new Date(prevTimestamp * 1000);
-                  const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60); // difference in days
-
-                  // If there's a gap of more than 1.5 days (indicating a weekend), add two boundaries
-                  if (daysDiff > 1.5) {
-                    // Add a boundary for "Saturday" (end of Friday) - slightly before Monday
-                    // Use a timestamp that's 1 second before the Monday market open
-                    boundaries.push(timestamp - 1);
-                    // Add a boundary for Monday market open
-                    boundaries.push(timestamp);
-                  } else {
-                    // Normal day transition, just add one boundary
-                    boundaries.push(timestamp);
-                  }
-                } else {
-                  // First data point, just add one boundary
-                  boundaries.push(timestamp);
-                }
-              }
-            } catch {
-              // Fallback: use UTC approximation
-              const utcHour = date.getUTCHours();
-              const utcMinute = date.getUTCMinutes();
-              const utcMinutes = utcHour * 60 + utcMinute;
-              if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
-                // Check for weekend gap
-                if (index > 0) {
-                  const prevTimestamp = filteredTimestamps[index - 1];
-                  const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60);
-
-                  if (daysDiff > 1.5) {
-                    boundaries.push(timestamp - 1);
-                    boundaries.push(timestamp);
-                  } else {
-                    boundaries.push(timestamp);
-                  }
-                } else {
-                  boundaries.push(timestamp);
-                }
-              }
-            }
-          }
-        }
-      } else if (simulationMode === 'historical' || simulationMode === 'simulated' || simulationMode === 'hybrid') {
-        // For simulated/historical/hybrid: check day boundaries based on day number
-        // Hybrid mode before transition behaves like simulated mode
-        const dayNum = Math.floor(timestamp);
-        const isNewDay = lastDayKey === null || dayNum.toString() !== lastDayKey;
-        if (isNewDay) {
-          // Check if this is market open (hour 0) - include first data point
-          const hourDecimal = timestamp - dayNum;
-          const hours = Math.floor(hourDecimal * 10);
-          if (hours === 0) {
-            boundaries.push(timestamp);
-          }
-        }
-        currentDayKey = dayNum.toString();
-      }
-      
-      lastDayKey = currentDayKey;
-      
-      const dayData: { [key: string]: number | string } = { timestamp };
       visibleParticipants.forEach(p => {
-        if (!p.performanceHistory || !Array.isArray(p.performanceHistory) || p.performanceHistory.length === 0) {
+        if (entry.isGap) {
+          row[p.id] = null;
           return;
         }
-        
-        // Find the metric that matches this timestamp exactly or is closest
-        // Use a tolerance based on timestamp type (Unix vs day-based)
-        const tolerance = timestamp > 1000000000 ? 60 : 0.01; // 60 seconds for Unix, 0.01 days for day-based
-        
-        // First, try to find an exact or very close match
-        let bestMetric: typeof p.performanceHistory[0] | undefined = p.performanceHistory.find(m => {
-          return Math.abs(m.timestamp - timestamp) < tolerance;
-        });
-        
-        // If no close match, find the most recent metric that's <= this timestamp
-        // This ensures continuity - if a participant doesn't have data at exactly this timestamp,
-        // we use their most recent value, preventing gaps in the graph
-        if (!bestMetric) {
-          const metricsAtOrBefore = p.performanceHistory.filter(m => m.timestamp <= timestamp);
-          
-          if (metricsAtOrBefore.length > 0) {
-            // Use the most recent metric <= timestamp
-            bestMetric = metricsAtOrBefore.reduce((latest, m) => {
-              return m.timestamp > latest.timestamp ? m : latest;
-            });
-            
-            // Only use this value if it's reasonably close (within 5x tolerance for continuity)
-            // This prevents using very old values that would create incorrect plotting
-            const maxDistance = tolerance * 5;
-            if (Math.abs(bestMetric.timestamp - timestamp) > maxDistance) {
-              // Too far away, don't use it - let the line break naturally
-              bestMetric = undefined;
-            }
-          } else {
-            // No metric <= timestamp - check if there's a future metric very close
-            // This handles cases where timestamps are slightly off
-            const futureMetrics = p.performanceHistory.filter(m => m.timestamp > timestamp);
-            if (futureMetrics.length > 0) {
-              const closestFuture = futureMetrics.reduce((closest, m) => {
-                return Math.abs(m.timestamp - timestamp) < Math.abs(closest.timestamp - timestamp) ? m : closest;
-              });
-              // Only use if it's very close (within 2x tolerance)
-              if (Math.abs(closestFuture.timestamp - timestamp) < tolerance * 2) {
-                bestMetric = closestFuture;
-              }
-            }
-          }
+
+        const series = seriesByParticipant.get(p.id) ?? [];
+        let idx = seriesIndices.get(p.id) ?? 0;
+        while (idx < series.length && series[idx].timestamp <= entry.timestamp) {
+          idx += 1;
         }
-        
-        if (bestMetric) {
-          const value = bestMetric.totalValue;
-          dayData[p.id] = value;
-          minValue = Math.min(minValue, value);
-          maxValue = Math.max(maxValue, value);
+        seriesIndices.set(p.id, idx);
+
+        const candidate = idx > 0 ? series[idx - 1] : null;
+        if (candidate && entry.timestamp - candidate.timestamp <= maxCarrySeconds) {
+          row[p.id] = candidate.value;
+          minValue = Math.min(minValue, candidate.value);
+          maxValue = Math.max(maxValue, candidate.value);
+        } else {
+          row[p.id] = null;
         }
-        // If no bestMetric found, leave it undefined - this will create a gap in the line
-        // which is correct behavior when there's no data
       });
-      // Also include initial capital if no participant is selected
+
       if (!selectedParticipantId) {
-        dayData['initial-capital'] = INITIAL_CASH;
+        row['initial-capital'] = INITIAL_CASH;
         minValue = Math.min(minValue, INITIAL_CASH);
         maxValue = Math.max(maxValue, INITIAL_CASH);
       }
-      data.push(dayData);
+
+      data.push(row);
     });
-    
-    // Calculate domain with tighter padding to fit curves better
-    // For filtered periods (24h, 1w), center the data in the graph and maximize space
-    // For 'all' period, use standard padding
-    const range = maxValue - minValue;
+
+    const safeMin = Number.isFinite(minValue) ? minValue : INITIAL_CASH;
+    const safeMax = Number.isFinite(maxValue) ? maxValue : INITIAL_CASH;
+    const range = safeMax - safeMin;
     let domain: [number, number];
-    
+
     if (timePeriod === '24h' || timePeriod === '1w') {
-      // Center the data: add minimal padding to maximize space utilization
-      // Use smaller padding percentage to maximize the visible range
-      const paddingPercent = 0.08; // 8% padding on each side for better space utilization
-      const padding = Math.max(50, range * paddingPercent); // Minimum $50 padding
-      const center = (minValue + maxValue) / 2;
+      const paddingPercent = 0.08;
+      const padding = Math.max(50, range * paddingPercent);
+      const center = (safeMin + safeMax) / 2;
       const totalRange = range + (padding * 2);
       domain = [
         Math.max(0, center - totalRange / 2),
         center + totalRange / 2
       ];
     } else {
-      // Standard padding for full view
-      const padding = Math.max(50, range * 0.05); // 5% padding or minimum $50
+      const padding = Math.max(50, range * 0.05);
       domain = [
-        Math.max(0, minValue - padding),
-        maxValue + padding
+        Math.max(0, safeMin - padding),
+        safeMax + padding
       ];
     }
-    
-    return { chartData: data, yAxisDomain: domain, dayBoundaries: boundaries };
-  }, [participants, selectedParticipantId, simulationMode, startDate, timePeriod]);
+
+    return { chartData: data, yAxisDomain: domain };
+  }, [participants, selectedParticipantId, startDate, timePeriod]);
+
+  const axisMeta = useMemo<AxisMeta>(() => {
+    const timestamps = chartData.map(point => point.timestamp as number);
+    const dayKeys: string[] = [];
+    const dayIndices: number[] = [];
+    const isGapIndices = new Set<number>();
+
+    let lastDayKey: string | null = null;
+    let dayIndex = -1;
+
+    chartData.forEach((point, idx) => {
+      if (point?.isGap) {
+        isGapIndices.add(idx);
+      }
+      const date = new Date(timestamps[idx] * 1000);
+      const dayKey = getEtDayKey(date);
+      dayKeys[idx] = dayKey;
+      if (dayKey !== lastDayKey) {
+        dayIndex += 1;
+        lastDayKey = dayKey;
+      }
+      dayIndices[idx] = Math.max(dayIndex, 0);
+    });
+
+    const totalDays = Math.max(dayIndex + 1, 0);
+    const showEveryNDays = totalDays <= 10 ? 1 : totalDays <= 30 ? 2 : 5;
+
+    return {
+      timestamps,
+      dayKeys,
+      dayIndices,
+      totalDays,
+      showEveryNDays,
+      isGapIndices
+    };
+  }, [chartData]);
+
+  const dayBoundaries = useMemo(() => {
+    if (chartData.length === 0) {
+      return [];
+    }
+
+    const boundaries: number[] = [];
+    let lastDayKey: string | null = null;
+
+    chartData.forEach((_, idx) => {
+      if (axisMeta.isGapIndices.has(idx)) {
+        return;
+      }
+      const timestamp = axisMeta.timestamps[idx];
+      const date = new Date(timestamp * 1000);
+      const dayKey = axisMeta.dayKeys[idx];
+      const isFirstPoint = idx === 0;
+      const minutes = getEtMinutes(date);
+      const isMarketOpen = minutes >= MARKET_OPEN_MINUTES
+        && minutes < (MARKET_OPEN_MINUTES + MARKET_OPEN_LABEL_WINDOW_MINUTES);
+
+      if (dayKey !== lastDayKey && (isMarketOpen || isFirstPoint)) {
+        const dayIndex = axisMeta.dayIndices[idx];
+        if (timePeriod === '24h' || axisMeta.totalDays <= 1 || isFirstPoint || dayIndex % axisMeta.showEveryNDays === 0) {
+          boundaries.push(timestamp);
+        }
+      }
+      lastDayKey = dayKey;
+    });
+
+    return boundaries;
+  }, [chartData, axisMeta, timePeriod]);
 
   // Calculate which ticks should be visible based on available space
   const visibleTickIndices = useMemo(() => {
     return getVisibleTickIndices(
       chartData,
       effectiveWidth,
-      startDate,
-      currentDate,
-      simulationMode,
-      day,
-      intradayHour,
+      axisMeta,
       timePeriod
     );
-  }, [chartData, effectiveWidth, startDate, currentDate, simulationMode, day, intradayHour, timePeriod]);
+  }, [chartData, effectiveWidth, axisMeta, timePeriod]);
 
   // Create array of timestamps that should have ticks (only those with visible labels)
   const visibleTickTimestamps = useMemo(() => {
@@ -1321,202 +648,34 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
           )}
         />
         {/* Day boundary reference lines (dotted vertical lines) - show at beginning of each day */}
-        {(() => {
-          // For 24h period, show day boundaries at the start of each day
-          // For other periods, show where there are visible ticks
-          const dayBoundaryTimestamps: number[] = [];
-          
-          if (timePeriod === '24h') {
-            // HARDCODED: Add Nov 17 boundary for hybrid->realtime transition
-            // Calculate Unix timestamp for Nov 17, 2025 at 9:30 AM ET
-            const nov17_2025 = new Date('2025-11-17T09:30:00-05:00').getTime() / 1000;
-
-            // Check if we're in hybrid mode and have realtime data
-            const hasRealtimeData = chartData.some(d => {
-              const ts = d.timestamp as number;
-              return ts > 1000000000; // Unix timestamp
-            });
-
-            if (simulationMode === 'hybrid' && hasRealtimeData) {
-              console.log('Adding hardcoded Nov 17 boundaries at:', nov17_2025);
-              // Add Saturday line (visual marker for end of Friday)
-              dayBoundaryTimestamps.push(nov17_2025 - 86400 * 2); // 2 days before (Saturday)
-              // Add Monday Nov 17 line
-              dayBoundaryTimestamps.push(nov17_2025);
-            }
-
-            // For 24h period, find all day boundaries (start of each day)
-            let lastDayKey: string | null = null;
-            chartData.forEach((d, idx) => {
-              const timestamp = d.timestamp as number;
-              let currentDayKey: string | null = null;
-
-              if ((simulationMode === 'realtime' || simulationMode === 'hybrid') && timestamp > 1000000000) {
-                // Real-time: use Unix timestamp to get date in ET timezone
-                const date = new Date(timestamp * 1000);
-                try {
-                  const etDateStr = date.toLocaleDateString('en-US', {
-                    timeZone: 'America/New_York',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit'
-                  });
-                  currentDayKey = etDateStr;
-
-                  // Check if this is a new day and around market open (9:30 AM ET)
-                  // Skip weekends - don't show boundaries for Saturday/Sunday
-                  const isNewDay = lastDayKey === null || currentDayKey !== lastDayKey;
-                  if (isNewDay) {
-                    // Skip weekend days - don't show boundaries for them
-                    if (!isWeekend(date, 'America/New_York')) {
-                      try {
-                        const etHour = parseInt(date.toLocaleTimeString('en-US', {
-                          timeZone: 'America/New_York',
-                          hour: '2-digit',
-                          hour12: false
-                        }).split(':')[0]);
-                        const etMinute = parseInt(date.toLocaleTimeString('en-US', {
-                          timeZone: 'America/New_York',
-                          minute: '2-digit'
-                        }).split(':')[1]);
-                        const etMinutes = etHour * 60 + etMinute;
-                        // Market open is 9:30 AM ET (570 minutes), check within first hour
-                        if (etMinutes >= (9 * 60 + 30) && etMinutes < (10 * 60 + 30)) {
-                          // Check if this is Monday after a weekend
-                          if (idx > 0) {
-                            const prevTimestamp = chartData[idx - 1].timestamp as number;
-                            const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60);
-
-                            // If there's a gap of more than 1.5 days (indicating a weekend), add two boundaries
-                            if (daysDiff > 1.5) {
-                              // Add boundary for "Saturday" (end of Friday)
-                              dayBoundaryTimestamps.push(timestamp - 1);
-                              // Add boundary for Monday market open
-                              dayBoundaryTimestamps.push(timestamp);
-                            } else {
-                              dayBoundaryTimestamps.push(timestamp);
-                            }
-                          } else {
-                            dayBoundaryTimestamps.push(timestamp);
-                          }
-                        }
-                      } catch {
-                        const utcHour = date.getUTCHours();
-                        const utcMinute = date.getUTCMinutes();
-                        const utcMinutes = utcHour * 60 + utcMinute;
-                        if (utcMinutes >= (13 * 60) && utcMinutes < (15 * 60)) {
-                          // Check for weekend gap
-                          if (idx > 0) {
-                            const prevTimestamp = chartData[idx - 1].timestamp as number;
-                            const daysDiff = (timestamp - prevTimestamp) / (24 * 60 * 60);
-
-                            if (daysDiff > 1.5) {
-                              dayBoundaryTimestamps.push(timestamp - 1);
-                              dayBoundaryTimestamps.push(timestamp);
-                            } else {
-                              dayBoundaryTimestamps.push(timestamp);
-                            }
-                          } else {
-                            dayBoundaryTimestamps.push(timestamp);
-                          }
-                        }
-                      }
-                    }
-                  }
-                } catch {
-                  currentDayKey = `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`;
-                }
-              } else if (simulationMode === 'historical' || simulationMode === 'simulated' || simulationMode === 'hybrid') {
-                // For simulated/historical/hybrid: check day boundaries based on day number
-                const dayNum = Math.floor(timestamp);
-                const isNewDay = lastDayKey === null || dayNum.toString() !== lastDayKey;
-                if (isNewDay) {
-                  // Check if this is market open (hour 0)
-                  const hourDecimal = timestamp - dayNum;
-                  const hours = Math.floor(hourDecimal * 10);
-                  if (hours === 0) {
-                    dayBoundaryTimestamps.push(timestamp);
-                  }
-                }
-                currentDayKey = dayNum.toString();
-              }
-              
-              lastDayKey = currentDayKey;
-            });
-          } else {
-            // For other periods, only show reference lines where there are visible ticks
-            const timestampsWithVisibleTicks = chartData
-              .map((d, idx) => {
-                // Only include if this index is in the visible set
-                if (!visibleTickIndices.has(idx)) return null;
-                
-                const label = formatXAxisLabel(
-                  d.timestamp as number,
-                  idx,
-                  chartData.map(d => d.timestamp as number),
-                  startDate,
-                  currentDate,
-                  simulationMode,
-                  day,
-                  intradayHour,
-                  timePeriod
-                );
-                // Check if label contains a date (not just time)
-                const isDateLabel = label && (label.includes('/') || label.includes(' ') || label.match(/\d{1,2}\s+\w{3}/));
-                return isDateLabel ? d.timestamp : null;
-              })
-              .filter((ts): ts is number => ts !== null);
-            
-            dayBoundaryTimestamps.push(...timestampsWithVisibleTicks);
-          }
-          
-          return dayBoundaryTimestamps.map((boundary, idx) => (
-            <ReferenceLine 
-              key={`day-boundary-${idx}`}
-              x={boundary} 
-              stroke="#A3A3A3" 
-              strokeDasharray="4 4" 
-              strokeWidth={1.5}
-              opacity={0.7}
-            />
-          ));
-        })()}
+        {dayBoundaries.map((boundary, idx) => (
+          <ReferenceLine
+            key={`day-boundary-${idx}`}
+            x={boundary}
+            stroke="#A3A3A3"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+            opacity={0.7}
+          />
+        ))}
         <XAxis 
           dataKey="timestamp" 
-          type="number"
-          scale="linear"
           stroke="#A3A3A3"
           ticks={visibleTickTimestamps}
           tick={(props: any) => {
             const { x, y, payload } = props;
-            
-            // Find the index in chartData for this timestamp
-            const dataIndex = chartData.findIndex(d => {
-              const ts = d.timestamp as number;
-              const payloadTs = payload.value;
-              // Use appropriate tolerance based on timestamp type
-              const tolerance = ts > 1000000000 ? 60 : 0.01;
-              return Math.abs(ts - payloadTs) < tolerance;
-            });
-            
-            // Only render if this index is in the visible set
-            if (dataIndex === -1 || !visibleTickIndices.has(dataIndex)) return null;
-            
-            const label = formatXAxisLabel(
-              payload.value,
-              dataIndex,
-              chartData.map(d => d.timestamp as number),
-              startDate,
-              currentDate,
-              simulationMode,
-              day,
-              intradayHour,
-              timePeriod
-            );
-            
-            // Only render tick if there's a label
+
+            const payloadValue = Number(payload.value);
+            if (!Number.isFinite(payloadValue)) return null;
+
+            const dataIndex = axisMeta.timestamps.findIndex(ts => Math.abs(ts - payloadValue) < 1);
+            if (dataIndex === -1 || axisMeta.isGapIndices.has(dataIndex) || !visibleTickIndices.has(dataIndex)) {
+              return null;
+            }
+
+            const label = formatXAxisLabel(payloadValue, dataIndex, axisMeta, timePeriod);
             if (!label) return null;
-            
+
             return (
               <g transform={`translate(${x},${y})`}>
                 <text
@@ -1537,33 +696,19 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             const timestamp = props.payload?.value ?? props.value;
             if (timestamp === undefined) return null;
             
-            // Check if this timestamp is in our visible ticks array
-            const isVisible = visibleTickTimestamps.some(ts => {
-              const tolerance = ts > 1000000000 ? 60 : 0.01;
-              return Math.abs(ts - timestamp) < tolerance;
-            });
-            
-            if (!isVisible) return null;
-            
-            const dataIndex = chartData.findIndex(d => {
-              const ts = d.timestamp as number;
-              const tolerance = ts > 1000000000 ? 60 : 0.01;
-              return Math.abs(ts - timestamp) < tolerance;
-            });
-            
-            if (dataIndex === -1 || !visibleTickIndices.has(dataIndex)) return null;
-            
-            const label = formatXAxisLabel(
-              timestamp,
-              dataIndex,
-              chartData.map(d => d.timestamp as number),
-              startDate,
-              currentDate,
-              simulationMode,
-              day,
-              intradayHour,
-              timePeriod
-            );
+            const numericTimestamp = Number(timestamp);
+            if (!Number.isFinite(numericTimestamp)) return null;
+
+            if (!visibleTickTimestamps.some(ts => Math.abs(ts - numericTimestamp) < 1)) {
+              return null;
+            }
+
+            const dataIndex = axisMeta.timestamps.findIndex(ts => Math.abs(ts - numericTimestamp) < 1);
+            if (dataIndex === -1 || axisMeta.isGapIndices.has(dataIndex) || !visibleTickIndices.has(dataIndex)) {
+              return null;
+            }
+
+            const label = formatXAxisLabel(numericTimestamp, dataIndex, axisMeta, timePeriod);
             if (!label) return null;
             return <line {...props} />;
           }}

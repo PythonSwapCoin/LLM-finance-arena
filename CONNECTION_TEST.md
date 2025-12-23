@@ -118,8 +118,8 @@ Even when the market is closed, you can verify the connection by checking:
    - If you see CORS errors in console, update `ALLOWED_ORIGINS` in Render
 
 3. **Check environment variables**:
-   - Verify `VITE_API_BASE` in Vercel is set to your backend URL
-   - Should be: `https://llm-finance-arena.onrender.com/api`
+   - Verify `VITE_API_BASE_URL` in Vercel is set to your backend URL
+   - Should be: `https://llm-finance-arena.onrender.com`
 
 4. **Check browser console for errors**:
    - Look for network errors

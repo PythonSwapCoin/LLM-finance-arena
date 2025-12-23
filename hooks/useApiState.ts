@@ -18,7 +18,7 @@ export const useApiState = () => {
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [chat, setChat] = useState<ChatState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [simulationMode, setSimulationMode] = useState<'simulated' | 'realtime' | 'historical'>('simulated');
+  const [simulationMode, setSimulationMode] = useState<'simulated' | 'realtime' | 'historical' | 'hybrid'>('simulated');
   const [marketTelemetry, setMarketTelemetry] = useState<MarketDataTelemetry | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<{
     connected: boolean;

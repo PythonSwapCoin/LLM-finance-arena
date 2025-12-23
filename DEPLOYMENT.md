@@ -89,7 +89,7 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
 
 3. **Add Environment Variable:**
    ```
-   VITE_API_BASE=https://your-backend.onrender.com/api
+   VITE_API_BASE_URL=https://your-backend.onrender.com
    ```
    (Replace with your actual backend URL)
 
@@ -103,7 +103,7 @@ This guide explains how to deploy the LLM Finance Arena to make it accessible on
    - Publish directory: `dist`
 3. **Environment variables:**
    ```
-   VITE_API_BASE=https://your-backend.onrender.com/api
+   VITE_API_BASE_URL=https://your-backend.onrender.com
    ```
 4. **Deploy**
 
@@ -179,7 +179,7 @@ LOG_LEVEL=INFO
 
 ### Frontend (in Vercel/Netlify dashboard)
 ```
-VITE_API_BASE=https://your-backend.onrender.com/api
+VITE_API_BASE_URL=https://your-backend.onrender.com
 ```
 
 ## Troubleshooting
@@ -194,7 +194,7 @@ VITE_API_BASE=https://your-backend.onrender.com/api
 - Restart backend after changing CORS settings
 
 ### API connection fails
-- Verify `VITE_API_BASE` matches your backend URL
+- Verify `VITE_API_BASE_URL` matches your backend URL
 - Check backend logs for errors
 - Ensure backend is accessible (not behind firewall)
 

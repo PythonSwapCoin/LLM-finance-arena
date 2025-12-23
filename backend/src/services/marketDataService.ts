@@ -1,8 +1,8 @@
-import type { MarketData, TickerData, MarketDataTelemetry, SimulationSnapshot } from '../types.js';
+﻿import type { MarketData, TickerData, MarketDataTelemetry, SimulationSnapshot } from '../types.js';
 import { Ticker, type HistoricalDataPoint } from './yfinanceService.js';
 import { logger, LogLevel, LogCategory } from './logger.js';
 import { S_P500_TICKERS } from '../constants.js';
-import { setDateToMarketOpenET } from '../simulation/marketHours.js';
+import { setDateToMarketOpenET, isMarketOpen } from '../simulation/marketHours.js';
 
 const resolveMode = (): 'simulated' | 'realtime' | 'historical' | 'hybrid' => {
   const raw = (process.env.MODE || 'simulated').toLowerCase();
@@ -26,7 +26,7 @@ const resolveMode = (): 'simulated' | 'realtime' | 'historical' | 'hybrid' => {
   logger.log(
     LogLevel.WARNING,
     LogCategory.SYSTEM,
-    `Unrecognized MODE "${raw}" – defaulting to simulated`,
+    `Unrecognized MODE "${raw}" ÔÇô defaulting to simulated`,
     { rawMode: raw }
   );
 
@@ -37,9 +37,17 @@ const MODE = resolveMode();
 const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY;
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const HISTORICAL_SIMULATION_START_DATE = process.env.HISTORICAL_SIMULATION_START_DATE;
+const HISTORICAL_SIMULATION_END_DATE = process.env.HISTORICAL_SIMULATION_END_DATE;
 const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true'; // Use 15-30 min delayed data to avoid rate limits
-const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '15', 10); // Default 15 minutes delay
+const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10); // Default 30 minutes delay
 const ENABLE_YAHOO_DETAILED_INFO = process.env.ENABLE_YAHOO_DETAILED_INFO === 'true';
+const MAX_PRICE_JUMP_PERCENT = (() => {
+  const parsed = Number.parseFloat(process.env.MAX_PRICE_JUMP_PERCENT || '0.2');
+  if (!Number.isFinite(parsed)) {
+    return 0.2;
+  }
+  return Math.max(parsed, 0);
+})();
 
 // Helper function to convert a date to ET timezone
 const toET = (date: Date): { hour: number; minute: number; dayOfWeek: number; dateObj: Date } => {
@@ -73,6 +81,7 @@ const toET = (date: Date): { hour: number; minute: number; dayOfWeek: number; da
 let historicalDataCache: { [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] } = {};
 let historicalWeekStart: Date | null = null;
 let historicalWeekEnd: Date | null = null;
+let historicalTradingDates: Date[] = [];
 let currentHistoricalDay = 0;
 let currentIntradayHour = 0;
 let lastTradingHour = 0;
@@ -277,18 +286,103 @@ const setToMarketOpen = (date: Date): Date => {
   return setDateToMarketOpenET(date);
 };
 
+const formatDate = (date: Date): string => date.toISOString().split('T')[0];
+
+const isTradingDay = (date: Date): boolean => {
+  const marketOpen = setToMarketOpen(date);
+  return isMarketOpen(marketOpen);
+};
+
+const getNextTradingDay = (date: Date): Date => {
+  const cursor = new Date(date);
+  while (!isTradingDay(cursor)) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return setToMarketOpen(cursor);
+};
+
+const getPreviousTradingDay = (date: Date): Date => {
+  const cursor = new Date(date);
+  while (!isTradingDay(cursor)) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return setToMarketOpen(cursor);
+};
+
+const addTradingDays = (start: Date, daysToAdd: number): Date => {
+  const cursor = new Date(start);
+  let added = 0;
+  while (added < daysToAdd) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (isTradingDay(cursor)) {
+      added += 1;
+    }
+  }
+  return setToMarketOpen(cursor);
+};
+
+const setToEndOfDay = (date: Date): Date => {
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
+  return end;
+};
+
+const buildTradingDates = (start: Date, end: Date): Date[] => {
+  const normalizedStart = getNextTradingDay(start);
+  let normalizedEnd = getPreviousTradingDay(end);
+
+  if (normalizedEnd < normalizedStart) {
+    normalizedEnd = new Date(normalizedStart);
+  }
+
+  const dates: Date[] = [];
+  const cursor = new Date(normalizedStart);
+  while (cursor <= normalizedEnd) {
+    if (isTradingDay(cursor)) {
+      dates.push(setToMarketOpen(cursor));
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  if (dates.length === 0) {
+    dates.push(setToMarketOpen(normalizedStart));
+  }
+
+  return dates;
+};
+
+const getHistoricalSimulationEndDate = (startDate: Date): Date => {
+  if (HISTORICAL_SIMULATION_END_DATE) {
+    const parsed = new Date(HISTORICAL_SIMULATION_END_DATE);
+    if (!isNaN(parsed.getTime())) {
+      const endDate = getPreviousTradingDay(parsed);
+      if (endDate < startDate) {
+        return new Date(startDate);
+      }
+      return endDate;
+    }
+  }
+
+  const maxSimulationDays = process.env.MAX_SIMULATION_DAYS
+    ? parseInt(process.env.MAX_SIMULATION_DAYS, 10)
+    : undefined;
+
+  if (maxSimulationDays !== undefined && Number.isFinite(maxSimulationDays) && maxSimulationDays > 0) {
+    return addTradingDays(startDate, maxSimulationDays - 1);
+  }
+
+  return addTradingDays(startDate, 4);
+};
+
 export const getHistoricalSimulationStartDate = (): Date => {
   if (HISTORICAL_SIMULATION_START_DATE) {
     const date = new Date(HISTORICAL_SIMULATION_START_DATE);
     if (!isNaN(date.getTime())) {
-      const dayOfWeek = date.getDay();
-      const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 1 ? 0 : 8 - dayOfWeek);
-      date.setDate(date.getDate() + daysToMonday);
-      return setToMarketOpen(date);
+      return getNextTradingDay(date);
     }
   }
   const defaultDate = new Date('2025-01-06');
-  return setToMarketOpen(defaultDate);
+  return getNextTradingDay(defaultDate);
 };
 
 export const isHistoricalSimulationComplete = (simulationDay?: number): boolean => {
@@ -309,17 +403,23 @@ export const isHistoricalSimulationComplete = (simulationDay?: number): boolean 
     ? parseInt(process.env.MAX_SIMULATION_DAYS, 10)
     : undefined;
 
-  // If no max day is configured, simulation never completes automatically
-  if (maxSimulationDays === undefined || !Number.isFinite(maxSimulationDays)) {
-    return false;
+  const effectiveDay = simulationDay ?? currentHistoricalDay;
+
+  if (maxSimulationDays !== undefined && Number.isFinite(maxSimulationDays) && maxSimulationDays > 0) {
+    const effectiveLimit = MODE === 'historical' && historicalTradingDates.length > 0
+      ? Math.min(maxSimulationDays, historicalTradingDates.length)
+      : maxSimulationDays;
+    // MAX_SIMULATION_DAYS=8 means run days 0-7 (8 total days)
+    // Complete when day >= maxSimulationDays (0-indexed day 8 is the 9th day)
+    return effectiveDay >= effectiveLimit;
   }
 
-  // MAX_SIMULATION_DAYS=8 means run days 0-7 (8 total days)
-  // Complete when day >= maxSimulationDays (0-indexed day 8 is the 9th day)
-  if (simulationDay !== undefined) {
-    return simulationDay >= maxSimulationDays;
+  if (MODE === 'historical' && historicalTradingDates.length > 0) {
+    return effectiveDay >= historicalTradingDates.length;
   }
-  return currentHistoricalDay >= maxSimulationDays;
+
+  // If no max day is configured, simulation never completes automatically
+  return false;
 };
 
 export const getSimulationMode = (): 'simulated' | 'realtime' | 'historical' | 'hybrid' => {
@@ -467,7 +567,7 @@ export const shouldHybridModeTransition = (currentDate: string, currentDay: numb
   const timeDifferenceMinutes = timeDifference / 60000;
   if (shouldTransition || timeDifferenceMinutes < 5) {
     logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-      shouldTransition ? '🔄 HYBRID MODE TRANSITION: Caught up to real-time!' : 'Hybrid mode: approaching transition',
+      shouldTransition ? '­ƒöä HYBRID MODE TRANSITION: Caught up to real-time!' : 'Hybrid mode: approaching transition',
       {
         currentDate,
         currentDay,
@@ -518,7 +618,7 @@ const validateMarketData = (data: TickerData, previousPrice?: number): boolean =
     const priceChangePercent = Math.abs((data.price - previousPrice) / previousPrice);
     if (priceChangePercent > 0.05) {
       logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
-        `[PRICE JUMP] ${data.ticker}: ${previousPrice.toFixed(2)} → ${data.price.toFixed(2)} (${(priceChangePercent * 100).toFixed(2)}% change)`,
+        `[PRICE JUMP] ${data.ticker}: ${previousPrice.toFixed(2)} ÔåÆ ${data.price.toFixed(2)} (${(priceChangePercent * 100).toFixed(2)}% change)`,
         {
           ticker: data.ticker,
           previousPrice,
@@ -529,6 +629,50 @@ const validateMarketData = (data: TickerData, previousPrice?: number): boolean =
   }
 
   return true;
+};
+
+const applyPriceJumpGuard = (ticker: string, nextData: TickerData, previousData?: TickerData): TickerData => {
+  if (MAX_PRICE_JUMP_PERCENT <= 0) {
+    return nextData;
+  }
+
+  if (!previousData || !Number.isFinite(previousData.price) || previousData.price <= 0) {
+    return nextData;
+  }
+
+  if (!Number.isFinite(nextData.price) || nextData.price <= 0) {
+    return previousData;
+  }
+
+  const changePercent = Math.abs((nextData.price - previousData.price) / previousData.price);
+  if (changePercent <= MAX_PRICE_JUMP_PERCENT) {
+    return nextData;
+  }
+
+  const direction = nextData.price >= previousData.price ? 1 : -1;
+  const cappedPrice = previousData.price * (1 + direction * MAX_PRICE_JUMP_PERCENT);
+  const previousDailyChange = Number.isFinite(previousData.dailyChange) ? previousData.dailyChange : 0;
+  const previousOpen = previousData.price - previousDailyChange;
+  const dailyChange = previousOpen > 0 ? cappedPrice - previousOpen : cappedPrice - previousData.price;
+  const dailyChangePercent = previousOpen > 0 ? dailyChange / previousOpen : 0;
+
+  logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
+    `[PRICE JUMP GUARD] ${ticker}: ${previousData.price.toFixed(2)} -> ${nextData.price.toFixed(2)} capped at ${cappedPrice.toFixed(2)}`,
+    {
+      ticker,
+      previousPrice: previousData.price,
+      currentPrice: nextData.price,
+      cappedPrice,
+      changePercent,
+      maxAllowedPercent: MAX_PRICE_JUMP_PERCENT,
+    });
+
+  return {
+    ...nextData,
+    price: cappedPrice,
+    dailyChange,
+    dailyChangePercent,
+  };
 };
 
 // Fetch delayed data (30 minutes ago) using historical endpoints
@@ -967,29 +1111,29 @@ export const prefetchRealtimeMarketData = async (
   };
 };
 
-const fetchHistoricalWeekData = async (tickers: string[]): Promise<{ [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] }> => {
+const fetchHistoricalRangeData = async (tickers: string[]): Promise<{ [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] }> => {
   const historicalData: { [ticker: string]: { date: string, price: number, change: number, changePercent: number }[] } = {};
 
-  const weekStart = getHistoricalSimulationStartDate();
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 4);
-  weekEnd.setHours(23, 59, 59, 999);
+  const rangeStart = getHistoricalSimulationStartDate();
+  const rangeEnd = getHistoricalSimulationEndDate(rangeStart);
+  const tradingDates = buildTradingDates(rangeStart, rangeEnd);
 
-  historicalWeekStart = weekStart;
-  historicalWeekEnd = weekEnd;
+  historicalTradingDates = tradingDates;
+  historicalWeekStart = tradingDates[0] ?? rangeStart;
+  historicalWeekEnd = setToEndOfDay(tradingDates[tradingDates.length - 1] ?? rangeEnd);
   currentHistoricalDay = 0;
 
-  console.log(`📅 Historical Simulation Period: ${weekStart.toISOString().split('T')[0]} to ${weekEnd.toISOString().split('T')[0]} (Mon-Fri)`);
+  console.log(`Historical Simulation Period: ${formatDate(historicalWeekStart)} to ${formatDate(historicalWeekEnd)} (${tradingDates.length} trading days)`);
 
   for (const ticker of tickers) {
     historicalData[ticker] = [];
 
     try {
       const yfTicker = new Ticker(ticker);
-      const startDate = new Date(weekStart);
-      startDate.setDate(weekStart.getDate() - 2);
-      const endDate = new Date(weekEnd);
-      endDate.setDate(weekEnd.getDate() + 2);
+      const startDate = new Date(rangeStart);
+      startDate.setDate(rangeStart.getDate() - 2);
+      const endDate = new Date(rangeEnd);
+      endDate.setDate(rangeEnd.getDate() + 2);
 
       const history = await yfTicker.history({
         start: startDate,
@@ -997,38 +1141,54 @@ const fetchHistoricalWeekData = async (tickers: string[]): Promise<{ [ticker: st
         interval: '1d',
       });
 
-      let weekData: { date: string, price: number, change: number, changePercent: number }[] = [];
-      let prevClose: number | null = null;
+      const historyByDate = new Map<string, number>();
+      let seedClose: number | null = null;
 
       for (const point of history) {
-        const date = point.date;
-        const dateOnly = new Date(date);
+        const dateOnly = new Date(point.date);
         dateOnly.setHours(0, 0, 0, 0);
-
-        if (dateOnly >= weekStart && dateOnly <= weekEnd) {
-          const dayOfWeek = dateOnly.getDay();
-          if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-            const change = prevClose !== null ? point.close - prevClose : 0;
-            const changePercent = prevClose !== null && prevClose > 0 ? change / prevClose : 0;
-
-            weekData.push({
-              date: dateOnly.toISOString().split('T')[0],
-              price: point.close,
-              change,
-              changePercent,
-            });
-
-            prevClose = point.close;
-          }
+        const dateKey = formatDate(dateOnly);
+        historyByDate.set(dateKey, point.close);
+        if (seedClose === null) {
+          seedClose = point.close;
         }
       }
 
-      weekData.sort((a, b) => a.date.localeCompare(b.date));
-      weekData = weekData.slice(0, 5);
+      const rangeData: { date: string, price: number, change: number, changePercent: number }[] = [];
+      let prevClose: number | null = null;
 
-      if (weekData.length > 0) {
-        historicalData[ticker] = weekData;
-        logger.logMarketData('Yahoo Finance (Historical)', ticker, true, weekData[0].price);
+      for (const tradingDate of tradingDates) {
+        const dateKey = formatDate(tradingDate);
+        let price = historyByDate.get(dateKey);
+
+        if (price === undefined) {
+          if (prevClose !== null) {
+            price = prevClose;
+          } else if (seedClose !== null) {
+            price = seedClose;
+          }
+        }
+
+        if (price === undefined) {
+          continue;
+        }
+
+        const change = prevClose !== null ? price - prevClose : 0;
+        const changePercent = prevClose !== null && prevClose > 0 ? change / prevClose : 0;
+
+        rangeData.push({
+          date: dateKey,
+          price,
+          change,
+          changePercent,
+        });
+
+        prevClose = price;
+      }
+
+      if (rangeData.length > 0) {
+        historicalData[ticker] = rangeData;
+        logger.logMarketData('Yahoo Finance (Historical)', ticker, true, rangeData[0].price);
         continue;
       }
     } catch (error) {
@@ -1040,18 +1200,19 @@ const fetchHistoricalWeekData = async (tickers: string[]): Promise<{ [ticker: st
     // Fallback: generate simulated historical data
     const basePrice = 50 + Math.random() * 250;
     if (historicalData[ticker].length === 0) {
-      for (let day = 0; day < 5; day++) {
-        const date = new Date(weekStart);
-        date.setDate(weekStart.getDate() + day);
+      const fallbackData: { date: string, price: number, change: number, changePercent: number }[] = [];
+      for (let day = 0; day < tradingDates.length; day++) {
+        const date = tradingDates[day];
         const volatility = 0.02;
         const price = basePrice * (1 + (Math.random() - 0.5) * volatility * day);
-        historicalData[ticker].push({
-          date: date.toISOString().split('T')[0],
+        fallbackData.push({
+          date: formatDate(date),
           price,
-          change: day > 0 ? price - historicalData[ticker][day - 1].price : 0,
-          changePercent: day > 0 ? (price - historicalData[ticker][day - 1].price) / historicalData[ticker][day - 1].price : 0,
+          change: day > 0 ? price - fallbackData[day - 1].price : 0,
+          changePercent: day > 0 ? (price - fallbackData[day - 1].price) / fallbackData[day - 1].price : 0,
         });
       }
+      historicalData[ticker] = fallbackData;
     }
   }
 
@@ -1231,11 +1392,11 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
 
   if (shouldUseHistorical) {
     const modeLabel = MODE === 'hybrid' ? 'Hybrid Mode (Historical Phase)' : 'Historical Simulation Mode';
-    console.log(`📊 ✅ ${modeLabel} ENABLED`);
+    console.log(`­ƒôè Ô£à ${modeLabel} ENABLED`);
     logger.logSimulationEvent(`${modeLabel} ENABLED`, { tickers: tickersWithBenchmark.length });
     historicalDataCache = {};
     currentHistoricalDay = 0;
-    historicalDataCache = await fetchHistoricalWeekData(tickersWithBenchmark);
+    historicalDataCache = await fetchHistoricalRangeData(tickersWithBenchmark);
 
     const marketData: MarketData = {};
     tickersWithBenchmark.forEach(ticker => {
@@ -1259,9 +1420,9 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
     });
     return marketData;
   } else if (MODE === 'realtime') {
-    console.log('📊 ✅ Real-Time Market Data Mode ENABLED');
+    console.log('­ƒôè Ô£à Real-Time Market Data Mode ENABLED');
     if (USE_DELAYED_DATA) {
-      console.log(`⏰ Using ${DATA_DELAY_MINUTES}-minute delayed data`);
+      console.log(`ÔÅ░ Using ${DATA_DELAY_MINUTES}-minute delayed data`);
       logger.logSimulationEvent('Real-Time Market Data Mode ENABLED (Delayed)', {
         tickers: tickersWithBenchmark.length,
         delayMinutes: DATA_DELAY_MINUTES
@@ -1289,7 +1450,7 @@ export const createInitialMarketData = async (tickers: string[]): Promise<Market
 
     return marketData;
   }
-  console.log('📊 ✅ Simulated Market Data Mode (Default)');
+  console.log('­ƒôè Ô£à Simulated Market Data Mode (Default)');
   logger.logSimulationEvent('Simulated Market Data Mode ENABLED', { tickers: tickersWithBenchmark.length });
   return await createSimulatedMarketData(tickersWithBenchmark);
 };
@@ -1394,7 +1555,7 @@ export const generateNextIntradayMarketData = async (
     const result: MarketData = { ...previousMarketData };
     Object.keys(fetchedData).forEach(ticker => {
       if (fetchedData[ticker]) {
-        result[ticker] = fetchedData[ticker];
+        result[ticker] = applyPriceJumpGuard(ticker, fetchedData[ticker], previousMarketData[ticker]);
       }
     });
 
@@ -1451,7 +1612,7 @@ export const generateNextIntradayMarketData = async (
     const intradayChangePercent = Math.abs(intradayChange / prevPrice);
     if (intradayChangePercent > 0.05) {
       logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
-        `[INTRADAY JUMP] ${ticker}: ${prevPrice.toFixed(2)} → ${intradayPrice.toFixed(2)} (${(intradayChangePercent * 100).toFixed(2)}% change)`,
+        `[INTRADAY JUMP] ${ticker}: ${prevPrice.toFixed(2)} ÔåÆ ${intradayPrice.toFixed(2)} (${(intradayChangePercent * 100).toFixed(2)}% change)`,
         {
           ticker,
           previousPrice: prevPrice,
@@ -1478,13 +1639,20 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     // Increment day FIRST
     currentHistoricalDay++;
 
+    const cachedDays = Object.values(historicalDataCache)
+      .reduce((max, entries) => Math.max(max, entries.length), 0);
+    const maxHistoricalDay = historicalTradingDates.length > 0
+      ? historicalTradingDates.length - 1
+      : cachedDays - 1;
+
     // Check if we've run out of historical data AFTER incrementing
-    // Historical data has indices 0-4 (5 days), so currentHistoricalDay > 4 means we're past available data
-    if (currentHistoricalDay > 4) {
+    if (currentHistoricalDay > maxHistoricalDay) {
       logger.log(LogLevel.WARNING, LogCategory.MARKET_DATA,
         `[HISTORICAL DATA] No more historical data available (day ${currentHistoricalDay}), keeping previous prices`, {
         currentHistoricalDay,
-        maxDays: 4
+        maxDays: maxHistoricalDay,
+        tradingDays: historicalTradingDates.length,
+        cachedDays
       });
 
       // Return previous data with NO changes to prevent phantom price jumps
@@ -1575,7 +1743,14 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
   } else if (MODE === 'realtime') {
     // Always include ^GSPC for S&P 500 benchmark tracking
     const tickers = [...new Set([...Object.keys(previousMarketData), '^GSPC'])];
-    return await fetchRealMarketDataWithCascade(tickers);
+    const fetched = await fetchRealMarketDataWithCascade(tickers);
+    const guarded: MarketData = {};
+
+    Object.keys(fetched).forEach(ticker => {
+      guarded[ticker] = applyPriceJumpGuard(ticker, fetched[ticker], previousMarketData[ticker]);
+    });
+
+    return guarded;
   }
 
   // Simulated mode
@@ -1625,7 +1800,7 @@ export const generateNextDayMarketData = async (previousMarketData: MarketData):
     const priceChangePercent = Math.abs(dailyChangePercent);
     if (priceChangePercent > 0.05) {
       logger.log(LogLevel.INFO, LogCategory.MARKET_DATA,
-        `[DAY TRANSITION] ${ticker}: ${prevData.price.toFixed(2)} → ${newPrice.toFixed(2)} (${(priceChangePercent * 100).toFixed(2)}% change)`,
+        `[DAY TRANSITION] ${ticker}: ${prevData.price.toFixed(2)} ÔåÆ ${newPrice.toFixed(2)} (${(priceChangePercent * 100).toFixed(2)}% change)`,
         {
           ticker,
           previousPrice: prevData.price,
@@ -1703,29 +1878,25 @@ const ensureHistoricalCacheForSnapshot = async (
       tickers: tickersToFetch.length,
       requestedDay: snapshot.day,
     });
-    historicalDataCache = await fetchHistoricalWeekData(tickersToFetch);
+    historicalDataCache = await fetchHistoricalRangeData(tickersToFetch);
   }
 
-  currentHistoricalDay = Math.min(requiredDay, 4);
-
-  if (snapshot.startDate) {
-    const start = new Date(snapshot.startDate);
-    if (!isNaN(start.getTime())) {
-      const normalizedStart = setToMarketOpen(start);
-      historicalWeekStart = normalizedStart;
-      const end = new Date(normalizedStart);
-      end.setDate(normalizedStart.getDate() + 4);
-      end.setHours(23, 59, 59, 999);
-      historicalWeekEnd = end;
-    }
-  } else if (!historicalWeekStart || !historicalWeekEnd) {
-    const defaultStart = getHistoricalSimulationStartDate();
-    historicalWeekStart = defaultStart;
-    const end = new Date(defaultStart);
-    end.setDate(defaultStart.getDate() + 4);
-    end.setHours(23, 59, 59, 999);
-    historicalWeekEnd = end;
+  let rangeStart = snapshot.startDate ? new Date(snapshot.startDate) : null;
+  if (!rangeStart || isNaN(rangeStart.getTime())) {
+    rangeStart = getHistoricalSimulationStartDate();
+  } else {
+    rangeStart = getNextTradingDay(rangeStart);
   }
+
+  const rangeEnd = getHistoricalSimulationEndDate(rangeStart);
+  const tradingDates = buildTradingDates(rangeStart, rangeEnd);
+
+  historicalTradingDates = tradingDates;
+  historicalWeekStart = tradingDates[0] ?? rangeStart;
+  historicalWeekEnd = setToEndOfDay(tradingDates[tradingDates.length - 1] ?? rangeEnd);
+
+  const maxHistoricalDay = Math.max(tradingDates.length - 1, 0);
+  currentHistoricalDay = Math.min(requiredDay, maxHistoricalDay);
 };
 
 export const synchronizeSimulationFromSnapshot = async (
