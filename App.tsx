@@ -11,7 +11,10 @@ export default function App() {
       <Route path="/menu" element={<SimulationSelector />} />
       <Route path="/simulation/:simulationId" element={<SimulationView />} />
       <Route path="/synthetic-demo" element={<SyntheticChartDemo />} />
-      <Route path="/snapshot-tool" element={<SnapshotTool />} />
+      <Route path="/synthetic-demo" element={<SyntheticChartDemo />} />
+      {import.meta.env.VITE_ENABLE_SNAPSHOT_TOOL === 'true' && (
+        <Route path="/snapshot-tool" element={<SnapshotTool />} />
+      )}
     </Routes>
   );
 }

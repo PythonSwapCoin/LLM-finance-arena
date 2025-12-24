@@ -193,5 +193,7 @@ export interface SimulationSnapshot {
     marketMinutesPerTick: number;
     realtimeTickIntervalMs: number;
   };
+  // ID of the historical snapshot used for preloading (to detect config changes)
+  preloadSnapshotId?: string;
 }
 

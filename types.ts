@@ -125,10 +125,10 @@ export interface Agent {
 }
 
 export interface Benchmark {
-    id: string;
-    name: string;
-    color: string;
-    performanceHistory: PerformanceMetrics[];
+  id: string;
+  name: string;
+  color: string;
+  performanceHistory: PerformanceMetrics[];
 }
 
 export interface MarketDataSourceTelemetry {
@@ -158,4 +158,37 @@ export interface MarketDataTelemetry {
   rateLimits: {
     yahoo: YahooRateLimitStatus;
   };
+}
+
+// Snapshot type for persistence
+export interface SimulationSnapshot {
+  day: number;
+  intradayHour: number;
+  marketData: MarketData;
+  agents: Agent[];
+  benchmarks: Benchmark[];
+  mode: 'simulated' | 'realtime' | 'historical' | 'hybrid';
+  historicalPeriod?: {
+    start: string;
+    end: string;
+  };
+  // Date tracking for display purposes
+  startDate?: string; // ISO date string when simulation started
+  currentDate?: string; // ISO date string for current point in simulation
+  chat: ChatState;
+  currentTimestamp?: number; // Timestamp in milliseconds for realtime mode
+  lastUpdated: string;
+  // Historical preload metadata (for saving historical data to preload in realtime mode)
+  historicalPreloadMetadata?: {
+    mode: 'historical' | 'realtime' | 'hybrid' | 'simulated';
+    startDate: string;
+    endDate: string;
+    endDay: number;
+    endIntradayHour: number;
+    tickIntervalMs: number;
+    marketMinutesPerTick: number;
+    realtimeTickIntervalMs: number;
+  };
+  // ID of the historical snapshot used for preloading (to detect config changes)
+  preloadSnapshotId?: string;
 }

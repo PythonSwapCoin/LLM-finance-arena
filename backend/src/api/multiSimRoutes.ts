@@ -36,18 +36,33 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
       // Check if this simulation type exists but is disabled
       const allTypes = simulationManager.getAllSimulationTypesWithStatus();
       const simType = allTypes.find(t => t.id === typeId);
-      
+
       if (simType && !simType.enabled) {
         reply.code(403); // Forbidden - exists but disabled
         return { error: `Simulation type '${typeId}' is currently disabled` };
       }
-      
+
       reply.code(404);
       return { error: `Simulation type '${typeId}' not found` };
     }
 
-    const snapshot = instance.getSnapshot();
+    const rawSnapshot = instance.getSnapshot();
     const simType = instance.getSimulationType();
+
+    // Optimize the snapshot for transmission by downsampling performance history
+    const { downsamplePerformanceMetrics } = await import('../utils/dataOptimization.js');
+
+    const snapshot = {
+      ...rawSnapshot,
+      agents: rawSnapshot.agents.map(agent => ({
+        ...agent,
+        performanceHistory: downsamplePerformanceMetrics(agent.performanceHistory, 500)
+      })),
+      benchmarks: rawSnapshot.benchmarks.map(benchmark => ({
+        ...benchmark,
+        performanceHistory: downsamplePerformanceMetrics(benchmark.performanceHistory, 500)
+      }))
+    };
 
     return {
       snapshot,
@@ -101,7 +116,7 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
 
       // Reset the simulation
       await simulationManager.resetSimulation(typeId);
-      
+
       // Save fresh snapshot
       const instance = simulationManager.getSimulation(typeId);
       if (instance) {
@@ -131,7 +146,7 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
   fastify.post('/api/simulations/reset', async (request, reply) => {
     try {
       const disableScheduler = process.env.DISABLE_SCHEDULER === 'true';
-      
+
       // Stop scheduler if it's running
       if (!disableScheduler) {
         await stopMultiSimScheduler();
@@ -209,20 +224,20 @@ export const registerMultiSimRoutes = async (fastify: FastifyInstance): Promise<
 
       logger.log(LogLevel.INFO, LogCategory.SYSTEM,
         `[CHAT] Message added to simulation ${typeId}`, {
-          messageId: result.message.id,
-          roundId: result.message.roundId,
-          totalMessages: result.chat.messages.length,
-        });
+        messageId: result.message.id,
+        roundId: result.message.roundId,
+        totalMessages: result.chat.messages.length,
+      });
 
       return result;
     } catch (error) {
       reply.code(400);
       logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
         `[CHAT] Message rejected for simulation ${typeId}`, {
-          username,
-          agentId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        username,
+        agentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return {
         error: error instanceof Error ? error.message : 'Failed to send chat message',
       };

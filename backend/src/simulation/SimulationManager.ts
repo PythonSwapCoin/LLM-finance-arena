@@ -359,12 +359,14 @@ class SimulationInstance {
       currentTimestamp,
       chat: this.createChatState(),
       lastUpdated: new Date().toISOString(),
+      preloadSnapshotId: shouldPreloadHistorical ? (process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'optimized') : undefined,
     };
 
     logger.logSimulationEvent('Simulation instance initialized', {
       simulationType: this.simulationType.id,
       agentCount: initialAgentStates.length,
       chatEnabled: this.simulationType.chatEnabled,
+      preloadSnapshotId: this.snapshot.preloadSnapshotId
     });
   }
 
@@ -450,12 +452,34 @@ class SimulationManager {
       } else {
         // Try to load from persistence
         try {
-          const snapshot = await loadSnapshot(simType.id);
-          if (snapshot) {
+          let snapshot = await loadSnapshot(simType.id);
+          let shouldForceReset = false;
+
+          // Check if we need to force a reset due to configuration changes
+          // Specifically, if the user changed the historical preload snapshot ID
+          if (snapshot && getSimulationMode() === 'realtime' && process.env.REALTIME_PRELOAD_HISTORICAL === 'true') {
+            const configuredPreloadId = process.env.HISTORICAL_PRELOAD_SNAPSHOT_ID || 'optimized';
+            const snapshotPreloadId = snapshot.preloadSnapshotId;
+
+            // If the snapshot doesn't have a preload ID (old format) or it differs from configured, force reset
+            // This ensures we pick up the new historical data
+            if (snapshotPreloadId !== configuredPreloadId) {
+              logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+                'Detected configuration change in historical preload ID. Forcing reset to use new data.', {
+                configuredPreloadId,
+                snapshotPreloadId: snapshotPreloadId || 'undefined',
+                simulationType: simType.id
+              });
+              shouldForceReset = true;
+            }
+          }
+
+          if (snapshot && !shouldForceReset) {
             logger.logSimulationEvent('Loaded snapshot from persistence', {
               simulationType: simType.id,
               day: snapshot.day,
               intradayHour: snapshot.intradayHour,
+              preloadSnapshotId: snapshot.preloadSnapshotId
             });
             // Use the market data from snapshot if available, otherwise use initial
             const snapshotMarketData = snapshot.marketData && Object.keys(snapshot.marketData).length > 0
@@ -463,7 +487,7 @@ class SimulationManager {
               : initialMarketData;
             await instance.initialize(snapshotMarketData, snapshot);
           } else {
-            logger.logSimulationEvent('No snapshot found, starting fresh', {
+            logger.logSimulationEvent(shouldForceReset ? 'Forcing fresh start with new configuration' : 'No snapshot found, starting fresh', {
               simulationType: simType.id,
             });
             await instance.initialize(initialMarketData);

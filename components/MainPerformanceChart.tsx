@@ -41,13 +41,13 @@ const CustomTooltip = ({
 }: any) => {
   if (active && payload && payload.length) {
     const timeLabel = formatTimestampToDate(label, startDate, currentDate, simulationMode, day, intradayHour);
-    
+
     // If a participant is selected, only show that one; otherwise show all
-    const filteredPayload = selectedParticipantId 
+    const filteredPayload = selectedParticipantId
       ? payload.filter((pld: any) => pld.dataKey === selectedParticipantId)
       : payload;
     const numericPayload = filteredPayload.filter((pld: any) => typeof pld.value === 'number' && Number.isFinite(pld.value));
-    
+
     return (
       <div className="bg-arena-surface p-4 rounded-md border border-arena-border shadow-lg">
         <p className="label text-arena-text-primary font-semibold">{timeLabel}</p>
@@ -77,7 +77,7 @@ const CustomDot = (props: any) => {
   // Extract key and other props separately to avoid React key warning
   // Note: 'key' is a special React prop and shouldn't be destructured
   const { cx, cy, payload, dataKey, index, data, image } = props;
-  
+
   // Only render logo at the last data point
   if (index !== data.length - 1) return null;
   if (!image) return null;
@@ -211,7 +211,7 @@ const getVisibleTickIndices = (
 
   const visibleIndices = new Set<number>();
   const estimatedLabelWidth = 60; // Estimated width of a label in pixels (e.g., "14:30" or "Nov 10")
-  
+
   // First, determine which indices have labels
   const indicesWithLabels: number[] = [];
   chartData.forEach((d, idx) => {
@@ -234,33 +234,33 @@ const getVisibleTickIndices = (
   // Estimate chart width: container width minus margins (left: 10-20, right: 170-56 depending on viewport)
   // Use a conservative estimate
   const chartWidth = Math.max(200, containerWidth - 200);
-  
+
   // Calculate spacing between data points
   const dataPointSpacing = chartData.length > 1 ? chartWidth / (chartData.length - 1) : chartWidth;
-  
+
   // Only show ticks if there's enough space for labels
   // Check if the spacing between labels would be sufficient
   if (indicesWithLabels.length > 1) {
     // Estimate the minimum spacing needed between visible ticks
     // Need enough space for label + padding on both sides
     const minSpacingNeeded = estimatedLabelWidth + 20; // label width + padding
-    
+
     // Start with the first label
     let lastVisibleIndex = indicesWithLabels[0];
     visibleIndices.add(indicesWithLabels[0]);
-    
+
     // Iterate through remaining labels
     for (let i = 1; i < indicesWithLabels.length; i++) {
       const currentIndex = indicesWithLabels[i];
       const spacing = (currentIndex - lastVisibleIndex) * dataPointSpacing;
-      
+
       // Only add if there's enough space since the last visible tick
       if (spacing >= minSpacingNeeded) {
         visibleIndices.add(currentIndex);
         lastVisibleIndex = currentIndex;
       }
     }
-    
+
     // Always try to show the last label if it's different from the last visible one
     const lastIndex = indicesWithLabels[indicesWithLabels.length - 1];
     if (!visibleIndices.has(lastIndex) && lastIndex !== lastVisibleIndex) {
@@ -278,7 +278,7 @@ const getVisibleTickIndices = (
   return visibleIndices;
 };
 
-export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({ 
+export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
   participants,
   startDate,
   currentDate,
@@ -289,8 +289,8 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
 }) => {
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [hoveredParticipantId, setHoveredParticipantId] = useState<string | null>(null);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');
-  
+  const timePeriod: TimePeriod = 'all';
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
 
@@ -546,346 +546,281 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
 
   // Create array of timestamps that should have ticks (only those with visible labels)
   const visibleTickTimestamps = useMemo(() => {
-    return chartData
-      .map((d, idx) => visibleTickIndices.has(idx) ? d.timestamp as number : null)
-      .filter((ts): ts is number => ts !== null);
-  }, [chartData, visibleTickIndices]);
+    return axisMeta.timestamps.filter((_, idx) => visibleTickIndices.has(idx));
+  }, [axisMeta, visibleTickIndices]);
 
-  if (chartData.length === 0) {
-    return <div className="flex items-center justify-center h-full text-arena-text-secondary">Awaiting simulation data...</div>;
-  }
+  const [agents, benchmarks] = useMemo(() => {
+    const a: Agent[] = [];
+    const b: Benchmark[] = [];
+    participants.forEach(p => {
+      const isBench = (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500";
+      if (isBench) {
+        b.push(p as Benchmark);
+      } else {
+        a.push(p as Agent);
+      }
+    });
+    return [a, b];
+  }, [participants]);
 
-  // Separate participants into benchmarks and agents for legend
-  const benchmarks = participants.filter(p =>
-    (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500"
-  );
-  const agents = participants.filter(p =>
-    (p as Benchmark).name !== "AI Managers Index" && (p as Benchmark).name !== "S&P 500"
-  );
+  const displayName = useMemo(() => {
+    const id = hoveredParticipantId || selectedParticipantId;
+    if (!id) return 'All Participants';
+    const p = participants.find(p => p.id === id);
+    return p?.name || id;
+  }, [hoveredParticipantId, selectedParticipantId, participants]);
 
   return (
-    <div ref={containerRef} className="relative w-full flex flex-col" style={{ gap: '12px' }}>
-      {/* Time Period Selector */}
-      <div className="flex items-center gap-2 justify-end">
-        <span className="text-xs text-arena-text-tertiary uppercase tracking-wider">Time Period:</span>
-        <div className="flex gap-1 bg-arena-surface/50 rounded-md border border-arena-border/50 p-1">
-          <button
-            onClick={() => setTimePeriod('24h')}
-            className={`px-3 py-1.5 text-sm font-medium rounded transition-all ${
-              timePeriod === '24h'
-                ? 'bg-arena-surface text-arena-text-primary shadow-sm'
-                : 'text-arena-text-secondary hover:text-arena-text-primary hover:bg-arena-surface/50'
-            }`}
-          >
-            24h
-          </button>
-          <button
-            onClick={() => setTimePeriod('1w')}
-            className={`px-3 py-1.5 text-sm font-medium rounded transition-all ${
-              timePeriod === '1w'
-                ? 'bg-arena-surface text-arena-text-primary shadow-sm'
-                : 'text-arena-text-secondary hover:text-arena-text-primary hover:bg-arena-surface/50'
-            }`}
-          >
-            1 Week
-          </button>
-          <button
-            onClick={() => setTimePeriod('all')}
-            className={`px-3 py-1.5 text-sm font-medium rounded transition-all ${
-              timePeriod === 'all'
-                ? 'bg-arena-surface text-arena-text-primary shadow-sm'
-                : 'text-arena-text-secondary hover:text-arena-text-primary hover:bg-arena-surface/50'
-            }`}
-          >
-            All Time
-          </button>
-        </div>
-      </div>
-      
-      {selectedParticipantId && (() => {
-        const selected = participants.find(p => p.id === selectedParticipantId);
-        const displayName = selected && 'model' in selected
-          ? getAgentDisplayName(selected as Agent, simulationTypeName)
-          : selected?.name || 'Selected';
-        return (
-          <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
-            Showing: {displayName}
-            <span className="ml-2 text-arena-text-tertiary">(Click to deselect)</span>
-          </div>
-        );
-      })()}
-      <div 
+    <div className="flex flex-col gap-4 w-full">
+      <div
         style={{ width: '100%', height: '400px', minHeight: '400px', minWidth: '200px', position: 'relative' }}
         className="focus:outline-none"
         tabIndex={-1}
+        ref={containerRef}
       >
-        <ResponsiveContainer width="100%" height={400} minHeight={400}>
-      <LineChart
-        data={chartData}
-        margin={chartMargin}
-        onClick={(e) => {
-          // If clicking on chart background (not a line), deselect
-          if (selectedParticipantId && !e?.activePayload?.length) {
-            setSelectedParticipantId(null);
-          }
-        }}
-        style={{ cursor: hoveredParticipantId ? 'pointer' : 'default', outline: 'none' }}
-      >
-        <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
-        <Tooltip
-          content={(props) => (
-            <CustomTooltip
-              {...props}
-              selectedParticipantId={selectedParticipantId}
-              startDate={startDate}
-              currentDate={currentDate}
-              simulationMode={simulationMode}
-              day={day}
-              intradayHour={intradayHour}
-              simulationTypeName={simulationTypeName}
-              participants={participants}
-            />
-          )}
-        />
-        {/* Day boundary reference lines (dotted vertical lines) - show at beginning of each day */}
-        {dayBoundaries.map((boundary, idx) => (
-          <ReferenceLine
-            key={`day-boundary-${idx}`}
-            x={boundary}
-            stroke="#A3A3A3"
-            strokeDasharray="4 4"
-            strokeWidth={1.5}
-            opacity={0.7}
-          />
-        ))}
-        <XAxis 
-          dataKey="timestamp" 
-          stroke="#A3A3A3"
-          ticks={visibleTickTimestamps}
-          tick={(props: any) => {
-            const { x, y, payload } = props;
-
-            const payloadValue = Number(payload.value);
-            if (!Number.isFinite(payloadValue)) return null;
-
-            const dataIndex = axisMeta.timestamps.findIndex(ts => Math.abs(ts - payloadValue) < 1);
-            if (dataIndex === -1 || axisMeta.isGapIndices.has(dataIndex) || !visibleTickIndices.has(dataIndex)) {
-              return null;
-            }
-
-            const label = formatXAxisLabel(payloadValue, dataIndex, axisMeta, timePeriod);
-            if (!label) return null;
-
-            return (
-              <g transform={`translate(${x},${y})`}>
-                <text
-                  x={0}
-                  y={0}
-                  dy={16}
-                  textAnchor="middle"
-                  fill="#A3A3A3"
-                  fontSize={12}
-                >
-                  {label}
-                </text>
-              </g>
-            );
-          }}
-          tickLine={(props: any) => {
-            // Only show tick line if this timestamp is in the visible set
-            const timestamp = props.payload?.value ?? props.value;
-            if (timestamp === undefined) return null;
-            
-            const numericTimestamp = Number(timestamp);
-            if (!Number.isFinite(numericTimestamp)) return null;
-
-            if (!visibleTickTimestamps.some(ts => Math.abs(ts - numericTimestamp) < 1)) {
-              return null;
-            }
-
-            const dataIndex = axisMeta.timestamps.findIndex(ts => Math.abs(ts - numericTimestamp) < 1);
-            if (dataIndex === -1 || axisMeta.isGapIndices.has(dataIndex) || !visibleTickIndices.has(dataIndex)) {
-              return null;
-            }
-
-            const label = formatXAxisLabel(numericTimestamp, dataIndex, axisMeta, timePeriod);
-            if (!label) return null;
-            return <line {...props} />;
-          }}
-          minTickGap={60}
-        />
-        <YAxis
-          stroke="#A3A3A3"
-          tick={{ fill: '#A3A3A3', fontSize: 12 }}
-          tickFormatter={(value: number) => `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-          domain={yAxisDomain}
-          width={80}
-        />
-        
-        {/* Initial Capital line - only show if no participant is selected, or dimmed if hovering */}
-        {!selectedParticipantId && (
-          <Line 
-              isAnimationActive={false}
-              dataKey={() => INITIAL_CASH} 
-              stroke="#737373" 
-              strokeWidth={1.5} 
-              strokeDasharray="5 5" 
-              dot={false}
-              name="Initial Capital"
-              opacity={hoveredParticipantId ? 0.2 : 1}
-          />
+        {(hoveredParticipantId || selectedParticipantId) && (
+          <div className="absolute top-2 right-2 z-10 bg-arena-surface px-3 py-1 rounded-md border border-arena-border text-xs text-arena-text-secondary">
+            Showing: {displayName}
+            {selectedParticipantId && <span className="ml-2 text-arena-text-tertiary">(Click chart to deselect)</span>}
+          </div>
         )}
-
-        {/* Render benchmarks first (behind agents) so markers appear on top */}
-        {participants
-          .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
-          .filter(p => (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500")
-          .map((p, index) => {
-            const isHovered = hoveredParticipantId === p.id;
-            const isSelected = selectedParticipantId === p.id;
-            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
-            const strokeWidth = isHovered || isSelected
-              ? ((p as Benchmark).name === "AI Managers Index" ? 5 : 4)
-              : ((p as Benchmark).name === "AI Managers Index" ? 3 : 2.5);
-
-            return (
-              <React.Fragment key={`benchmark-${p.id}-${index}`}>
-                {/* Invisible thicker line for better hover/click detection */}
-                <Line
-                  type="linear"
-                  dataKey={p.id}
-                  stroke="transparent"
-                  strokeWidth={20}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                  onMouseEnter={() => setHoveredParticipantId(p.id)}
-                  onMouseLeave={() => setHoveredParticipantId(null)}
-                  onClick={(e) => {
-                    e?.stopPropagation?.();
-                    if (selectedParticipantId === p.id) {
-                      setSelectedParticipantId(null);
-                    } else {
-                      setSelectedParticipantId(p.id);
-                    }
-                  }}
+        <ResponsiveContainer width="100%" height={400} minHeight={400}>
+          <LineChart
+            data={chartData}
+            margin={chartMargin}
+            onClick={(e) => {
+              if (selectedParticipantId && !e?.activePayload?.length) {
+                setSelectedParticipantId(null);
+              }
+            }}
+            style={{ cursor: hoveredParticipantId ? 'pointer' : 'default', outline: 'none' }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
+            <Tooltip
+              content={(props) => (
+                <CustomTooltip
+                  {...props}
+                  selectedParticipantId={selectedParticipantId}
+                  startDate={startDate}
+                  currentDate={currentDate}
+                  simulationMode={simulationMode}
+                  day={day}
+                  intradayHour={intradayHour}
+                  simulationTypeName={simulationTypeName}
+                  participants={participants}
                 />
-                {/* Visible line */}
-                <Line
-                  type="linear"
-                  dataKey={p.id}
-                  stroke={p.color}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={(p as Benchmark).name === "S&P 500" ? "3 3" : "0"}
-                  dot={false}
-                  activeDot={{
-                    r: isHovered || isSelected ? 8 : 5,
-                    strokeWidth: 2,
-                    stroke: '#ffffff',
-                    fill: p.color,
-                    style: { cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
-                  }}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                  name={p.name}
-                  opacity={opacity}
-                  style={{ pointerEvents: 'none' }}
-                  label={
-                    !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
-                      <EndOfLineLabel
-                        data={p.performanceHistory}
-                        color={p.color}
-                        name={p.name}
-                        isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
-                      />
-                    ) : undefined
-                  }
-                />
-              </React.Fragment>
-            );
-          })}
+              )}
+            />
+            {dayBoundaries.map((boundary, idx) => (
+              <ReferenceLine
+                key={`day-boundary-${idx}`}
+                x={boundary}
+                stroke="#A3A3A3"
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                opacity={0.7}
+              />
+            ))}
+            <XAxis
+              dataKey="timestamp"
+              stroke="#A3A3A3"
+              ticks={visibleTickTimestamps}
+              tick={(props: any) => {
+                const { x, y, payload } = props;
+                const payloadValue = Number(payload.value);
+                if (!Number.isFinite(payloadValue)) return null;
 
-        {/* Render agents after benchmarks (so markers appear on top) */}
-        {participants
-          .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
-          .filter(p => (p as Benchmark).name !== "AI Managers Index" && (p as Benchmark).name !== "S&P 500")
-          .map((p, index) => {
-            const isHovered = hoveredParticipantId === p.id;
-            const isSelected = selectedParticipantId === p.id;
-            const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
-            const strokeWidth = isHovered || isSelected ? 4 : 2.5;
-            // Get display name for agents (formatted model name for Wall Street Arena)
-            const displayName = getAgentDisplayName(p as Agent, simulationTypeName);
+                const dataIndex = axisMeta.timestamps.findIndex(ts => Math.abs(ts - payloadValue) < 1);
+                if (dataIndex === -1 || axisMeta.isGapIndices.has(dataIndex) || !visibleTickIndices.has(dataIndex)) {
+                  return null;
+                }
 
-            return (
-              <React.Fragment key={`agent-${p.id}-${index}`}>
-                {/* Invisible thicker line for better hover/click detection */}
-                <Line
-                  type="linear"
-                  dataKey={p.id}
-                  stroke="transparent"
-                  strokeWidth={20}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                  onMouseEnter={() => setHoveredParticipantId(p.id)}
-                  onMouseLeave={() => setHoveredParticipantId(null)}
-                  onClick={(e) => {
-                    e?.stopPropagation?.();
-                    if (selectedParticipantId === p.id) {
-                      setSelectedParticipantId(null);
-                    } else {
-                      setSelectedParticipantId(p.id);
-                    }
-                  }}
-                />
-                {/* Visible line */}
-                <Line
-                  type="linear"
-                  dataKey={p.id}
-                  stroke={p.color}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray="0"
-                  dot={(props) => {
-                    const { key, ...restProps } = props;
-                    return <CustomDot key={key} {...restProps} data={chartData} image={(p as Agent).image} />;
-                  }}
-                  activeDot={{
-                    r: isHovered || isSelected ? 8 : 5,
-                    strokeWidth: 2,
-                    stroke: '#ffffff',
-                    fill: p.color,
-                    style: { cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
-                  }}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                  name={displayName}
-                  opacity={opacity}
-                  style={{ pointerEvents: 'none' }}
-                  label={
-                    !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
-                      <EndOfLineLabel
-                        data={p.performanceHistory}
-                        color={p.color}
-                        name={displayName}
-                        isBenchmark={(p as any).name.includes('Index') || (p as any).name.includes('S&P')}
-                      />
-                    ) : undefined
-                  }
-                />
-              </React.Fragment>
-            );
-          })}
-      </LineChart>
+                const label = formatXAxisLabel(payloadValue, dataIndex, axisMeta, timePeriod);
+                if (!label) return null;
+
+                return (
+                  <g transform={`translate(${x},${y})`}>
+                    <text x={0} y={0} dy={16} textAnchor="middle" fill="#A3A3A3" fontSize={12}>
+                      {label}
+                    </text>
+                  </g>
+                );
+              }}
+              tickLine={(props: any) => {
+                const timestamp = props.payload?.value ?? props.value;
+                if (timestamp === undefined) return null;
+                const numericTimestamp = Number(timestamp);
+                if (!Number.isFinite(numericTimestamp)) return null;
+
+                if (!visibleTickTimestamps.some(ts => Math.abs(ts - numericTimestamp) < 1)) return null;
+
+                const dataIndex = axisMeta.timestamps.findIndex(ts => Math.abs(ts - numericTimestamp) < 1);
+                if (dataIndex === -1 || axisMeta.isGapIndices.has(dataIndex) || !visibleTickIndices.has(dataIndex)) return null;
+
+                const label = formatXAxisLabel(numericTimestamp, dataIndex, axisMeta, timePeriod);
+                if (!label) return null;
+                return <line {...props} />;
+              }}
+              minTickGap={60}
+            />
+            <YAxis
+              stroke="#A3A3A3"
+              tick={{ fill: '#A3A3A3', fontSize: 12 }}
+              tickFormatter={(value: number) => `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              domain={yAxisDomain}
+              width={80}
+            />
+
+            {!selectedParticipantId && (
+              <Line
+                isAnimationActive={false}
+                dataKey={() => INITIAL_CASH}
+                stroke="#737373"
+                strokeWidth={1.5}
+                strokeDasharray="5 5"
+                dot={false}
+                name="Initial Capital"
+                opacity={hoveredParticipantId ? 0.2 : 1}
+              />
+            )}
+
+            {participants
+              .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
+              .filter(p => (p as Benchmark).name === "AI Managers Index" || (p as Benchmark).name === "S&P 500")
+              .map((p, index) => {
+                const isHovered = hoveredParticipantId === p.id;
+                const isSelected = selectedParticipantId === p.id;
+                const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
+                const strokeWidth = isHovered || isSelected
+                  ? ((p as Benchmark).name === "AI Managers Index" ? 5 : 4)
+                  : ((p as Benchmark).name === "AI Managers Index" ? 3 : 2.5);
+
+                return (
+                  <React.Fragment key={`benchmark-${p.id}-${index}`}>
+                    <Line
+                      type="linear"
+                      dataKey={p.id}
+                      stroke="transparent"
+                      strokeWidth={20}
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                      onMouseEnter={() => setHoveredParticipantId(p.id)}
+                      onMouseLeave={() => setHoveredParticipantId(null)}
+                      onClick={(e) => {
+                        e?.stopPropagation?.();
+                        if (selectedParticipantId === p.id) {
+                          setSelectedParticipantId(null);
+                        } else {
+                          setSelectedParticipantId(p.id);
+                        }
+                      }}
+                    />
+                    <Line
+                      type="linear"
+                      dataKey={p.id}
+                      stroke={p.color}
+                      strokeWidth={strokeWidth}
+                      strokeDasharray={(p as Benchmark).name === "S&P 500" ? "3 3" : "0"}
+                      dot={false}
+                      activeDot={{
+                        r: isHovered || isSelected ? 8 : 5,
+                        strokeWidth: 2,
+                        stroke: '#ffffff',
+                        fill: p.color,
+                        style: { cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
+                      }}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                      name={p.name}
+                      opacity={opacity}
+                      style={{ pointerEvents: 'none' }}
+                      label={
+                        !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
+                          <EndOfLineLabel
+                            data={p.performanceHistory}
+                            color={p.color}
+                            name={p.name}
+                            isBenchmark={true}
+                          />
+                        ) : undefined
+                      }
+                    />
+                  </React.Fragment>
+                );
+              })}
+
+            {participants
+              .filter(p => !selectedParticipantId || selectedParticipantId === p.id)
+              .filter(p => (p as Benchmark).name !== "AI Managers Index" && (p as Benchmark).name !== "S&P 500")
+              .map((p, index) => {
+                const isHovered = hoveredParticipantId === p.id;
+                const isSelected = selectedParticipantId === p.id;
+                const opacity = selectedParticipantId && !isSelected ? 0 : (hoveredParticipantId && !isHovered ? 0.15 : 1);
+                const strokeWidth = isHovered || isSelected ? 4 : 2;
+
+                return (
+                  <React.Fragment key={`participant-${p.id}-${index}`}>
+                    <Line
+                      type="linear"
+                      dataKey={p.id}
+                      stroke="transparent"
+                      strokeWidth={20}
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                      onMouseEnter={() => setHoveredParticipantId(p.id)}
+                      onMouseLeave={() => setHoveredParticipantId(null)}
+                      onClick={(e) => {
+                        e?.stopPropagation?.();
+                        if (selectedParticipantId === p.id) {
+                          setSelectedParticipantId(null);
+                        } else {
+                          setSelectedParticipantId(p.id);
+                        }
+                      }}
+                    />
+                    <Line
+                      type="linear"
+                      dataKey={p.id}
+                      stroke={p.color}
+                      strokeWidth={strokeWidth}
+                      strokeDasharray={(p as Benchmark).name === "S&P 500" ? "3 3" : "0"}
+                      dot={false}
+                      activeDot={{
+                        r: isHovered || isSelected ? 8 : 5,
+                        strokeWidth: 2,
+                        stroke: '#ffffff',
+                        fill: p.color,
+                        style: { cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
+                      }}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                      name={p.name}
+                      opacity={opacity}
+                      style={{ pointerEvents: 'none' }}
+                      label={
+                        !isCompactViewport && p.performanceHistory && p.performanceHistory.length > 0 ? (
+                          <EndOfLineLabel
+                            data={p.performanceHistory}
+                            color={p.color}
+                            name={p.name}
+                            isBenchmark={false}
+                          />
+                        ) : undefined
+                      }
+                    />
+                  </React.Fragment>
+                );
+              })}
+          </LineChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Interactive Legend */}
       {!isCompactViewport && (
         <div className="flex flex-wrap gap-3 px-2 py-3 bg-arena-surface/50 rounded-md border border-arena-border/50">
-          {/* Benchmarks section */}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs text-arena-text-tertiary uppercase tracking-wider mr-1">Benchmarks:</span>
             {benchmarks.map((p, index) => {
@@ -905,13 +840,12 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                   }}
                   onMouseEnter={() => setHoveredParticipantId(p.id)}
                   onMouseLeave={() => setHoveredParticipantId(null)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${
-                    isSelected
-                      ? 'bg-arena-surface shadow-md'
-                      : isHovered
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${isSelected
+                    ? 'bg-arena-surface shadow-md'
+                    : isHovered
                       ? 'bg-arena-surface/80 shadow-sm'
                       : 'bg-arena-surface/40 hover:bg-arena-surface/60'
-                  }`}
+                    }`}
                   style={{
                     border: '1px solid',
                     borderColor: isSelected || isHovered ? p.color : 'rgba(38, 38, 38, 0.5)',
@@ -941,12 +875,10 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
             })}
           </div>
 
-          {/* Divider */}
           {agents.length > 0 && benchmarks.length > 0 && (
             <div className="w-px h-8 bg-arena-border/50" />
           )}
 
-          {/* Agents section */}
           {agents.length > 0 && (
             <div className="flex flex-wrap gap-2 items-center">
               <span className="text-xs text-arena-text-tertiary uppercase tracking-wider mr-1">Agents:</span>
@@ -954,7 +886,6 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                 const isHovered = hoveredParticipantId === p.id;
                 const isSelected = selectedParticipantId === p.id;
                 const isDimmed = (hoveredParticipantId && !isHovered) || (selectedParticipantId && !isSelected);
-                // Get display name for agents (formatted model name for Wall Street Arena)
                 const displayName = getAgentDisplayName(p as Agent, simulationTypeName);
 
                 return (
@@ -969,13 +900,12 @@ export const MainPerformanceChart: React.FC<MainPerformanceChartProps> = ({
                     }}
                     onMouseEnter={() => setHoveredParticipantId(p.id)}
                     onMouseLeave={() => setHoveredParticipantId(null)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${
-                      isSelected
-                        ? 'bg-arena-surface shadow-md'
-                        : isHovered
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all ${isSelected
+                      ? 'bg-arena-surface shadow-md'
+                      : isHovered
                         ? 'bg-arena-surface/80 shadow-sm'
                         : 'bg-arena-surface/40 hover:bg-arena-surface/60'
-                    }`}
+                      }`}
                     style={{
                       border: '1px solid',
                       borderColor: isSelected || isHovered ? p.color : 'rgba(38, 38, 38, 0.5)',

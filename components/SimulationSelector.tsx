@@ -106,87 +106,86 @@ export function SimulationSelector() {
               <div
                 key={type.id}
                 onClick={() => handleSelectSimulation(type.id, isEnabled)}
-                className={`group rounded-xl p-6 transition-all duration-300 ${
-                  isEnabled
+                className={`group rounded-xl p-6 transition-all duration-300 ${isEnabled
                     ? 'cursor-pointer bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10 transform hover:scale-[1.02]'
                     : 'cursor-not-allowed bg-slate-800/30 backdrop-blur-sm border border-slate-700/30 opacity-60'
-                }`}
+                  }`}
               >
                 {/* Card Header */}
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
-                    <h2 className={`text-2xl font-bold mb-2 transition-colors ${
-                      isEnabled
+                    <h2 className={`text-2xl font-bold mb-2 transition-colors ${isEnabled
                         ? 'text-white group-hover:text-blue-400'
                         : 'text-slate-500'
-                    }`}>
+                      }`}>
                       {type.name}
                       {!isEnabled && (
                         <span className="ml-2 text-sm text-slate-500 italic">(Coming Soon)</span>
                       )}
                     </h2>
-                    <p className={`text-sm leading-relaxed ${
-                      isEnabled ? 'text-slate-400' : 'text-slate-500'
-                    }`}>
+                    <p className={`text-sm leading-relaxed ${isEnabled ? 'text-slate-400' : 'text-slate-500'
+                      }`}>
                       {type.description}
                     </p>
                   </div>
-                <div className="ml-4 text-3xl group-hover:scale-110 transition-transform">
-                  {type.id === 'multi-model' && '🤖'}
-                  {type.id === 'model-sizes' && '📏'}
-                  {type.id === 'prompt-strategies' && '🎯'}
-                  {type.id === 'blind-test' && '🎭'}
-                </div>
-              </div>
-
-              {/* Card Stats */}
-              <div className="flex items-center gap-4 mt-4 pt-4 border-t border-slate-700/50">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500 text-sm">Agents:</span>
-                  <span className="text-white font-semibold">{type.agentCount}</span>
+                  <div className="ml-4 text-3xl group-hover:scale-110 transition-transform">
+                    {type.id === 'multi-model' && '🤖'}
+                    {type.id === 'model-sizes' && '📏'}
+                    {type.id === 'prompt-strategies' && '🎯'}
+                    {type.id === 'blind-test' && '🎭'}
+                  </div>
                 </div>
 
-                {type.chatEnabled && (
+                {/* Card Stats */}
+                <div className="flex items-center gap-4 mt-4 pt-4 border-t border-slate-700/50">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded border border-green-500/30">
-                      💬 Chat Enabled
-                    </span>
+                    <span className="text-slate-500 text-sm">Agents:</span>
+                    <span className="text-white font-semibold">{type.agentCount}</span>
+                  </div>
+
+                  {type.chatEnabled && (
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded border border-green-500/30">
+                        💬 Chat Enabled
+                      </span>
+                    </div>
+                  )}
+
+                  {!type.showModelNames && (
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded border border-purple-500/30">
+                        🎭 Blind Mode
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Enter Button */}
+                {isEnabled ? (
+                  <div className="mt-6 flex items-center justify-end text-blue-400 group-hover:text-blue-300 font-medium">
+                    <span className="mr-2">Enter Arena</span>
+                    <span className="group-hover:translate-x-1 transition-transform">→</span>
+                  </div>
+                ) : (
+                  <div className="mt-6 flex items-center justify-end text-slate-500 font-medium">
+                    <span className="mr-2">Coming Soon</span>
                   </div>
                 )}
-
-                {!type.showModelNames && (
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded border border-purple-500/30">
-                      🎭 Blind Mode
-                    </span>
-                  </div>
-                )}
               </div>
-
-              {/* Enter Button */}
-              {isEnabled ? (
-                <div className="mt-6 flex items-center justify-end text-blue-400 group-hover:text-blue-300 font-medium">
-                  <span className="mr-2">Enter Arena</span>
-                  <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </div>
-              ) : (
-                <div className="mt-6 flex items-center justify-end text-slate-500 font-medium">
-                  <span className="mr-2">Coming Soon</span>
-                </div>
-              )}
-            </div>
             );
           })}
         </div>
 
-        <div className="mt-10 flex justify-center">
-          <button
-            onClick={() => navigate('/snapshot-tool')}
-            className="px-5 py-2 rounded-lg border border-slate-600 text-slate-200 hover:text-white hover:border-slate-400 transition-colors"
-          >
-            Open Snapshot Toolkit
-          </button>
-        </div>
+        {import.meta.env.VITE_ENABLE_SNAPSHOT_TOOL === 'true' && (
+          <div className="mt-10 flex justify-center">
+            <button
+              onClick={() => navigate('/snapshot-tool')}
+              className="px-5 py-2 rounded-lg border border-slate-600 text-slate-200 hover:text-white hover:border-slate-400 transition-colors"
+            >
+              Open Snapshot Toolkit
+            </button>
+          </div>
+        )}
 
         {/* Footer Info */}
         <div className="mt-12 text-center">

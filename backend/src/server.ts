@@ -13,6 +13,7 @@ import { S_P500_TICKERS } from './constants.js';
 import { logger, LogLevel, LogCategory } from './services/logger.js';
 import { startMultiSimScheduler, stopMultiSimScheduler } from './simulation/multiSimScheduler.js';
 import { initializeTimer } from './services/timerService.js';
+import { saveSnapshot } from './store/persistence.js';
 
 const PORT = parseInt(process.env.BACKEND_PORT || '8080', 10);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
@@ -82,19 +83,19 @@ await fastify.register(cors, {
       cb(null, true);
       return;
     }
-    
+
     // Check if origin is in allowed list
     if (ALLOWED_ORIGINS.includes(origin)) {
       cb(null, true);
       return;
     }
-    
+
     // Also allow Vercel preview deployments (they have patterns like *.vercel.app)
     if (origin.includes('.vercel.app')) {
       cb(null, true);
       return;
     }
-    
+
     // Log rejected origins for debugging
     console.log(`CORS: Rejected origin: ${origin}`);
     console.log(`CORS: Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
@@ -134,7 +135,7 @@ const initializeAllSimulations = async (): Promise<void> => {
 
   // Check if scheduler should be disabled (for web service when worker is running)
   const disableScheduler = process.env.DISABLE_SCHEDULER === 'true';
-  
+
   if (disableScheduler) {
     logger.logSimulationEvent('Scheduler disabled (DISABLE_SCHEDULER=true) - web service will only serve API requests', {});
   } else {
@@ -161,7 +162,7 @@ const freePortIfNeeded = async (port: number): Promise<void> => {
     // Find process using the port
     const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
     const lines = stdout.trim().split('\n').filter(line => line.includes('LISTENING'));
-    
+
     if (lines.length > 0) {
       // Extract PID from the last column
       const pids = new Set<string>();
@@ -200,6 +201,31 @@ const start = async (): Promise<void> => {
 
     await initializeAllSimulations();
 
+    // Start autosave loop
+    if (SNAPSHOT_AUTOSAVE_INTERVAL_MS > 0) {
+      logger.logSimulationEvent('Starting snapshot autosave loop', {
+        intervalMs: SNAPSHOT_AUTOSAVE_INTERVAL_MS
+      });
+
+      setInterval(async () => {
+        try {
+          const simulations = simulationManager.getAllSimulations();
+          const savePromises: Promise<void>[] = [];
+
+          for (const [typeId, instance] of simulations) {
+            const snapshot = instance.getSnapshot();
+            savePromises.push(saveSnapshot(snapshot, typeId));
+          }
+
+          await Promise.all(savePromises);
+        } catch (error) {
+          logger.log(LogLevel.ERROR, LogCategory.SYSTEM, 'Autosave failed', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }, SNAPSHOT_AUTOSAVE_INTERVAL_MS);
+    }
+
     await fastify.listen({
       port: PORT,
       host: '0.0.0.0'
@@ -215,8 +241,8 @@ const start = async (): Promise<void> => {
   } catch (err) {
     logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
       'Error starting server', {
-        error: err instanceof Error ? err.message : String(err)
-      });
+      error: err instanceof Error ? err.message : String(err)
+    });
     console.error('Error starting server:', err);
     process.exit(1);
   }

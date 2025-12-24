@@ -305,137 +305,137 @@ const tradeWindowSimulation = async (simulationTypeId: string): Promise<void> =>
  */
 const advanceDaySimulation = async (simulationTypeId: string, newMarketData: MarketData): Promise<void> => {
   return withSimulationLock(simulationTypeId, async () => {
-  const instance = simulationManager.getSimulation(simulationTypeId);
-  if (!instance) return;
+    const instance = simulationManager.getSimulation(simulationTypeId);
+    if (!instance) return;
 
-  const snapshot = instance.getSnapshot();
-  const newDay = snapshot.day + 1;
+    const snapshot = instance.getSnapshot();
+    const newDay = snapshot.day + 1;
 
-  try {
-    const result = await advanceDay(
-      {
-        day: snapshot.day,
-        intradayHour: snapshot.intradayHour,
-        marketData: snapshot.marketData,
-        agents: snapshot.agents,
-        benchmarks: snapshot.benchmarks,
-        chat: snapshot.chat,
-        mode: snapshot.mode,
-      },
-      newMarketData,
-      { simulationId: simulationTypeId }
-    );
+    try {
+      const result = await advanceDay(
+        {
+          day: snapshot.day,
+          intradayHour: snapshot.intradayHour,
+          marketData: snapshot.marketData,
+          agents: snapshot.agents,
+          benchmarks: snapshot.benchmarks,
+          chat: snapshot.chat,
+          mode: snapshot.mode,
+        },
+        newMarketData,
+        { simulationId: simulationTypeId }
+      );
 
-    // Calculate new currentDate for the advanced day
-    let newCurrentDate: string;
-    if ((snapshot.mode === 'historical' || snapshot.mode === 'simulated' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
-      // For historical/simulated/hybrid pre-transition, advance in trading days.
-      const start = new Date(snapshot.startDate);
-      const currentDate = advanceTradingDays(start, newDay);
-      newCurrentDate = currentDate.toISOString();
-    } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
-      // For real-time mode, update currentDate to account for data delay
-      const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
-      const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
+      // Calculate new currentDate for the advanced day
+      let newCurrentDate: string;
+      if ((snapshot.mode === 'historical' || snapshot.mode === 'simulated' || (snapshot.mode === 'hybrid' && !hasHybridModeTransitioned())) && snapshot.startDate) {
+        // For historical/simulated/hybrid pre-transition, advance in trading days.
+        const start = new Date(snapshot.startDate);
+        const currentDate = advanceTradingDays(start, newDay);
+        newCurrentDate = currentDate.toISOString();
+      } else if (snapshot.mode === 'realtime' || (snapshot.mode === 'hybrid' && hasHybridModeTransitioned())) {
+        // For real-time mode, update currentDate to account for data delay
+        const USE_DELAYED_DATA = process.env.USE_DELAYED_DATA === 'true';
+        const DATA_DELAY_MINUTES = parseInt(process.env.DATA_DELAY_MINUTES || '30', 10);
 
-      if (USE_DELAYED_DATA) {
-        const now = new Date();
-        const dataTime = new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000));
-        newCurrentDate = dataTime.toISOString();
+        if (USE_DELAYED_DATA) {
+          const now = new Date();
+          const dataTime = new Date(now.getTime() - (DATA_DELAY_MINUTES * 60 * 1000));
+          newCurrentDate = dataTime.toISOString();
+        } else {
+          newCurrentDate = new Date().toISOString();
+        }
       } else {
-        newCurrentDate = new Date().toISOString();
+        // Simulated mode
+        const start = snapshot.startDate ? new Date(snapshot.startDate) : new Date();
+        start.setDate(start.getDate() + newDay);
+        newCurrentDate = start.toISOString();
       }
-    } else {
-      // Simulated mode
-      const start = snapshot.startDate ? new Date(snapshot.startDate) : new Date();
-      start.setDate(start.getDate() + newDay);
-      newCurrentDate = start.toISOString();
-    }
 
-    // Check if this is a weekend/holiday in simulated mode
-    const isSimulatedMode = snapshot.mode === 'simulated';
-    let marketStatus = '';
-    if (isSimulatedMode) {
-      const dateObj = new Date(newCurrentDate);
-      const marketOpen = isMarketOpen(dateObj);
-      if (!marketOpen) {
-        const dayOfWeek = dateObj.getUTCDay();
-        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        marketStatus = ` (MARKET CLOSED - ${dayNames[dayOfWeek]})`;
+      // Check if this is a weekend/holiday in simulated mode
+      const isSimulatedMode = snapshot.mode === 'simulated';
+      let marketStatus = '';
+      if (isSimulatedMode) {
+        const dateObj = new Date(newCurrentDate);
+        const marketOpen = isMarketOpen(dateObj);
+        if (!marketOpen) {
+          const dayOfWeek = dateObj.getUTCDay();
+          const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          marketStatus = ` (MARKET CLOSED - ${dayNames[dayOfWeek]})`;
+        }
       }
-    }
 
-    instance.updateSnapshot({
-      day: newDay,
-      intradayHour: 0,
-      currentDate: newCurrentDate,
-      agents: result.agents,
-      benchmarks: result.benchmarks,
-      marketData: result.marketData,
-      chat: result.chat,
-    });
+      instance.updateSnapshot({
+        day: newDay,
+        intradayHour: 0,
+        currentDate: newCurrentDate,
+        agents: result.agents,
+        benchmarks: result.benchmarks,
+        marketData: result.marketData,
+        chat: result.chat,
+      });
 
-    // Get S&P 500 price for logging
-    const sp500Data = result.marketData['^GSPC'];
-    const sp500Price = sp500Data?.price || 0;
-    const sp500Change = sp500Data?.dailyChange || 0;
-    const sp500ChangePercent = sp500Data?.dailyChangePercent || 0;
-    const sp500Info = sp500Price > 0
-      ? ` | S&P 500: $${sp500Price.toFixed(2)} (${sp500Change >= 0 ? '+' : ''}${sp500Change.toFixed(2)}, ${sp500ChangePercent >= 0 ? '+' : ''}${(sp500ChangePercent * 100).toFixed(2)}%)`
-      : '';
+      // Get S&P 500 price for logging
+      const sp500Data = result.marketData['^GSPC'];
+      const sp500Price = sp500Data?.price || 0;
+      const sp500Change = sp500Data?.dailyChange || 0;
+      const sp500ChangePercent = sp500Data?.dailyChangePercent || 0;
+      const sp500Info = sp500Price > 0
+        ? ` | S&P 500: $${sp500Price.toFixed(2)} (${sp500Change >= 0 ? '+' : ''}${sp500Change.toFixed(2)}, ${sp500ChangePercent >= 0 ? '+' : ''}${(sp500ChangePercent * 100).toFixed(2)}%)`
+        : '';
 
-    logger.log(LogLevel.INFO, LogCategory.SIMULATION,
-      `📅 Day ${newDay} started${marketStatus}${sp500Info}`, {
-      simulationType: simulationTypeId,
-      day: newDay,
-      currentDate: newCurrentDate,
-      marketOpen: isSimulatedMode ? isMarketOpen(new Date(newCurrentDate)) : undefined,
-      sp500: sp500Price > 0 ? {
-        price: sp500Price.toFixed(2),
-        dailyChange: sp500Change.toFixed(2),
-        dailyChangePercent: (sp500ChangePercent * 100).toFixed(2) + '%'
-      } : undefined
-    });
-
-    // Log prices and portfolio values at start of new day to ensure previousValue is correct
-    try {
-      const updatedSnapshot = instance.getSnapshot();
-      if (updatedSnapshot.marketData && Object.keys(updatedSnapshot.marketData).length > 0 && updatedSnapshot.agents.length > 0) {
-        const timestamp = newDay + (0 / 6.5); // Day + intradayHour fraction
-        priceLogService.logPricesAndPortfolios(
-          updatedSnapshot.marketData,
-          updatedSnapshot.agents,
-          newDay,
-          0, // intradayHour
-          timestamp,
-          simulationTypeId
-        );
-      }
-    } catch (error) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        'Failed to log prices after day advancement', {
+      logger.log(LogLevel.INFO, LogCategory.SIMULATION,
+        `📅 Day ${newDay} started${marketStatus}${sp500Info}`, {
         simulationType: simulationTypeId,
-        error: error instanceof Error ? error.message : String(error)
+        day: newDay,
+        currentDate: newCurrentDate,
+        marketOpen: isSimulatedMode ? isMarketOpen(new Date(newCurrentDate)) : undefined,
+        sp500: sp500Price > 0 ? {
+          price: sp500Price.toFixed(2),
+          dailyChange: sp500Change.toFixed(2),
+          dailyChangePercent: (sp500ChangePercent * 100).toFixed(2) + '%'
+        } : undefined
       });
-    }
 
-    // Save snapshot after day advancement
-    try {
-      const updatedSnapshot = instance.getSnapshot();
-      await saveSnapshot(updatedSnapshot, simulationTypeId);
+      // Log prices and portfolio values at start of new day to ensure previousValue is correct
+      try {
+        const updatedSnapshot = instance.getSnapshot();
+        if (updatedSnapshot.marketData && Object.keys(updatedSnapshot.marketData).length > 0 && updatedSnapshot.agents.length > 0) {
+          const timestamp = newDay + (0 / 6.5); // Day + intradayHour fraction
+          priceLogService.logPricesAndPortfolios(
+            updatedSnapshot.marketData,
+            updatedSnapshot.agents,
+            newDay,
+            0, // intradayHour
+            timestamp,
+            simulationTypeId
+          );
+        }
+      } catch (error) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          'Failed to log prices after day advancement', {
+          simulationType: simulationTypeId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+
+      // Save snapshot after day advancement
+      try {
+        const updatedSnapshot = instance.getSnapshot();
+        await saveSnapshot(updatedSnapshot, simulationTypeId);
+      } catch (error) {
+        logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+          `Failed to save snapshot after day advancement for ${simulationTypeId}`, {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     } catch (error) {
-      logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
-        `Failed to save snapshot after day advancement for ${simulationTypeId}`, {
-        error: error instanceof Error ? error.message : String(error)
+      logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
+        `Failed to advance day for simulation ${simulationTypeId}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
     }
-  } catch (error) {
-    logger.log(LogLevel.ERROR, LogCategory.SIMULATION,
-      `Failed to advance day for simulation ${simulationTypeId}`, {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-  }
   });
 };
 
@@ -510,6 +510,17 @@ export const startMultiSimScheduler = async (): Promise<void> => {
           totalDays: snapshot.day + 1,
           finalDay: snapshot.day,
         });
+
+        // Save final snapshot for all simulations
+        for (const [typeId, instance] of simulations) {
+          try {
+            await saveSnapshot(instance.getSnapshot(), typeId);
+            logger.logSimulationEvent('Saved final historical snapshot', { simulationType: typeId });
+          } catch (err) {
+            logger.log(LogLevel.ERROR, LogCategory.SYSTEM,
+              'Failed to save final snapshot', { error: err, simulationType: typeId });
+          }
+        }
 
         // Save historical preload data for all simulation types if enabled
         if (shouldSaveHistoricalPreloadSnapshot(snapshot.mode)) {

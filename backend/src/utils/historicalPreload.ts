@@ -196,6 +196,20 @@ export const fillGapMetrics = (
     realtimeIntervalMinutes: realtimeIntervalMs / (60 * 1000)
   });
 
+  // Safety check: Don't fill massive gaps (e.g. > 5 days) as it indicates a data issue
+  // and will crash the server / OOM
+  const MAX_GAP_MS = 5 * 24 * 60 * 60 * 1000;
+  if (timeDiff > MAX_GAP_MS) {
+    logger.log(LogLevel.WARNING, LogCategory.SYSTEM,
+      'Gap too large, skipping fill to prevent overflow', {
+      gapMs: timeDiff,
+      maxGapMs: MAX_GAP_MS,
+      historicalEndDate,
+      realtimeStartDate
+    });
+    return [];
+  }
+
   // Start from the day after historical end
   const current = new Date(endDate);
   current.setDate(current.getDate() + 1);
